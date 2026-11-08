@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 6,
+        "count": 3
+      },
+      "right": {
+        "start": 12,
+        "count": 3
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "A help page with one paragraph per line. The returns section moved to the end and a typo in its paragraph was fixed (recieve -> receive). That line has 402 graphemes, more than the 256 compared as a whole, so it is compared by its common prefix and suffix (moves spec 4.5). Neither the heading nor the last line is a move on its own, so without the long line nothing would be found."
+}

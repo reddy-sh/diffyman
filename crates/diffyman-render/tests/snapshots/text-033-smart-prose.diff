@@ -1,0 +1,9 @@
+--- a/left.txt
++++ b/right.txt
+@@ -1,4 +1,4 @@
+ Harbour notes
+-The colour of the harbour changes with the weather.
+-We walked to the old lighthouse after lunch.
++The color of the harbor changes with the weather.
++We walked to the new lighthouse after dinner.
+ Then we went home.

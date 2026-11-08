@@ -76,6 +76,79 @@ pub enum WhitespaceMode {
     Unknown,
 }
 
+/// Which adapter compares the inputs (open enum, since 0.3.0; spec §16.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Adapter {
+    /// Text when both inputs are text, otherwise binary (default).
+    #[default]
+    Auto,
+    /// Always the text adapter: an input that is not UTF-8 is an `invalid-utf8` error.
+    Text,
+    /// Always the binary adapter, even for text.
+    Binary,
+    /// Always the tree adapter: an input that is not an archive is an
+    /// `invalid-archive` error (spec §19.1).
+    Tree,
+    /// A value this version does not know, or a missing field (read only).
+    #[serde(other, skip_serializing)]
+    #[schemars(skip)]
+    Unknown,
+}
+
+/// Largest allowed `tree.maxDepth`.
+pub const MAX_TREE_DEPTH: u32 = 16;
+
+/// Largest allowed `tree.childBudget` (2^31 − 1).
+pub const MAX_CHILD_BUDGET: u32 = 2_147_483_647;
+
+/// Resolved options of the tree adapter (since 0.3.0, spec §9, §19).
+/// `Default` gives the spec defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", default = "TreeOptions::unset")]
+pub struct TreeOptions {
+    /// Folders only: list what a symbolic link points to instead of the link.
+    pub follow_symlinks: bool,
+    /// Folders only: honor `.gitignore` and `.ignore` files inside the folders.
+    pub ignore_files: bool,
+    /// `.gitignore`-style patterns matched against entry paths on both sides.
+    pub exclude: Vec<String>,
+    /// Pair left-only and right-only files with equal content as `moved`.
+    pub detect_moves: bool,
+    /// How many levels of nested archives are read as trees.
+    pub max_depth: u32,
+    /// Bytes of canonical JSON the child documents may take in total.
+    pub child_budget: u32,
+}
+
+impl Default for TreeOptions {
+    fn default() -> TreeOptions {
+        TreeOptions {
+            follow_symlinks: false,
+            ignore_files: false,
+            exclude: Vec::new(),
+            detect_moves: true,
+            max_depth: 3,
+            child_budget: 16 << 20,
+        }
+    }
+}
+
+impl TreeOptions {
+    /// What a reader fills in for keys missing from a document's
+    /// `options.tree` (see [`Options::unset`]).
+    pub fn unset() -> TreeOptions {
+        TreeOptions {
+            follow_symlinks: false,
+            ignore_files: false,
+            exclude: Vec::new(),
+            detect_moves: false,
+            max_depth: 0,
+            child_budget: 0,
+        }
+    }
+}
+
 /// Resolved ignore rules. `Default` gives the spec defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", default = "IgnoreOptions::unset")]
@@ -111,6 +184,10 @@ pub struct Options {
     pub position_encoding: PositionEncoding,
     /// Moved-block detection (`text.moves@1`, pure and edited moves).
     pub detect_moves: bool,
+    /// Adapter selection (since 0.3.0).
+    pub adapter: Adapter,
+    /// Folder and archive options (since 0.3.0).
+    pub tree: TreeOptions,
 }
 
 impl Default for Options {
@@ -122,6 +199,8 @@ impl Default for Options {
             context: 3,
             position_encoding: PositionEncoding::Utf8,
             detect_moves: false,
+            adapter: Adapter::Auto,
+            tree: TreeOptions::default(),
         }
     }
 }
@@ -138,6 +217,8 @@ impl Options {
             context: 0,
             position_encoding: PositionEncoding::Unknown,
             detect_moves: false,
+            adapter: Adapter::Unknown,
+            tree: TreeOptions::unset(),
         }
     }
 }
@@ -212,4 +293,44 @@ pub struct OptionsInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub detect_moves: Option<bool>,
+    /// Adapter selection (default `auto`): `auto`, `text`, `binary` or `tree`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Adapter")]
+    pub adapter: Option<Adapter>,
+    /// Folder and archive options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "TreeOptionsInput")]
+    pub tree: Option<TreeOptionsInput>,
+}
+
+/// Tree options as given by a caller; every key is optional.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TreeOptionsInput {
+    /// Folders only: follow symbolic links (default `false`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub follow_symlinks: Option<bool>,
+    /// Folders only: honor `.gitignore` and `.ignore` files (default `false`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub ignore_files: Option<bool>,
+    /// `.gitignore`-style patterns to leave out (default `[]`). At most 64
+    /// patterns of at most 1024 characters; one that does not compile gives
+    /// an `invalid-glob` error, too many or too long gives `limit-exceeded`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Vec<String>")]
+    pub exclude: Option<Vec<String>>,
+    /// Pair files with equal content as `moved` (default `true`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub detect_moves: Option<bool>,
+    /// Nested archive levels read as trees, 0 to 16 (default 3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u32", range(max = 16))]
+    pub max_depth: Option<u64>,
+    /// Total bytes of embedded child documents, 0 to 2^31 − 1 (default 16777216).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u32", range(max = 2_147_483_647))]
+    pub child_budget: Option<u64>,
 }

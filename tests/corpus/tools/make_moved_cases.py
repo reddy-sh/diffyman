@@ -31,6 +31,16 @@ OPTIONS = {
     "context": 3,
     "positionEncoding": "utf-8",
     "detectMoves": True,
+    "adapter": "auto",
+    # The tree options at their defaults; they do not change a text result.
+    "tree": {
+        "followSymlinks": False,
+        "ignoreFiles": False,
+        "exclude": [],
+        "detectMoves": True,
+        "maxDepth": 3,
+        "childBudget": 16777216,
+    },
 }
 
 
@@ -52,15 +62,25 @@ BLANK = [""]
 CASES: list[dict] = []
 
 
-def case(slug, left, right, moves, notes, *, crlf=False):
+def case(slug, left, right, moves, notes, *, crlf=False, ignore=None):
     """Register a case.
 
     left/right: lists of (segment name, lines). Names must be unique per side.
     moves: list of (left segment names, right segment names, kind); a tuple of
     names spans consecutive segments.
+    crlf: True for CRLF on both sides, "right" for CRLF on the right side only.
+    ignore: keys that replace the defaults of options.ignore.
     """
     CASES.append(
-        {"slug": slug, "left": left, "right": right, "moves": moves, "notes": notes, "crlf": crlf}
+        {
+            "slug": slug,
+            "left": left,
+            "right": right,
+            "moves": moves,
+            "notes": notes,
+            "crlf": crlf,
+            "ignore": ignore or {},
+        }
     )
 
 
@@ -1853,6 +1873,164 @@ func (s *Store) Compact(maxAge time.Duration) int {
 
 
 # ---------------------------------------------------------------------------
+# Edge cases: masks, long lines, terminator conversion, structure-only matches
+# ---------------------------------------------------------------------------
+
+TIMESTAMP = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+
+
+def stamped(day: str, start: int, messages: list[str]) -> list[str]:
+    """Log lines with one timestamp per line, a few seconds apart."""
+    out = []
+    for i, message in enumerate(messages):
+        seconds = start + 3 * i
+        out.append(f"{day}T02:{seconds // 60:02d}:{seconds % 60:02d}Z {message}")
+    return out
+
+
+LOG_IMPORT = [
+    "import: starting nightly run",
+    "import: reading manifest nightly/manifest.json",
+    "import: 1204 customer records staged",
+    "import: 88 records rejected by schema validation",
+]
+LOG_CLEANUP = [
+    "cleanup: removing staged files older than seven days",
+    "cleanup: 37 staged files removed",
+    "cleanup: finished",
+]
+LOG_REPORT = [
+    "report: summary sent to the data team",
+    "import: nightly run finished",
+]
+case(
+    "042-pure-masked-timestamps",
+    [("title", ["# expected log of the nightly import job"]),
+     ("import", stamped("2026-03-14", 0, LOG_IMPORT)),
+     ("cleanup_l", stamped("2026-03-14", 12, LOG_CLEANUP)),
+     ("report", stamped("2026-03-14", 21, LOG_REPORT))],
+    [("title", ["# expected log of the nightly import job"]),
+     ("cleanup_r", stamped("2026-03-21", 1, LOG_CLEANUP)),
+     ("import", stamped("2026-03-21", 11, LOG_IMPORT)),
+     ("report", stamped("2026-03-21", 25, LOG_REPORT))],
+    [("cleanup_l", "cleanup_r", "pure")],
+    "A golden log was regenerated: the cleanup steps now run before the import, and "
+    "every timestamp is new. ignore.regex masks the timestamps, so the line diff "
+    "matches the import and report lines, and the cleanup lines have equal move keys "
+    "under the same masks (moves spec 4.4): a pure move, although no line is equal "
+    "byte for byte.",
+    ignore={"regex": [TIMESTAMP]},
+)
+
+HELP_TITLE = b("""
+# Help centre: orders
+
+## Placing an order
+Add items to your basket, open the basket and choose a delivery slot. You can pay by card, by bank transfer or with store credit, and you can combine store credit with either of the other two. The order is confirmed as soon as the payment goes through, and the confirmation email lists every item, the delivery slot and the address we will deliver to.
+""")
+HELP_RETURNS_L = b("""
+## Returns and refunds
+You can return any unused item within thirty days of delivery. Pack it in its original box if you still have it, print the prepaid label from the order page, and drop the parcel at any post office. Once the warehouse has checked the item, we send the refund to your original payment method; most banks show it within five working days, but some card issuers take up to two weeks to recieve and post it.
+Store credit never expires.
+""")
+HELP_RETURNS_R = b("""
+## Returns and refunds
+You can return any unused item within thirty days of delivery. Pack it in its original box if you still have it, print the prepaid label from the order page, and drop the parcel at any post office. Once the warehouse has checked the item, we send the refund to your original payment method; most banks show it within five working days, but some card issuers take up to two weeks to receive and post it.
+Store credit never expires.
+""")
+HELP_DELIVERY = b("""
+## Delivery times
+Orders placed before noon on a working day leave the warehouse the same afternoon. Standard delivery takes two to four working days; express delivery arrives the next working day if you order before noon. Large items such as furniture are delivered by a partner courier, who calls you the day before to agree on a two-hour window.
+""")
+HELP_CONTACT = b("""
+## Contact
+Write to us at any time from the order page.
+""")
+case(
+    "043-edited-long-line",
+    [("title", HELP_TITLE), ("b0", BLANK), ("returns_l", HELP_RETURNS_L), ("b1", BLANK),
+     ("delivery", HELP_DELIVERY), ("b2", BLANK), ("contact", HELP_CONTACT)],
+    [("title", HELP_TITLE), ("b1", BLANK), ("delivery", HELP_DELIVERY), ("b2", BLANK),
+     ("contact", HELP_CONTACT), ("b0", BLANK), ("returns_r", HELP_RETURNS_R)],
+    [("returns_l", "returns_r", "edited")],
+    "A help page with one paragraph per line. The returns section moved to the end and "
+    "a typo in its paragraph was fixed (recieve -> receive). That line has 402 "
+    "graphemes, more than the 256 compared as a whole, so it is compared by its common "
+    "prefix and suffix (moves spec 4.5). Neither the heading nor the last line is a "
+    "move on its own, so without the long line nothing would be found.",
+)
+
+PY_SETTINGS_HEAD = b("""
+import os
+""")
+PY_SETTINGS_READ = b("""
+def read_settings(path):
+  with open(path) as handle:
+    return handle.read().splitlines()
+""")
+PY_SETTINGS_WRITE = b("""
+def write_settings(path, lines):
+  with open(path, "w") as handle:
+    handle.writelines(line + os.linesep for line in lines)
+""")
+PY_SETTINGS_PATH = b("""
+def settings_path(home):
+  folder = os.path.join(home, ".config", "tool")
+  return os.path.join(folder, "settings")
+""")
+case(
+    "044-pure-crlf-conversion",
+    [("head", PY_SETTINGS_HEAD), ("b0", BLANK), ("read", PY_SETTINGS_READ), ("b1", BLANK),
+     ("write", PY_SETTINGS_WRITE), ("b2", BLANK), ("path_l", PY_SETTINGS_PATH)],
+    [("head", PY_SETTINGS_HEAD), ("b2", BLANK), ("path_r", PY_SETTINGS_PATH), ("b0", BLANK),
+     ("read", PY_SETTINGS_READ), ("b1", BLANK), ("write", PY_SETTINGS_WRITE)],
+    [("path_l", "path_r", "pure")],
+    "The right file was converted from LF to CRLF and settings_path() moved to the top. "
+    "Under ignore.whitespace none every line differs by its terminator, so the line "
+    "diff gives one replace op for the whole file. Its lines are aligned again by move "
+    "key, which ignores terminators (moves spec 4.1 rule 4): the other functions are in "
+    "place, and settings_path() is a pure move.",
+    crlf="right",
+)
+
+INI_LIMITS_HEAD = b("""
+[server]
+host = 0.0.0.0
+port = 8443
+workers = 8
+""")
+INI_LOGGING_TAIL = b("""
+[logging]
+level = info
+format = json
+""")
+case(
+    "045-neg-config-values-changed",
+    [("server", INI_LIMITS_HEAD), ("b0", BLANK), ("limits_l", b("""
+[limits]
+max_connections = 100
+max_requests = 2000
+timeout_ms = 1500
+retry_count = 3
+""")), ("b1", BLANK), ("logging", INI_LOGGING_TAIL)],
+    [("server", INI_LIMITS_HEAD), ("b1", BLANK), ("logging", INI_LOGGING_TAIL), ("b0", BLANK),
+     ("limits_r", b("""
+[limits]
+max_connections = 250
+max_requests = 5000
+timeout_ms = 3000
+retry_count = 5
+"""))],
+    [],
+    "The [limits] section was removed and written again at the end with a new value "
+    "for every key. Each value line keeps its key, so line by line the two blocks look "
+    "alike (block similarity above 0.9), but they share only their structure: one "
+    "word in two changed on every value line. The word similarity rule of moves spec "
+    "4.5 rejects it; a section that keeps most of its values still moves.",
+)
+
+
+# ---------------------------------------------------------------------------
 # Writer
 # ---------------------------------------------------------------------------
 
@@ -1877,13 +2055,19 @@ def write_case(entry: dict) -> dict:
         rs, rc = right_spans[right_name]
         moves.append({"left": {"start": ls, "count": lc}, "right": {"start": rs, "count": rc}, "kind": kind})
     moves.sort(key=lambda m: (m["left"]["start"], m["right"]["start"]))
-    terminator = "\r\n" if entry["crlf"] else "\n"
+    crlf = entry["crlf"]
+    terminators = {
+        "left": "\r\n" if crlf is True else "\n",
+        "right": "\r\n" if crlf in (True, "right") else "\n",
+    }
     directory = ROOT / entry["slug"]
     directory.mkdir(parents=True, exist_ok=True)
     for side, lines in (("left", left_lines), ("right", right_lines)):
-        data = "".join(line + terminator for line in lines).encode("utf-8")
+        data = "".join(line + terminators[side] for line in lines).encode("utf-8")
         (directory / f"{side}.txt").write_bytes(data)
-    (directory / "options.json").write_text(json.dumps(OPTIONS, indent=2) + "\n", encoding="utf-8")
+    options = json.loads(json.dumps(OPTIONS))
+    options["ignore"].update(entry["ignore"])
+    (directory / "options.json").write_text(json.dumps(options, indent=2) + "\n", encoding="utf-8")
     labels = {"moves": moves, "notes": entry["notes"]}
     (directory / "labels.json").write_text(
         json.dumps(labels, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

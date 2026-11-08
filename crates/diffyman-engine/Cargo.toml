@@ -14,11 +14,29 @@ categories = ["text-processing", "algorithms"]
 [lib]
 name = "diffyman"
 
+[features]
+default = ["fs"]
+# Folders on disk (`diff_paths`). Off for wasm32-unknown-unknown builds,
+# which compare archives from bytes only.
+fs = ["diffyman-adapter-tree/fs"]
+
 [dependencies]
 diffyman-model.workspace = true
 diffyman-algo.workspace = true
+diffyman-detect.workspace = true
+diffyman-adapter-binary.workspace = true
+diffyman-adapter-tree.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+criterion.workspace = true
+
+# Criterion benchmarks on generated inputs: `cargo bench -p diffyman`.
+[[bench]]
+name = "engine"
+harness = false
 
 [lints]
 workspace = true

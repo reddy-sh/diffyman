@@ -1,0 +1,18 @@
+[package]
+name = "diffyman-adapter-binary"
+description = "Byte-level diff for diffyman: changed byte ranges of any two inputs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[dependencies]
+diffyman-algo.workspace = true
+fastcdc.workspace = true
+blake3.workspace = true
+
+[lints]
+workspace = true

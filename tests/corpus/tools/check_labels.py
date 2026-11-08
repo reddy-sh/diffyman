@@ -16,13 +16,17 @@ The script exits non-zero if any check fails. It checks, per case:
    content and would number lines differently.
 3. Every label meets the minimum move size of section 4.2 on both sides.
 4. A "pure" label pairs its lines one to one with equal move keys (section
-   4.4 with ignore.whitespace "none": leading whitespace removed, the rest
-   exact) and the same indentation delta on every non-blank line. An "edited"
-   label reaches the block similarity of section 4.5 and is not secretly pure.
+   4.4 with ignore.whitespace "none": the case's ignore.regex masks applied,
+   leading whitespace removed, the rest exact) and the same indentation delta
+   on every non-blank line. An "edited" label reaches the block similarity
+   and the word similarity of section 4.5 and is not secretly pure.
 5. Line-diff consistency: using git's histogram diff (no indent heuristic) as
    an independent stand-in for text.histogram@1, every labeled left line is
    deleted, every labeled right line is inserted, and the two sides are in
-   different change ops (rule 4.1.4).
+   different change ops (rule 4.1.4). The stand-in diffs the masked lines
+   with LF terminators: rule 4.1.4 applies to the sub-ops of a replace op
+   aligned by move key, which ignores terminators, so a whole-file LF to
+   CRLF conversion behaves like a diff of the converted lines.
 6. A small independent implementation of pure move detection (section 4.3)
    run on that diff must find every pure label (Jaccard >= 0.5 on both
    sides), must find nothing in negative cases, and must report nothing that
@@ -52,12 +56,16 @@ MOVE_MIN_NONTRIVIAL_LINES = 2
 MOVE_SINGLE_LINE_MIN_ALNUM = 40
 MOVE_EDITED_MIN_SIM_BP = 8000
 MOVE_LINE_PAIR_MIN_BP = 6000
+MOVE_EDITED_MIN_WORD_SIM_BP = 6000
 MATCH_MIN_JACCARD = 0.5
+# A regex placeholder in the masked text: one private-use character per pattern.
+PLACEHOLDER_BASE = 0xF0000
 
 OPTION_ENUMS = {
     "algorithm": {"histogram", "myers", "patience"},
     "granularity": {"line", "word", "char", "smart"},
     "positionEncoding": {"utf-8", "utf-16", "codepoint"},
+    "adapter": {"auto", "text"},
 }
 WHITESPACE_MODES = {"none", "trailing", "change", "all"}
 
@@ -108,6 +116,37 @@ def leading_ws(line: str) -> str:
 def key(line: str) -> str:
     """Move key (section 4.4) under ignore.whitespace "none": leading whitespace removed."""
     return line[len(leading_ws(line)):]
+
+
+def mask_line(line: str, patterns: list[re.Pattern]) -> str:
+    """Apply ignore.regex as diff-document.md 7.2.1 does (one placeholder per match).
+
+    Python's re stands in for the Rust regex dialect; the corpus uses patterns
+    that mean the same in both.
+    """
+    kept: list[tuple[int, int, int]] = []
+    for index, pattern in enumerate(patterns):
+        for m in pattern.finditer(line):
+            if m.start() == m.end():
+                continue
+            if any(s < m.end() and m.start() < e for s, e, _ in kept):
+                continue
+            kept.append((m.start(), m.end(), index))
+    out, pos = [], 0
+    for start, end, index in sorted(kept):
+        out.append(line[pos:start])
+        out.append(chr(PLACEHOLDER_BASE + index))
+        pos = end
+    out.append(line[pos:])
+    return "".join(out)
+
+
+WORD_RE = re.compile(r"\w+|[\U000F0000-\U000F00FF]")
+
+
+def words(line: str) -> list[str]:
+    """Words of a move key (section 4.5): a stand-in for UAX #29 word-like segments."""
+    return WORD_RE.findall(key(line))
 
 
 def alnum(line: str) -> int:
@@ -192,21 +231,42 @@ def block_similarity(left: list[str], right: list[str]):
     return (2 * total) // (n_left + n_right), pairs
 
 
+def word_similarity(left: list[str], right: list[str], pairs) -> int:
+    """Word similarity of section 4.5 in basis points over the given pairs."""
+    common = 0
+    for li, ri, _ in pairs:
+        if trivial(left[li]) or trivial(right[ri]):
+            continue
+        rest = list(words(right[ri]))
+        for w in words(left[li]):
+            if w in rest:
+                rest.remove(w)
+                common += 1
+    total = sum(len(words(x)) for x in left + right if not trivial(x))
+    return (20000 * common) // total if total else 0
+
+
 # --- stand-in line diff -----------------------------------------------------
 
 HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
-def git_change_ops(left_path: Path, right_path: Path):
-    """Return (deleted, inserted): maps of line number -> change op index."""
-    cmd = [
-        "git", "-c", "core.autocrlf=false", "-c", "diff.noprefix=false",
-        "diff", "--no-index", "--no-color", "--no-ext-diff", "--text",
-        "--histogram", "--no-indent-heuristic", "-U0",
-        str(left_path), str(right_path),
-    ]
-    with tempfile.TemporaryDirectory() as empty_dir:
-        proc = subprocess.run(cmd, capture_output=True, cwd=empty_dir)
+def git_change_ops(left: list[str], right: list[str]):
+    """Return (deleted, inserted): maps of line number -> change op index.
+
+    The lines are written with LF terminators and diffed by git.
+    """
+    with tempfile.TemporaryDirectory() as work:
+        left_path, right_path = Path(work) / "left.txt", Path(work) / "right.txt"
+        for path, lines in ((left_path, left), (right_path, right)):
+            path.write_bytes("".join(line + "\n" for line in lines).encode("utf-8"))
+        cmd = [
+            "git", "-c", "core.autocrlf=false", "-c", "diff.noprefix=false",
+            "diff", "--no-index", "--no-color", "--no-ext-diff", "--text",
+            "--histogram", "--no-indent-heuristic", "-U0",
+            str(left_path), str(right_path),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, cwd=work)
     if proc.returncode not in (0, 1):
         raise RuntimeError(proc.stderr.decode("utf-8", "replace"))
     deleted: dict[int, int] = {}
@@ -231,7 +291,13 @@ def git_change_ops(left_path: Path, right_path: Path):
 # --- reference-style pure move detection ------------------------------------
 
 
-def detect_pure_moves(left: list[str], right: list[str], deleted: dict, inserted: dict):
+def detect_pure_moves(
+    left: list[str], right: list[str], deleted: dict, inserted: dict, sizes: tuple[list[str], list[str]]
+):
+    """Pure moves over the masked lines `left` and `right`; `sizes` holds the
+    original lines, whose alphanumerics count for the minimum size (4.2)."""
+    size_left, size_right = sizes
+
     def pair_ok(i: int, j: int) -> bool:
         return (
             i in deleted
@@ -277,8 +343,8 @@ def detect_pure_moves(left: list[str], right: list[str], deleted: dict, inserted
                 candidates.append((i + start, j + start, t - start))
         best = None
         for i, j, k in candidates:
-            block = left[i - 1 : i - 1 + k]
-            rblock = right[j - 1 : j - 1 + k]
+            block = size_left[i - 1 : i - 1 + k]
+            rblock = size_right[j - 1 : j - 1 + k]
             if not (meets_min_size([key(x) for x in block]) and meets_min_size([key(x) for x in rblock])):
                 continue
             rank = (-sum(alnum(x) for x in block), -k, i, j)
@@ -336,7 +402,7 @@ def check_options(
     except (OSError, ValueError) as exc:
         errors.error(f"options.json unreadable: {exc}")
         return
-    allowed = {"algorithm", "granularity", "ignore", "context", "positionEncoding", "detectMoves"}
+    allowed = {"algorithm", "granularity", "ignore", "context", "positionEncoding", "detectMoves", "adapter", "tree"}
     if not isinstance(options, dict) or set(options) - allowed:
         errors.error(f"options.json has unknown keys: {sorted(set(options) - allowed)}")
         return
@@ -420,6 +486,18 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
     right = check_files(right_path.read_bytes(), "right", errors)
     if left is None or right is None:
         return errors
+    try:
+        ignore = json.loads((directory / "options.json").read_text(encoding="utf-8")).get("ignore", {})
+        patterns = [re.compile(p) for p in ignore.get("regex", [])]
+    except (ValueError, re.error) as exc:
+        errors.error(f"options.ignore.regex cannot be used here: {exc}")
+        return errors
+    if ignore.get("whitespace", "none") != "none" or ignore.get("case", False):
+        errors.error("moved cases must use ignore.whitespace 'none' and ignore.case false")
+    # Masked lines (move keys and the stand-in diff) next to the originals
+    # (alphanumeric counts and indentation).
+    mleft = [mask_line(line, patterns) for line in left]
+    mright = [mask_line(line, patterns) for line in right]
 
     try:
         labels = json.loads((directory / "labels.json").read_text(encoding="utf-8"))
@@ -460,12 +538,14 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
                 errors.error(f"two labels overlap on the {side} side")
             claimed |= lines
 
-    deleted, inserted = git_change_ops(left_path, right_path)
+    deleted, inserted = git_change_ops(mleft, mright)
 
     for index, move in enumerate(valid):
         where = f"moves[{index}]"
-        lblock = left[move["left"]["start"] - 1 : move["left"]["start"] - 1 + move["left"]["count"]]
-        rblock = right[move["right"]["start"] - 1 : move["right"]["start"] - 1 + move["right"]["count"]]
+        lslice = slice(move["left"]["start"] - 1, move["left"]["start"] - 1 + move["left"]["count"])
+        rslice = slice(move["right"]["start"] - 1, move["right"]["start"] - 1 + move["right"]["count"])
+        lblock, rblock = left[lslice], right[rslice]
+        mlblock, mrblock = mleft[lslice], mright[rslice]
         for side, block in (("left", lblock), ("right", rblock)):
             if not meets_min_size(block):
                 errors.error(f"{where}: {side} block is below the minimum move size (4.2)")
@@ -477,7 +557,7 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
             else:
                 deltas = set()
                 for offset, (a, b_) in enumerate(zip(lblock, rblock)):
-                    if key(a) != key(b_):
+                    if key(mlblock[offset]) != key(mrblock[offset]):
                         errors.error(f"{where}: line pair {offset + 1} differs beyond indentation")
                     d = indent_delta(a, b_)
                     if d is False:
@@ -487,11 +567,16 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
                 if len(deltas) > 1:
                     errors.error(f"{where}: indentation delta changes inside a pure move")
         else:
-            sim, pairs = block_similarity(lblock, rblock)
+            sim, pairs = block_similarity(mlblock, mrblock)
             paired_left = {p[0] for p in pairs}
             paired_right = {p[1] for p in pairs}
             if sim < MOVE_EDITED_MIN_SIM_BP:
                 errors.error(f"{where}: edited block similarity {sim} bp is below {MOVE_EDITED_MIN_SIM_BP}")
+            word_sim = word_similarity(mlblock, mrblock, pairs)
+            if word_sim < MOVE_EDITED_MIN_WORD_SIM_BP:
+                errors.error(
+                    f"{where}: edited word similarity {word_sim} bp is below {MOVE_EDITED_MIN_WORD_SIM_BP}"
+                )
             if 0 not in paired_left or len(lblock) - 1 not in paired_left:
                 errors.error(f"{where}: left range must start and end with paired lines")
             if 0 not in paired_right or len(rblock) - 1 not in paired_right:
@@ -499,7 +584,7 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
             unpaired = len(lblock) - len(paired_left) + len(rblock) - len(paired_right)
             if sim == 10000 and unpaired == 0:
                 errors.error(f"{where}: labeled edited but the block is pure")
-            errors.info.append(f"{where}: edited blockSim {sim} bp")
+            errors.info.append(f"{where}: edited blockSim {sim} bp, word similarity {word_sim} bp")
         left_lines = line_set(move["left"])
         right_lines = line_set(move["right"])
         if not left_lines <= set(deleted):
@@ -511,7 +596,7 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
         if left_ops & right_ops:
             errors.error(f"{where}: left and right lines share a change op (rule 4.1.4)")
 
-    predictions = detect_pure_moves(left, right, deleted, inserted)
+    predictions = detect_pure_moves(mleft, mright, deleted, inserted, (left, right))
     pure_labels = [m for m in valid if m["kind"] == "pure"]
     edited_labels = [m for m in valid if m["kind"] == "edited"]
     matched = match(predictions, pure_labels)

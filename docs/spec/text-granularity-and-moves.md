@@ -3,7 +3,8 @@
 Status: draft for Phase 1. Defines how the text adapter computes inline
 refinement (`granularity`) and moved blocks (`moves[]`), and their acceptance
 tests. Algorithm IDs: `text.refine@1`, `text.moves@1`; any output change bumps
-the matching ID. MUST and MUST NOT are used as in RFC 2119.
+the matching ID. Neither ID is part of a release yet, so changes made before
+the first release keep `@1`. MUST and MUST NOT are used as in RFC 2119.
 
 [diff-document.md](diff-document.md) is the single normative source for every
 output shape, option and warning code used here: the `inline` spans (§6.4),
@@ -78,11 +79,20 @@ that equals any other terminator (EOL rules report those differences).
 - `word`: tokens are word segments. Tokens compare after the active ignore
   rules (case folding under `ignore.case`; under `ignore.whitespace` modes
   other than `none`, whitespace tokens are normalized the same way as for
-  line comparison). `ignore.regex` masks are not applied in `text.refine@1`:
-  a span may cover masked text, for example a timestamp on a line that
-  changed for another reason.
+  line comparison).
 - `char`: tokens are graphemes. A span never splits a grapheme.
 - `smart`: chosen per op, section 3.3.
+
+**Regex masks.** In every mode, each `ignore.regex` match kept by
+diff-document.md §7.2.1 (found on the line content, with the same priority
+rules) is one token. It equals a token of a match of the same pattern,
+whatever the matched text, and nothing else. The text before, between and
+after the matches of a line is segmented on its own, so a word or grapheme
+never extends across a match. So a masked value that changed, such as a
+timestamp on a line that changed for another reason, gets no span; a match
+whose counterpart is missing, or belongs to another pattern, gets one span
+that covers the whole match. Steps 1 and 4 of section 3.3 count the
+graphemes of the content as it is, inside matches too.
 
 The token diff is a Myers diff over the token sequence (for example
 `similar`'s slice diff). The only cleanup is the merge rule below.
@@ -159,23 +169,40 @@ other move option:
 
 - **Kinds.** Which kinds are detected is fixed by the algorithm ID, not by an
   option. `text.moves@1` detects pure moves (4.3) and then edited moves (4.5).
-- **Whitespace.** The move key (4.4) is derived from `ignore.whitespace` and
-  `ignore.case`, so there is no separate whitespace option for moves.
+- **Whitespace.** The move key (4.4) is derived from `ignore.regex`,
+  `ignore.whitespace` and `ignore.case`, so there is no separate whitespace
+  option for moves.
 
 ### 4.1 Definition
 
 A **moved block** is a pair (left range, right range) where:
 
 1. every left line is deleted (in a `delete` or `replace` op) and every right
-   line is inserted (in an `insert` or `replace` op);
+   line is inserted (in an `insert` or `replace` op), and no line is in place
+   (below);
 2. the left range and right range are each contiguous in line numbers;
 3. no left line and no right line belongs to another move (moves are 1:1);
-4. the left lines and the right lines are not in the same op (a deletion and an
-   insertion inside one `replace` op is an in-place rewrite, not a move);
+4. the left lines and the right lines are not in the same **sub-op** (a
+   deletion and an insertion at the same place is an in-place rewrite, not a
+   move);
 5. it meets the minimum size (4.2) on both sides;
 6. for `kind: "pure"`, the lines have equal move keys pairwise (4.4) and, where
    4.4 requires it, the same indentation delta; for `kind: "edited"`, the
-   block similarity is `>= MOVE_EDITED_MIN_SIM_BP` (4.5).
+   block similarity is `>= MOVE_EDITED_MIN_SIM_BP` and the word similarity
+   `>= MOVE_EDITED_MIN_WORD_SIM_BP` (4.5).
+
+**Sub-ops.** An `insert` or `delete` op is one sub-op. A `replace` op is
+aligned again over the move keys (4.4) of its own lines, with
+`text.histogram@1`. Lines that this alignment pairs are **in place**: they
+differ from their partner only in what the move key leaves out (indentation,
+the terminator) and are never part of a move. Each maximal run of unpaired
+lines of the op (on both sides, between two paired runs or an op edge) is one
+sub-op. Without this step, a change that touches every line, such as a
+whole-file conversion from LF to CRLF under `ignore.whitespace` `none`, would
+put the whole file in one `replace` op and rule 4 would rule out every move.
+With it, the lines that kept their place pair up and a block that moved is
+still found. For a `replace` op whose lines have no move keys in common the
+whole op is one sub-op, as before. "Op" in the rest of section 4 means sub-op.
 
 ### 4.2 Minimum size
 
@@ -206,8 +233,9 @@ Line key: the move key of 4.4.
    with more frequent keys (blank lines, `}`, `return err`) may still extend a
    run; they only cannot seed one. Blank lines at either end of a candidate
    (after the split of step 3) are trimmed; other trivial lines such as `}`
-   stay. "Deleted" and "inserted" count every line of every change op. Lines
-   of `ignored` ops are neither: they are never part of a move.
+   stay. "Deleted" and "inserted" count every line of every sub-op. Lines
+   in place (4.1) and lines of `ignored` ops are neither: they are never part
+   of a move.
 2. **Selection.** Sort candidates by: alnum count descending, then `k`
    descending, then `l` ascending, then `r` ascending. Take the first one that
    meets 4.2 and claim its lines. Remove claimed lines from every remaining
@@ -231,9 +259,12 @@ Line key: the move key of 4.4.
    be unclaimed lines of the two ops. The walk stops when no step keeps
    `blockSim >= T`. The block then ends at the last pure move it absorbed
    whose lines, from the block start, are not all equal keys pairwise (so
-   pieces split only by step 3 stay apart); that block replaces the moves it
-   absorbed and is `edited` with similarity `blockSim / 10000`. A pure move
-   that absorbs no other move is kept exactly as step 2 selected it.
+   pieces split only by step 3 stay apart). If that block also meets the
+   word similarity of 4.5 (its pairs are the line pairs of the absorbed pure
+   moves and of the steps), it replaces the moves it absorbed and is `edited`
+   with similarity `blockSim / 10000`. A pure move that absorbs no other
+   move, or whose block misses the word similarity, is kept exactly as step 2
+   selected it.
 
 Guard: if deleted or inserted lines exceed `MOVE_MAX_CANDIDATE_LINES` on a side,
 detection is skipped, `moves` is `[]` and the document gets the warning
@@ -247,13 +278,21 @@ of many identical short lines costs linear work and yields no seeds.
 
 The move key of a line is computed from its content (never its terminator):
 
-1. Remove leading whitespace.
-2. Apply `ignore.whitespace` to the rest as diff-document.md §7.2 step 2 does,
+1. Apply `ignore.regex` as diff-document.md §7.2.1 does: each kept match
+   becomes the placeholder of its pattern.
+2. Remove leading whitespace: the whitespace before the first other
+   character or placeholder.
+3. Apply `ignore.whitespace` to the rest as diff-document.md §7.2 step 3 does,
    without the terminator kind: `none` keeps the rest exactly, `trailing`
    removes trailing whitespace, `change` also collapses every other whitespace
-   run to one U+0020, and `all` removes all whitespace.
-3. If `ignore.case` is true, apply the same case folding as diff-document.md
-   §7.2 step 3.
+   run to one U+0020, and `all` removes all whitespace. A placeholder is not
+   whitespace.
+4. If `ignore.case` is true, apply the same case folding as diff-document.md
+   §7.2 step 4.
+
+For line similarity (4.5) a placeholder is one grapheme and one word, equal
+only to a placeholder of the same pattern; the text on either side of it is
+segmented on its own.
 
 Under `ignore.whitespace` `none` and `trailing`, a pure move also needs a
 constant indentation delta (4.3 step 3). This is git's
@@ -263,29 +302,52 @@ because those modes already ignore the amount of whitespace.
 
 Why there is no separate option: code moved into or out of a nested block is
 the most common real move, so indentation changes are always allowed (git's
-default, `no`, would miss them). Every other whitespace rule follows the
-document's own `ignore.whitespace`, so lines that are equal for the line diff
-are also equal as move keys. A terminator change alone (LF to CRLF) never
-prevents a move.
-
-`ignore.regex` masks (diff-document.md §7.2.1) are not part of the move key
-in `text.moves@1`. Two lines that are equal for the line diff only because of
-a mask therefore need the edited-move search (4.5) to pair as a move. A later
-moves ID may apply the masks.
+default, `no`, would miss them). Every other rule follows the document's own
+`ignore` options, regex masks included, so lines that are equal for the line
+diff are also equal as move keys: a block of log lines that moved and got new
+timestamps is a pure move when `ignore.regex` masks the timestamps. A
+terminator change never makes two move keys differ, and it never prevents a
+move: under `ignore.whitespace` `none` it does make the line diff report the
+line as changed, but the sub-ops of 4.1 put lines that differ only in their
+terminator back in place.
 
 ### 4.5 Edited moves
 
 Edited moves are searched after the pure moves are claimed and joined (4.3
-step 4), over the lines that are still unclaimed. A **segment** is a maximal run of unclaimed lines of
-one change op on one side; segments without a non-trivial line are ignored.
+step 4), over the lines that are still unclaimed. A **segment** is a maximal
+run of unclaimed lines of one sub-op (4.1) on one side; segments without a
+non-trivial line are ignored.
 
 **Line similarity** `sim(a, b)` in bp: `floor(10000*(m - d)/m)` where `d` is the
 grapheme Levenshtein distance between the two move keys and `m` the larger key
 length in graphemes (equal keys: 10000). Only non-trivial lines pair, and only
-when they are in different ops. A key longer than
-`MOVE_EDIT_MAX_LINE_GRAPHEMES` graphemes pairs only with an equal key. A pair
-is **pairable** when `sim >= MOVE_LINE_PAIR_MIN_BP` and a **seed** when
-`sim >= MOVE_EDIT_SEED_BP`.
+when they are in different ops. A pair is **pairable** when
+`sim >= MOVE_LINE_PAIR_MIN_BP` and a **seed** when `sim >= MOVE_EDIT_SEED_BP`.
+
+**Long lines.** When one of the two keys is longer than
+`MOVE_EDIT_MAX_LINE_GRAPHEMES` graphemes, the pair is compared by removing
+the common prefix of the two keys and then the common suffix of what is left
+(in graphemes). Removing a common prefix or suffix never changes the
+Levenshtein distance, so `d` is the distance of the two remainders and `sim`
+is exact. The pair is pairable only when both remainders have at most
+`MOVE_EDIT_MAX_LONG_REMAINDER` graphemes. So a long paragraph or log line
+with a few small edits still pairs, at a cost of about the line length plus
+`ceil(r/64)*r'` word steps for remainders of `r <= r'` graphemes, and lines
+that differ throughout (beyond the length and histogram bounds below) cost
+little.
+
+**Word similarity.** The words of a move key are its word-like word segments
+(section 1) and its placeholders (4.4). For a pair, `common` is the size of
+the multiset intersection of the two keys' words. The word similarity of a
+block is `floor(10000*2*sum(common) / W)`, the sum taken over its pairs, where
+`W` counts the words of all non-trivial lines of both ranges, paired or not.
+An edited move needs word similarity `>= MOVE_EDITED_MIN_WORD_SIM_BP`. Why:
+grapheme similarity rewards shared structure. A config section moved with a
+new value on every line (`max_requests = 2000` to `max_requests = 5000`)
+has a block similarity over 0.9, but only one word in two survived on each
+line, so its word similarity is about 0.5 and it is a removal and an
+addition, not a move. A moved block with a renamed variable or a few typo
+fixes keeps most of its words.
 
 **Block similarity** of a left range and a right range with a monotone set of
 pairable pairs: `blockSim = floor(2*sum(sim) / (nL + nR))`, where `nL`, `nR`
@@ -315,7 +377,9 @@ and for every seed in it, the candidate is built in four steps:
    the block extend it on both sides at once; blank lines at either end are
    then trimmed again.
 4. The ranges start and end with pairs (after step 3, with matching trivial
-   lines), MUST meet 4.2 on both sides, and have `blockSim >= T`.
+   lines), MUST meet 4.2 on both sides, and have `blockSim >= T`. A block
+   that is not reported as `pure` (see Kind) also needs the word similarity
+   above.
 
 **Selection.** Sort candidates by: alnum count of the paired left lines
 descending, then number of pairs descending, then left start ascending, then
@@ -329,8 +393,11 @@ Repeat until no candidate is left.
 **Kind.** A selected block whose two ranges have the same length, with keys
 equal pairwise and one indentation delta where 4.4 requires it, is reported
 as `pure` with similarity `1`. Every other block is `edited` with similarity
-`blockSim / 10000` (this is `1` only for a block of equal keys whose
-indentation delta changes).
+`blockSim / 10000`. That is `1` whenever every non-trivial line of the block
+is paired with an equal key, even though the block is not pure: for example
+when the indentation delta changes inside it, or when one side has an extra
+trivial line (a blank line or a lone `}`), which scores 0 and does not count
+in `nL + nR`.
 
 **Work limits** (deterministic, no clock):
 
@@ -353,6 +420,13 @@ indentation delta changes).
 - Line similarity uses a length bound (`|la - lb| <= 0.4 m`) and a grapheme
   histogram bound before the bit-parallel distance, so the cost per pair is
   small. All of these are exact filters: they never drop a pairable pair.
+- Long-line pairs (see Long lines) are compared in a fixed order: the steps
+  of 4.3 step 4 first, then the edited search by left line, then by right
+  line. Each one counts the graphemes its prefix and suffix scans compared
+  (plus one) and, when its remainders are compared, `ceil(r/64)*r'`. Once
+  the count reaches `MOVE_EDIT_MAX_LONG_SCAN`, no further long-line pair is
+  pairable and the document gets `moves-skipped-limit`; pairs of short lines
+  are not affected.
 
 ### 4.6 What is not a move
 
@@ -360,7 +434,10 @@ indentation delta changes).
 - Copies: inserted text whose source still exists unchanged on the left.
 - Extra destinations of one deleted block: one pair wins, the rest stay inserts.
 - Blocks below 4.2, trivial-only blocks (`}`, blank lines), and
-  deletion/insertion pairs inside one op.
+  deletion/insertion pairs inside one sub-op (4.1), including lines that only
+  changed their indentation or terminator in place.
+- Blocks that share only their structure: lines that pair by grapheme
+  similarity but lost most of their words (the word similarity of 4.5).
 - Moves across files in a folder diff (out of scope for `text.moves@1`).
 
 ### 4.7 Output in `moves[]`
@@ -389,9 +466,12 @@ else stripe 0. Moved line count: the sum of `from.range.count`.
 | `MOVE_MAX_KEY_OCCURRENCES` | 64 |
 | `MOVE_MAX_CANDIDATE_LINES` | 50000 per side |
 | `MOVE_EDITED_MIN_SIM_BP` | 8000 (0.80) |
+| `MOVE_EDITED_MIN_WORD_SIM_BP` | 6000 (0.60) |
 | `MOVE_LINE_PAIR_MIN_BP` | 6000 |
 | `MOVE_EDIT_SEED_BP` | 9000 |
 | `MOVE_EDIT_MAX_LINE_GRAPHEMES` | 256 |
+| `MOVE_EDIT_MAX_LONG_REMAINDER` | 4096 graphemes per side |
+| `MOVE_EDIT_MAX_LONG_SCAN` | 32000000 |
 | `MOVE_EDIT_EXTEND_SKIP` | 2 lines per side |
 | `MOVE_EDIT_MAX_PAIRS` | 1000000 |
 | `MOVE_EDIT_MAX_CELLS` | 8000000 |

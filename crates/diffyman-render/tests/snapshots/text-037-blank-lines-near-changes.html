@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="generator" content="diffyman">
+<title>Diff: left.txt → right.txt</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1f2328;--mute:#59636e;--bd:#d1d9e0;--hh:#eef3f8;--gap:#f6f8fa;--a-bg:#e1efff;--a-hi:#a8cdf5;--a-fg:#0b4f8a;--d-bg:#ffead9;--d-hi:#f4bd8f;--d-fg:#8f3f00;--mv:#7b3aa6;--mv-bg:#f4eafb;--i-bg:#f0f1f3;--inv-bg:#fff1a8;--inv-fg:#5a4500;--link:#0b5cad}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--mute:#9198a1;--bd:#3d444d;--hh:#161d27;--gap:#151b23;--a-bg:#0c2d4d;--a-hi:#1d5d99;--a-fg:#a8cdf5;--d-bg:#3a230f;--d-hi:#7c4517;--d-fg:#f4bd8f;--mv:#d2a8ef;--mv-bg:#2a1c36;--i-bg:#1b1f24;--inv-bg:#5a4500;--inv-fg:#fff1a8;--link:#79b8ff}}
+*{box-sizing:border-box}
+body{margin:0;padding:1rem 1.25rem 2rem;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--link)}
+h1{font-size:1.35rem;margin:0 0 .25rem;overflow-wrap:anywhere}
+h2{font-size:1.05rem;margin:1rem 0 .4rem}
+code,.diff{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.files{margin:0;color:var(--mute);overflow-wrap:anywhere}
+.notice{border:1px solid var(--bd);border-left:4px solid var(--mv);padding:.4rem .75rem;background:var(--gap)}
+.legend{display:flex;flex-wrap:wrap;gap:.25rem 1.25rem;list-style:none;padding:0;margin:.5rem 0;font-size:.9rem}
+.key{display:inline-block;min-width:1.7em;text-align:center;font-weight:700;border:1px solid var(--bd);border-radius:3px}
+.key.d{background:var(--d-bg);color:var(--d-fg)}.key.a{background:var(--a-bg);color:var(--a-fg)}.key.mv{background:var(--mv-bg);color:var(--mv)}.key.i{background:var(--i-bg);color:var(--mute)}
+details{margin:.5rem 0}summary{cursor:pointer}
+table.meta{border-collapse:collapse;font-size:.85rem;margin:.5rem 0}
+.meta th,.meta td{border:1px solid var(--bd);padding:.15rem .5rem;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+.warnings{padding-left:1.25rem}.sev-error strong{color:var(--d-fg)}
+.empty{font-size:1.05rem;padding:1rem;border:1px solid var(--bd);background:var(--gap)}
+.vt{position:absolute;opacity:0;width:1px;height:1px}
+.vt+label{display:inline-block;padding:.2rem .8rem;border:1px solid var(--bd);border-radius:4px;margin:0 .3rem .6rem 0;cursor:pointer}
+.vt:checked+label{background:var(--hh);border-color:var(--fg);font-weight:600}
+.vt:focus-visible+label{outline:2px solid var(--link);outline-offset:2px}
+#view-split:checked~.inline,#view-inline:checked~.split{display:none}
+table.diff{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;line-height:1.45;border:1px solid var(--bd)}
+.cm{width:1.6em}
+.diff thead th{background:var(--hh);text-align:left;font-weight:600;padding:.25rem .5rem;border-bottom:1px solid var(--bd);overflow-wrap:anywhere}
+.diff td{padding:0 .4rem;vertical-align:top}
+.diff .n{color:var(--mute);text-align:right;-webkit-user-select:none;user-select:none}
+.diff .m{padding:0;text-align:center;font-weight:700;-webkit-user-select:none;user-select:none}
+.diff .c{white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext;tab-size:4}
+.diff .hh th{background:var(--hh);color:var(--mute);text-align:left;font-weight:400;padding:.2rem .5rem;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd)}
+.diff .gap td{background:var(--gap);color:var(--mute);text-align:center;font-style:italic;padding:.1rem}
+.diff .cut td{background:var(--inv-bg);color:var(--inv-fg);text-align:center;padding:.4rem}
+.d{background:var(--d-bg)}.m.d{color:var(--d-fg)}
+.a{background:var(--a-bg)}.m.a{color:var(--a-fg)}
+.i{background:var(--i-bg);color:var(--mute)}
+.x{background:var(--gap)}
+.mv{background:var(--mv-bg)}.m.mv{color:var(--mv)}.c.mv{box-shadow:inset 3px 0 0 var(--mv)}
+del{background:var(--d-hi);color:inherit;text-decoration:line-through 1px}
+ins{background:var(--a-hi);color:inherit;text-decoration:underline 2px;text-underline-offset:2px}
+.inv{display:inline-block;font:600 .7em/1.2 system-ui,sans-serif;padding:0 .2em;margin:0 .05em;border:1px solid var(--inv-fg);border-radius:3px;background:var(--inv-bg);color:var(--inv-fg);vertical-align:.1em;text-decoration:none;unicode-bidi:isolate}
+.tab{border-bottom:1px dotted var(--mute)}
+.tw{outline:1px dashed var(--mute);outline-offset:-1px}
+.eol{margin-left:.35em;font:.75em system-ui,sans-serif;color:var(--mute);-webkit-user-select:none;user-select:none}
+.cl{font:italic .8em system-ui,sans-serif;color:var(--mute)}
+.mvl{float:right;margin-left:.5em;padding:0 .35em;font:.75em/1.6 system-ui,sans-serif;border:1px solid var(--mv);border-radius:3px;color:var(--mv);text-decoration:none;-webkit-user-select:none;user-select:none}
+.mvl:focus-visible,.mvl:hover{text-decoration:underline}
+footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhere}
+@media print{.vt,.vt+label{display:none}.view{display:block!important}}
+.cn{width:calc(2ch + 1em)}
+</style>
+</head>
+<body>
+<header>
+<h1>Diff: left.txt → right.txt</h1>
+<p class="files">left.txt <span aria-hidden="true">→</span><span class="sr">compared with</span> right.txt</p>
+<p class="status st-different"><strong>Different.</strong> 2 changes in 2 hunks: 3 lines added, 0 removed, 13 unchanged; 89.66% similar.</p>
+<ul class="legend" aria-label="Legend"><li><span class="key d">−</span> removed</li><li><span class="key a">+</span> added</li><li><span class="key mv">⇄</span> moved</li><li><span class="key i">≈</span> ignored</li><li><del>word</del> <ins>word</ins> changed text</li><li><span class="inv">RLO</span> invisible or control character</li></ul>
+<details>
+<summary>Files and options</summary>
+<table class="meta">
+<thead><tr><td></td><th scope="col">Left</th><th scope="col">Right</th></tr></thead>
+<tbody>
+<tr><th scope="row">Name</th><td>left.txt</td><td>right.txt</td></tr>
+<tr><th scope="row">Size</th><td>78 bytes</td><td>90 bytes</td></tr>
+<tr><th scope="row">Lines</th><td>15</td><td>17</td></tr>
+<tr><th scope="row">Encoding</th><td>utf-8</td><td>utf-8</td></tr>
+<tr><th scope="row">Line endings</th><td>LF</td><td>LF</td></tr>
+<tr><th scope="row">Final newline</th><td>yes</td><td>yes</td></tr>
+<tr><th scope="row">Byte order mark</th><td>no</td><td>no</td></tr>
+<tr><th scope="row">SHA-256</th><td><code>fdfa62c1e50e73e8244f24b05655336e21e006c757861adeaada3a43bdd945d7</code></td><td><code>4eec51d3b05895b9a66dc1d238b218989226844dcc04e004fadebab3005e1ce9</code></td></tr>
+</tbody>
+</table>
+<p>Options: algorithm histogram, granularity line, whitespace compared, case compared, blank lines ignored, 0 patterns masked, moves not detected, positions utf-8, context 3.</p>
+</details>
+</header>
+<main>
+<input type="radio" name="view" id="view-split" class="vt" checked><label for="view-split">Side by side</label>
+<input type="radio" name="view" id="view-inline" class="vt"><label for="view-inline">Inline</label>
+<section class="view split" aria-label="Side-by-side view">
+<table class="diff">
+<colgroup><col class="cn"><col class="cm"><col><col class="cn"><col class="cm"><col></colgroup>
+<thead><tr><th scope="col"><span class="sr">Left line</span></th><th scope="col"><span class="sr">Change</span></th><th scope="col">left.txt</th><th scope="col"><span class="sr">Right line</span></th><th scope="col"><span class="sr">Change</span></th><th scope="col">right.txt</th></tr></thead>
+<tbody id="s-h1"><tr class="hh"><th colspan="6" scope="rowgroup">@@ -1,7 +1,8 @@<span class="sr"> hunk 1</span></th></tr>
+<tr><td class="n">1</td><td class="m"></td><td class="c"># Shopping</td><td class="n">1</td><td class="m"></td><td class="c"># Shopping</td></tr>
+<tr><td class="n">2</td><td class="m i">≈<span class="sr"> ignored removal</span></td><td class="c i"></td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
+<tr><td class="n">3</td><td class="m"></td><td class="c">apples</td><td class="n">2</td><td class="m"></td><td class="c">apples</td></tr>
+<tr><td class="n">4</td><td class="m"></td><td class="c">bread</td><td class="n">3</td><td class="m"></td><td class="c">bread</td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">4</td><td class="m a">+<span class="sr"> added</span></td><td class="c a">butter</td></tr>
+<tr><td class="n">5</td><td class="m"></td><td class="c">cheese</td><td class="n">5</td><td class="m"></td><td class="c">cheese</td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">6</td><td class="m i">≈<span class="sr"> ignored addition</span></td><td class="c i"></td></tr>
+<tr><td class="n">6</td><td class="m"></td><td class="c"></td><td class="n">7</td><td class="m"></td><td class="c"></td></tr>
+<tr><td class="n">7</td><td class="m"></td><td class="c">dates</td><td class="n">8</td><td class="m"></td><td class="c">dates</td></tr>
+</tbody>
+<tbody class="gap"><tr><td colspan="6">⋯ Left 4, right 4 lines without changes not shown</td></tr></tbody>
+<tbody id="s-h2"><tr class="hh"><th colspan="6" scope="rowgroup">@@ -12,4 +13,5 @@<span class="sr"> hunk 2</span></th></tr>
+<tr><td class="n">12</td><td class="m"></td><td class="c">ice cream</td><td class="n">13</td><td class="m"></td><td class="c">ice cream</td></tr>
+<tr><td class="n">13</td><td class="m"></td><td class="c"></td><td class="n">14</td><td class="m"></td><td class="c"></td></tr>
+<tr><td class="n">14</td><td class="m i">≈<span class="sr"> ignored removal</span></td><td class="c i"></td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
+<tr><td class="n">15</td><td class="m"></td><td class="c">jam</td><td class="n">15</td><td class="m"></td><td class="c">jam</td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">16</td><td class="m a">+<span class="sr"> added</span></td><td class="c a"></td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">17</td><td class="m a">+<span class="sr"> added</span></td><td class="c a">kale</td></tr>
+</tbody>
+</table>
+</section>
+<section class="view inline" aria-label="Inline view">
+<table class="diff">
+<colgroup><col class="cn"><col class="cn"><col class="cm"><col></colgroup>
+<thead><tr><th scope="col"><span class="sr">Left line</span></th><th scope="col"><span class="sr">Right line</span></th><th scope="col"><span class="sr">Change</span></th><th scope="col">left.txt <span aria-hidden="true">→</span><span class="sr">compared with</span> right.txt</th></tr></thead>
+<tbody id="u-h1"><tr class="hh"><th colspan="4" scope="rowgroup">@@ -1,7 +1,8 @@<span class="sr"> hunk 1</span></th></tr>
+<tr><td class="n">1</td><td class="n">1</td><td class="m"></td><td class="c"># Shopping</td></tr>
+<tr><td class="n">2</td><td class="n"></td><td class="m i">≈<span class="sr"> ignored removal</span></td><td class="c i"></td></tr>
+<tr><td class="n">3</td><td class="n">2</td><td class="m"></td><td class="c">apples</td></tr>
+<tr><td class="n">4</td><td class="n">3</td><td class="m"></td><td class="c">bread</td></tr>
+<tr><td class="n"></td><td class="n">4</td><td class="m a">+<span class="sr"> added</span></td><td class="c a">butter</td></tr>
+<tr><td class="n">5</td><td class="n">5</td><td class="m"></td><td class="c">cheese</td></tr>
+<tr><td class="n"></td><td class="n">6</td><td class="m i">≈<span class="sr"> ignored addition</span></td><td class="c i"></td></tr>
+<tr><td class="n">6</td><td class="n">7</td><td class="m"></td><td class="c"></td></tr>
+<tr><td class="n">7</td><td class="n">8</td><td class="m"></td><td class="c">dates</td></tr>
+</tbody>
+<tbody class="gap"><tr><td colspan="4">⋯ Left 4, right 4 lines without changes not shown</td></tr></tbody>
+<tbody id="u-h2"><tr class="hh"><th colspan="4" scope="rowgroup">@@ -12,4 +13,5 @@<span class="sr"> hunk 2</span></th></tr>
+<tr><td class="n">12</td><td class="n">13</td><td class="m"></td><td class="c">ice cream</td></tr>
+<tr><td class="n">13</td><td class="n">14</td><td class="m"></td><td class="c"></td></tr>
+<tr><td class="n">14</td><td class="n"></td><td class="m i">≈<span class="sr"> ignored removal</span></td><td class="c i"></td></tr>
+<tr><td class="n">15</td><td class="n">15</td><td class="m"></td><td class="c">jam</td></tr>
+<tr><td class="n"></td><td class="n">16</td><td class="m a">+<span class="sr"> added</span></td><td class="c a"></td></tr>
+<tr><td class="n"></td><td class="n">17</td><td class="m a">+<span class="sr"> added</span></td><td class="c a">kale</td></tr>
+</tbody>
+</table>
+</section>
+</main>
+<footer>
+<p>Diff Document <code>sha256:81aab23a056f08824b9653f8fd58a83fbd9ff45ec00edc785d1d9fbf5b17ffbf</code>, schema 0.3.0.</p>
+</footer>
+</body>
+</html>

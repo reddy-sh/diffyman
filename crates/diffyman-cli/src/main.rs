@@ -1,37 +1,56 @@
 //! `diffyman`: the command-line interface to the diffyman engine.
 //!
 //! ```text
-//! diffyman diff <LEFT> <RIGHT> [--options <FILE>] [--json] [--pretty]
+//! diffyman diff <LEFT> <RIGHT> [--format text|unified|json|html|summary] [options]
+//! diffyman dir <LEFT> <RIGHT>          (the same, for two folders)
 //! diffyman schema [--options]
+//! diffyman formats [--json]
+//! diffyman textconv <FILE>
+//! diffyman git install [--global|--local] [--dry-run]
 //! ```
 //!
-//! `diff` prints a unified-style text diff by default. `--json` prints the
-//! canonical (RFC 8785) Diff Document followed by one newline; `--pretty`
-//! prints it indented instead (and implies `--json`). `schema` prints the JSON
-//! Schema of the Diff Document, or of the options object with `--options`.
-//!
-//! Exit codes:
+//! The full reference, with the help text of every command, is
+//! `docs/cli.md`. Exit codes:
 //!
 //! | Code | Meaning |
 //! |---|---|
-//! | 0 | The inputs are identical under the resolved options |
-//! | 1 | The inputs differ |
+//! | 0 | The inputs are identical under the resolved options (other commands: success) |
+//! | 1 | The inputs differ, or (`status: "partial"`) some content could not be compared |
 //! | 2 | Error: bad arguments, unreadable files, invalid options, or a document with `status: "error"` |
+//!
+//! Large inputs: regular files are memory-mapped (feature `mmap`, on by
+//! default), so their pages stay in the file cache instead of the process
+//! heap; `--no-mmap`, pipes and other special files are read instead.
 
-use std::fmt::Write as _;
+mod formats;
+mod git;
+mod input;
+mod options;
+mod output;
+mod textconv;
+
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
-use diffyman::model::{DiffDocument, OpKind, Severity, Side, Status, WarningCode};
-use diffyman::{Input, Line, Settings, Terminator};
+use clap::{Args, Parser, Subcommand};
+use diffyman::{Input, Settings};
 
-const EXIT_CODES: &str = "Exit codes: 0 identical, 1 different, 2 error \
+use crate::options::{DiffFlags, IgnoreFlags};
+use crate::output::{ColorArg, Failure, Format, Inputs, Shape, Sink, Style};
+
+const EXIT_CODES: &str = "Exit codes: 0 identical, 1 different or partial, 2 error \
 (bad arguments, unreadable files, invalid options, or a document with status \"error\").";
 
 #[derive(Debug, Parser)]
-#[command(name = "diffyman", version, about = "Diff any file. Prints a text diff or the canonical JSON Diff Document.", after_help = EXIT_CODES)]
+#[command(
+    name = "diffyman",
+    version,
+    about = "Diff any file: text, binary, folders and archives.",
+    long_about = "Diff any file: text, binary, folders and archives. Prints a unified diff, \
+                  an HTML report, a summary or the canonical JSON Diff Document.",
+    after_help = EXIT_CODES
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -39,219 +58,201 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Compare two files.
+    /// Compare two files, folders or archives.
     #[command(after_help = EXIT_CODES)]
-    Diff {
-        /// The left (old) file.
-        left: PathBuf,
-        /// The right (new) file.
-        right: PathBuf,
-        /// A JSON file with diff options (see `diffyman schema --options`).
-        #[arg(long, value_name = "FILE")]
-        options: Option<PathBuf>,
-        /// Print the canonical JSON Diff Document.
-        #[arg(long)]
-        json: bool,
-        /// Print the Diff Document as indented JSON (implies --json).
-        #[arg(long)]
-        pretty: bool,
-    },
+    Diff(DiffArgs),
+    /// Compare two folders (the same as `diff`, but both sides must be folders).
+    #[command(after_help = EXIT_CODES)]
+    Dir(DiffArgs),
     /// Print the JSON Schema (2020-12) of the Diff Document.
     Schema {
         /// Print the schema of the options object instead.
         #[arg(long)]
         options: bool,
     },
+    /// List the kinds, algorithms and input formats this build compares.
+    Formats {
+        /// Print JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the text the text adapter compares (a git textconv filter).
+    #[command(long_about = "Print the text the text adapter compares, for git's \
+                      `diff.<driver>.textconv`. Without options this is the file without its \
+                      UTF-8 BOM. With --ignore-whitespace, --ignore-case or --ignore-regex each \
+                      line becomes its comparison key: whitespace normalized, case folded, and \
+                      each regex match replaced by <masked:N> (N is the pattern's index). Under \
+                      whitespace `none` lines keep their line endings; under the other modes each \
+                      line ends with LF. An input that is not UTF-8 is an error (exit code 2).")]
+    Textconv(textconv::TextconvArgs),
+    /// Set up diffyman as git's difftool and textconv driver.
+    Git {
+        #[command(subcommand)]
+        command: GitCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GitCommand {
+    /// Print (default) or write the git config for `git difftool` and textconv.
+    #[command(
+        long_about = "Print (default) or write the git config that makes diffyman \
+                            git's difftool (`diff.tool`, `difftool.diffyman.cmd`) and a textconv \
+                            driver (`diff.diffyman.textconv`). Nothing is written unless --global \
+                            or --local is given, and --dry-run prints even then."
+    )]
+    Install(git::InstallArgs),
+}
+
+/// Arguments of `diff` and `dir`.
+#[derive(Debug, Args)]
+struct DiffArgs {
+    /// The left (old) file, folder or archive.
+    left: PathBuf,
+    /// The right (new) file, folder or archive.
+    right: PathBuf,
+    /// Output format.
+    #[arg(short, long, value_enum, value_name = "FORMAT")]
+    format: Option<Format>,
+    /// Print the canonical JSON Diff Document (the same as --format json).
+    #[arg(long, conflicts_with = "format")]
+    json: bool,
+    /// Print the Diff Document as indented JSON (implies --format json).
+    #[arg(long)]
+    pretty: bool,
+    /// Print one JSON line per hunk (text), byte range (binary) or entry
+    /// (folders and archives) instead of the whole document.
+    #[arg(long, conflicts_with_all = ["format", "json", "pretty"])]
+    json_stream: bool,
+    /// Write the output to this file instead of standard output.
+    #[arg(short, long, value_name = "FILE")]
+    output: Option<PathBuf>,
+    /// When to color the text and unified formats. `auto` colors on a
+    /// terminal unless `NO_COLOR` is set.
+    #[arg(long, value_enum, value_name = "WHEN", default_value_t = ColorArg::Auto)]
+    color: ColorArg,
+    #[command(flatten)]
+    ignore: IgnoreFlags,
+    #[command(flatten)]
+    flags: DiffFlags,
+    /// Read input files into memory instead of memory-mapping them.
+    #[arg(long)]
+    no_mmap: bool,
+}
+
+impl DiffArgs {
+    fn shape(&self) -> Result<Shape, String> {
+        if self.json_stream {
+            return Ok(Shape::Stream);
+        }
+        match self.format {
+            Some(Format::Json) | None if self.json || self.pretty => Ok(Shape::Json {
+                pretty: self.pretty,
+            }),
+            Some(Format::Json) => Ok(Shape::Json { pretty: false }),
+            Some(_) if self.pretty => Err("--pretty applies to --format json only".to_owned()),
+            Some(format) => Ok(Shape::Rendered(format)),
+            None => Ok(Shape::Rendered(Format::Text)),
+        }
+    }
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let result = match cli.command {
-        Command::Diff {
-            left,
-            right,
-            options,
-            json,
-            pretty,
-        } => run_diff(&left, &right, options.as_deref(), json || pretty, pretty),
-        Command::Schema { options } => run_schema(options),
+    let result = match &cli.command {
+        Command::Diff(args) => run_diff(args, false),
+        Command::Dir(args) => run_diff(args, true),
+        Command::Schema { options } => run_schema(*options),
+        Command::Formats { json } => formats::run(*json),
+        Command::Textconv(args) => textconv::run(args),
+        Command::Git {
+            command: GitCommand::Install(args),
+        } => git::install(args),
     };
     match result {
         Ok(code) => ExitCode::from(code),
-        Err(message) => {
+        // Output closed early (`| head`): not an error worth reporting.
+        Err(Failure::Io(e)) if e.kind() == io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+        Err(Failure::Io(e)) => {
+            eprintln!("diffyman: error: cannot write output: {e}");
+            ExitCode::from(2)
+        }
+        Err(Failure::Message(message)) => {
             eprintln!("diffyman: error: {message}");
             ExitCode::from(2)
         }
     }
 }
 
-fn run_schema(options: bool) -> Result<u8, String> {
+fn run_schema(options: bool) -> Result<u8, Failure> {
     let schema = if options {
         diffyman::model::options_schema()
     } else {
         diffyman::model::document_schema()
     };
-    let text = serde_json::to_string_pretty(&schema).map_err(|e| e.to_string())?;
-    write_stdout(&format!("{text}\n"));
+    let mut out = Sink::open(None)?;
+    serde_json::to_writer_pretty(&mut out, &schema).map_err(io::Error::from)?;
+    out.write_all(b"\n")?;
+    out.finish()?;
     Ok(0)
 }
 
-fn read(path: &Path) -> Result<Vec<u8>, String> {
-    std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))
-}
-
-fn file_name(path: &Path) -> String {
-    path.file_name()
-        .map_or_else(|| path.to_string_lossy(), |n| n.to_string_lossy())
-        .into_owned()
-}
-
-fn run_diff(
-    left: &Path,
-    right: &Path,
-    options: Option<&Path>,
-    json: bool,
-    pretty: bool,
-) -> Result<u8, String> {
-    let options_text = match options {
-        Some(path) => String::from_utf8(read(path)?)
-            .map_err(|_| format!("{} is not UTF-8", path.display()))?,
-        None => String::new(),
-    };
-    let options = diffyman::parse_options(&options_text).map_err(|e| e.to_string())?;
-    let left_bytes = read(left)?;
-    let right_bytes = read(right)?;
-    let (left_name, right_name) = (file_name(left), file_name(right));
+fn run_diff(args: &DiffArgs, folders_only: bool) -> Result<u8, Failure> {
+    let shape = args.shape()?;
+    let options = options::resolve(&args.ignore, &args.flags)?;
     let settings = Settings {
         binding: "cli".to_owned(),
     };
-    let doc = diffyman::diff_document_with(
-        Input::named(&left_bytes, &left_name),
-        Input::named(&right_bytes, &right_name),
-        &options,
-        &settings,
-    )
-    .map_err(|e| e.to_string())?;
-
-    if json {
-        let canonical = diffyman::model::to_canonical_json(&doc).map_err(|e| e.to_string())?;
-        let text = if pretty {
-            let value: serde_json::Value =
-                serde_json::from_str(&canonical).map_err(|e| e.to_string())?;
-            serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?
-        } else {
-            canonical
-        };
-        // Two writes, so a large document is not copied to add the newline.
-        write_stdout(&text);
-        write_stdout("\n");
-    } else {
-        report_warnings(&doc);
-        if doc.status != Status::Error {
-            write_stdout(&render_unified(&doc, &left_bytes, &right_bytes));
-        }
+    let (left_dir, right_dir) = (args.left.is_dir(), args.right.is_dir());
+    if folders_only && !(left_dir && right_dir) {
+        let which = if left_dir { &args.right } else { &args.left };
+        return Err(Failure::Message(format!(
+            "{} is not a folder; `dir` compares two folders (use `diff` for files and archives)",
+            which.display()
+        )));
     }
-    Ok(match doc.status {
-        Status::Identical => 0,
-        Status::Different => 1,
-        _ => 2,
-    })
-}
-
-fn report_warnings(doc: &DiffDocument) {
-    for w in &doc.warnings {
-        if w.code == WarningCode::NoNewlineAtEof {
-            continue; // shown inline in the text diff
-        }
-        let level = if w.severity == Severity::Error {
-            "error"
-        } else {
-            "warning"
+    // The output is created only after the inputs are read and compared, and
+    // never over an input file (the file inputs are still read, or mapped,
+    // while the output is written).
+    let inputs = [args.left.as_path(), args.right.as_path()];
+    let open = || -> Result<(Sink, Style), Failure> {
+        let out = Sink::create(args.output.as_deref(), &inputs)?;
+        let no_color = std::env::var("NO_COLOR").ok();
+        let style = Style {
+            shape,
+            color: args.color.resolve(out.terminal, no_color.as_deref()),
         };
-        let side = match w.side {
-            Some(Side::Left) => format!("{}: ", doc.left.name.as_deref().unwrap_or("left")),
-            Some(Side::Right) => format!("{}: ", doc.right.name.as_deref().unwrap_or("right")),
-            _ => String::new(),
-        };
-        eprintln!("diffyman: {level}: {side}{}", w.message);
-    }
-}
-
-/// Renders hunks in unified diff style (`---`, `+++`, `@@ -a,b +c,d @@`).
-fn render_unified(doc: &DiffDocument, left: &[u8], right: &[u8]) -> String {
-    let mut out = String::new();
-    if doc.hunks.is_empty() {
-        return out;
-    }
-    let lt = diffyman::decode_text(left).unwrap_or_default();
-    let rt = diffyman::decode_text(right).unwrap_or_default();
-    let ll = diffyman::split_lines(lt);
-    let rl = diffyman::split_lines(rt);
-    // Writing to a String cannot fail.
-    let _ = writeln!(out, "--- {}", doc.left.name.as_deref().unwrap_or("left"));
-    let _ = writeln!(out, "+++ {}", doc.right.name.as_deref().unwrap_or("right"));
-    for hunk in &doc.hunks {
-        let _ = writeln!(
-            out,
-            "@@ -{} +{} @@",
-            header_range(hunk.left.start, hunk.left.count),
-            header_range(hunk.right.start, hunk.right.count)
+        Ok((out, style))
+    };
+    let (out, status) = if left_dir || right_dir {
+        // Folders (and a folder against an archive) are trees, spec §19.
+        let doc = diffyman::diff_paths(&args.left, &args.right, &options, &settings)
+            .map_err(|e| e.to_string())?;
+        let roots = Inputs::Folders(
+            left_dir.then_some(args.left.as_path()),
+            right_dir.then_some(args.right.as_path()),
         );
-        for op in &hunk.ops {
-            let left_lines = lines_of(&ll, op.left_range.start, op.left_range.count);
-            let right_lines = lines_of(&rl, op.right_range.start, op.right_range.count);
-            if op.op == OpKind::Equal {
-                for line in left_lines {
-                    push_line(&mut out, ' ', lt, line);
-                }
-            } else {
-                // Change ops, and `ignored` ops inside a hunk: like git's
-                // --ignore-blank-lines, ignored lines near a change still show.
-                for line in left_lines {
-                    push_line(&mut out, '-', lt, line);
-                }
-                for line in right_lines {
-                    push_line(&mut out, '+', rt, line);
-                }
-            }
-        }
-    }
-    out
-}
-
-fn lines_of(lines: &[Line], start: u64, count: u64) -> &[Line] {
-    let first = usize::try_from(start.saturating_sub(1))
-        .unwrap_or(usize::MAX)
-        .min(lines.len());
-    let last = first
-        .saturating_add(usize::try_from(count).unwrap_or(usize::MAX))
-        .min(lines.len());
-    &lines[first..last]
-}
-
-fn header_range(start: u64, count: u64) -> String {
-    match count {
-        0 => format!("{},0", start.saturating_sub(1)),
-        1 => start.to_string(),
-        _ => format!("{start},{count}"),
-    }
-}
-
-fn push_line(out: &mut String, marker: char, text: &str, line: &Line) {
-    out.push(marker);
-    out.push_str(line.content(text));
-    out.push('\n');
-    if line.terminator == Terminator::None {
-        out.push_str("\\ No newline at end of file\n");
-    }
-}
-
-fn write_stdout(text: &str) {
-    let stdout = io::stdout();
-    let mut lock = stdout.lock();
-    // A closed pipe (for example `| head`) is not an error worth reporting.
-    let _ = lock.write_all(text.as_bytes());
-    let _ = lock.flush();
+        let (mut out, style) = open()?;
+        output::emit(&mut out, &doc, &roots, &style)?;
+        (out, doc.status)
+    } else {
+        let mmap = !args.no_mmap;
+        let left = input::open(&args.left, mmap)?;
+        let right = input::open(&args.right, mmap)?;
+        let (left_name, right_name) = (input::file_name(&args.left), input::file_name(&args.right));
+        let doc = diffyman::diff_document_with(
+            Input::named(&left, &left_name),
+            Input::named(&right, &right_name),
+            &options,
+            &settings,
+        )
+        .map_err(|e| e.to_string())?;
+        let (mut out, style) = open()?;
+        output::emit(&mut out, &doc, &Inputs::Files(&left, &right), &style)?;
+        (out, doc.status)
+    };
+    out.finish()?;
+    Ok(output::exit_code(status))
 }
 
 #[cfg(test)]
@@ -265,46 +266,37 @@ mod tests {
     }
 
     #[test]
-    fn header_ranges() {
-        assert_eq!(header_range(5, 0), "4,0");
-        assert_eq!(header_range(1, 0), "0,0");
-        assert_eq!(header_range(3, 1), "3");
-        assert_eq!(header_range(1, 3), "1,3");
-    }
-
-    #[test]
-    fn ignored_blank_lines_render_only_inside_hunks() {
-        let left = b"a\n\nb\nc\nd\ne\nf\ng\n\n";
-        let right = b"a\nb\nC\nd\ne\nf\ng\n";
-        let options =
-            diffyman::parse_options(r#"{"context": 2, "ignore": {"blankLines": true}}"#).unwrap();
-        let doc = diffyman::diff_document(Input::new(left), Input::new(right), &options).unwrap();
-        assert_eq!(doc.status, Status::Different);
-        let text = render_unified(&doc, left, right);
-        // The blank line after `a` is within the context of the change; the
-        // one at the end is not and produces no hunk.
+    fn output_shapes() {
+        let parse = |args: &[&str]| {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Command::Diff(diff) = cli.command else {
+                panic!("not diff");
+            };
+            diff.shape()
+        };
         assert_eq!(
-            text,
-            "--- left\n+++ right\n@@ -1,6 +1,5 @@\n a\n-\n b\n-c\n+C\n d\n e\n"
+            parse(&["diffyman", "diff", "a", "b"]),
+            Ok(Shape::Rendered(Format::Text))
         );
-    }
-
-    #[test]
-    fn unified_rendering() {
-        let left = b"apple\nbanana\ncherry\ndate\nelderberry\n";
-        let right = b"apple\nblueberry\ncherry\ndate\nelderberry\nfig";
-        let options = diffyman::parse_options(r#"{"context": 1}"#).unwrap();
-        let doc = diffyman::diff_document(
-            Input::named(left, "left.txt"),
-            Input::named(right, "right.txt"),
-            &options,
-        )
-        .unwrap();
-        let text = render_unified(&doc, left, right);
         assert_eq!(
-            text,
-            "--- left.txt\n+++ right.txt\n@@ -1,3 +1,3 @@\n apple\n-banana\n+blueberry\n cherry\n\
-             @@ -5 +5,2 @@\n elderberry\n+fig\n\\ No newline at end of file\n"
+            parse(&["diffyman", "diff", "a", "b", "--json"]),
+            Ok(Shape::Json { pretty: false })
+        );
+        assert_eq!(
+            parse(&["diffyman", "diff", "a", "b", "--pretty"]),
+            Ok(Shape::Json { pretty: true })
+        );
+        assert_eq!(
+            parse(&["diffyman", "diff", "a", "b", "-f", "json", "--pretty"]),
+            Ok(Shape::Json { pretty: true })
+        );
+        assert!(parse(&["diffyman", "diff", "a", "b", "-f", "html", "--pretty"]).is_err());
+        assert_eq!(
+            parse(&["diffyman", "diff", "a", "b", "--json-stream"]),
+            Ok(Shape::Stream)
+        );
+        assert!(
+            Cli::try_parse_from(["diffyman", "diff", "a", "b", "--json", "-f", "html"]).is_err()
         );
     }
 }

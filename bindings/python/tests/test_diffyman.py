@@ -18,12 +18,12 @@ import diffyman
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 CORPUS = REPO / "tests" / "corpus"
-GROUPS = ("text", "moved")
+GROUPS = ("text", "moved", "binary", "tree")
 
 LEFT = b"apple\nbanana\ncherry\ndate\nelderberry\n"
 RIGHT = b"apple\nblueberry\ncherry\ndate\nelderberry\nfig"
 # Diff Document spec section 14: the worked example (unnamed inputs give a different id).
-WORKED_EXAMPLE_ID = "sha256:95ff6bb81d8f60205c99119cc386ddfa9235ee9f83e253fc10fd6f166e604a54"
+WORKED_EXAMPLE_ID = "sha256:3f3cc30959bd88671f71e392eb77fe668a9eef4400e34400af62a76dd22ac80b"
 
 
 def without_provenance(doc: dict[str, Any]) -> dict[str, Any]:
@@ -40,12 +40,16 @@ def corpus_cases() -> list[pathlib.Path]:
 
 
 def only(case: pathlib.Path, stem: str) -> pathlib.Path:
-    (found,) = sorted(p for p in case.iterdir() if p.is_file() and p.name.startswith(f"{stem}."))
+    (found,) = sorted(
+        p
+        for p in case.iterdir()
+        if (p.is_file() and p.name.startswith(f"{stem}.")) or (p.is_dir() and p.name == stem)
+    )
     return found
 
 
 def test_versions() -> None:
-    assert diffyman.SCHEMA_VERSION == "0.2.0"
+    assert diffyman.SCHEMA_VERSION == "0.3.0"
     assert diffyman.__version__ == diffyman.ENGINE_VERSION
     assert diffyman.ENGINE_VERSION
 
@@ -142,11 +146,20 @@ def test_invalid_regex_gives_error_document() -> None:
     assert doc["hunks"] == []
 
 
-def test_invalid_utf8_gives_error_document() -> None:
-    doc = diffyman.diff_document(b"\xff\xfe\x00", b"ok\n")
+def test_invalid_utf8_gives_error_document_with_the_text_adapter() -> None:
+    doc = diffyman.diff_document(b"\xff\xfe\x00", b"ok\n", {"adapter": "text"})
     assert doc["status"] == "error"
     assert doc["stats"] is None
     assert ("invalid-utf8", "left") in [(w["code"], w["side"]) for w in doc["warnings"]]
+
+
+def test_binary_inputs_give_byte_ranges() -> None:
+    doc = diffyman.diff_document(b"\x00\x01\x02", b"\x00\x09\x02")
+    assert (doc["kind"], doc["status"]) == ("binary", "different")
+    assert doc["bytes"] == [
+        {"leftOffset": 1, "leftLength": 1, "rightOffset": 1, "rightLength": 1, "op": "replace"}
+    ]
+    assert doc["stats"]["bytes"] == {"left": 3, "right": 3, "added": 1, "removed": 1, "unchanged": 2}
 
 
 @pytest.mark.parametrize("bad", [123, None, ["a"], 1.5])
@@ -176,3 +189,28 @@ def test_threads_get_identical_results() -> None:
     assert len(results) == 4
     ids = {json.loads(r)["id"] for r in results}
     assert len(ids) == 1
+
+
+def test_folders_and_archives_give_tree_documents(tmp_path: pathlib.Path) -> None:
+    left, right = tmp_path / "left", tmp_path / "right"
+    for root, text in ((left, "one\n"), (right, "two\n")):
+        (root / "sub").mkdir(parents=True)
+        (root / "sub" / "a.txt").write_text(text, encoding="utf-8")
+    doc = diffyman.diff_document(left, right)
+    assert (doc["kind"], doc["status"]) == ("tree", "different")
+    assert doc["provenance"]["binding"] == "python"
+    (entry,) = [e for e in doc["tree"]["entries"] if e["path"] == "sub/a.txt"]
+    assert entry["status"] == "modified"
+    assert entry["childDocument"]["kind"] == "text"
+    assert "provenance" not in entry["childDocument"]
+    with pytest.raises(TypeError):
+        diffyman.diff(left, right, left_name="x")
+    with pytest.raises(OSError):
+        diffyman.diff(left, tmp_path / "missing")
+    # Archives work from bytes, like in every binding.
+    zip_case = CORPUS / "tree" / "011-zip-changes"
+    archive = diffyman.diff_document(
+        (zip_case / "left.zip").read_bytes(), (zip_case / "right.zip").read_bytes()
+    )
+    assert archive["kind"] == "tree"
+    assert archive["left"]["name"] is None

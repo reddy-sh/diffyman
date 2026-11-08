@@ -1,0 +1,7 @@
+target/
+artifacts/
+coverage/
+# libFuzzer adds the inputs it finds to corpus/<target>/; only the seeds
+# written by seed_corpus.py are committed.
+corpus/*/*
+!corpus/*/seed-*

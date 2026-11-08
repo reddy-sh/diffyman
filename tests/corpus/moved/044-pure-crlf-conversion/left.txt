@@ -1,0 +1,13 @@
+import os
+
+def read_settings(path):
+  with open(path) as handle:
+    return handle.read().splitlines()
+
+def write_settings(path, lines):
+  with open(path, "w") as handle:
+    handle.writelines(line + os.linesep for line in lines)
+
+def settings_path(home):
+  folder = os.path.join(home, ".config", "tool")
+  return os.path.join(folder, "settings")

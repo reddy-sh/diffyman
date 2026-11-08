@@ -39,13 +39,14 @@ fn worked_example_matches_spec() {
     );
     let value = serde_json::to_value(&d).unwrap();
     let expected = json!({
-        "schemaVersion": "0.2.0",
+        "schemaVersion": "0.3.0",
         "kind": "text",
         "status": "different",
         "positionEncoding": "utf-8",
         "stats": {
             "linesLeft": 5, "linesRight": 6, "linesAdded": 2, "linesRemoved": 1,
-            "linesUnchanged": 4, "changeCount": 2, "hunkCount": 2, "similarity": 0.7273
+            "linesUnchanged": 4, "changeCount": 2, "hunkCount": 2, "similarity": 0.7273,
+            "bytes": null, "tree": null
         },
         "hunks": [
             {
@@ -77,8 +78,15 @@ fn worked_example_matches_spec() {
             "ignore": { "whitespace": "none", "case": false, "blankLines": false, "regex": [] },
             "context": 1,
             "positionEncoding": "utf-8",
-            "detectMoves": false
-        }
+            "detectMoves": false,
+            "adapter": "auto",
+            "tree": {
+                "followSymlinks": false, "ignoreFiles": false, "exclude": [],
+                "detectMoves": true, "maxDepth": 3, "childBudget": 16_777_216
+            }
+        },
+        "bytes": [],
+        "tree": null
     });
     for (key, want) in expected.as_object().unwrap() {
         assert_eq!(&value[key], want, "field {key}");
@@ -86,9 +94,10 @@ fn worked_example_matches_spec() {
     assert_eq!(value["left"]["lineTerminator"], "lf");
     assert_eq!(value["right"]["finalNewline"], false);
     assert_eq!(value["right"]["lineCount"], 6);
+    assert_eq!(value["left"]["mediaType"], "text/plain");
     assert_eq!(
         d.id,
-        "sha256:95ff6bb81d8f60205c99119cc386ddfa9235ee9f83e253fc10fd6f166e604a54"
+        "sha256:3f3cc30959bd88671f71e392eb77fe668a9eef4400e34400af62a76dd22ac80b"
     );
 }
 
@@ -244,8 +253,9 @@ fn whitespace_and_case_ignores() {
 }
 
 #[test]
-fn invalid_utf8_is_an_error_document() {
-    let d = doc(b"\xEF\xBB\xBFok\n\xff\n", b"ok", "{}");
+fn invalid_utf8_is_an_error_document_with_the_text_adapter() {
+    let text = r#"{"adapter": "text"}"#;
+    let d = doc(b"\xEF\xBB\xBFok\n\xff\n", b"ok", text);
     assert_eq!(d.status, Status::Error);
     assert!(d.stats.is_none());
     assert!(d.hunks.is_empty());
@@ -261,10 +271,125 @@ fn invalid_utf8_is_an_error_document() {
         ]
     );
     // Overlong encodings and surrogates are invalid too.
-    assert_eq!(doc(b"\xC0\xAF", b"", "{}").status, Status::Error);
-    assert_eq!(doc(b"\xED\xA0\x80", b"", "{}").status, Status::Error);
+    assert_eq!(doc(b"\xC0\xAF", b"", text).status, Status::Error);
+    assert_eq!(doc(b"\xED\xA0\x80", b"", text).status, Status::Error);
     // UTF-16 with a BOM fails the UTF-8 check.
-    assert_eq!(doc(b"\xFF\xFEa\x00", b"", "{}").status, Status::Error);
+    assert_eq!(doc(b"\xFF\xFEa\x00", b"", text).status, Status::Error);
+    // Valid UTF-8 with NUL bytes is compared as text when text is forced.
+    let d = doc(b"a\0b\n", b"a\0c\n", text);
+    assert_eq!((d.kind, d.status), (Kind::Text, Status::Different));
+}
+
+#[test]
+fn inputs_that_are_not_utf8_text_are_compared_as_bytes() {
+    let d = doc(b"\xEF\xBB\xBFok\n\xff\n", b"ok", "{}");
+    assert_eq!((d.kind, d.status), (Kind::Binary, Status::Different));
+    assert!(d.hunks.is_empty() && d.moves.is_empty());
+    assert_eq!(codes(&d), [("binary-fallback", None)]);
+    // No line meta and no per-side text warnings in a binary document.
+    assert_eq!(d.left.line_count, None);
+    assert_eq!(d.right.line_count, None);
+    assert_eq!(d.right.final_newline, None);
+    assert_eq!(d.left.encoding, None);
+    assert_eq!(d.right.encoding.as_deref(), Some("utf-8"));
+    assert!(d.left.bom);
+    assert_eq!(
+        d.left.media_type.as_deref(),
+        Some("application/octet-stream")
+    );
+    assert_eq!(d.right.media_type.as_deref(), Some("text/plain"));
+    let stats = d.stats.as_ref().unwrap();
+    let bytes = stats.bytes.as_ref().unwrap();
+    assert_eq!((bytes.left, bytes.right), (8, 2));
+    assert_eq!(bytes.unchanged + bytes.removed, bytes.left);
+    assert_eq!(bytes.unchanged + bytes.added, bytes.right);
+    assert_eq!(stats.change_count, d.bytes.len() as u64);
+    assert_eq!(stats.hunk_count, 0);
+    // UTF-16 text is text, but not text the line diff reads.
+    let d = doc(b"\xFF\xFEa\x00\n\x00", b"a\n", "{}");
+    assert_eq!(d.kind, Kind::Binary);
+    assert_eq!(d.left.encoding.as_deref(), Some("utf-16le"));
+    assert_eq!(d.left.media_type.as_deref(), Some("text/plain"));
+    assert_eq!(codes(&d), [("binary-fallback", None)]);
+    // NUL bytes make an input binary.
+    let d = doc(b"a\0b\n", b"a\0c\n", "{}");
+    assert_eq!(d.kind, Kind::Binary);
+    assert!(
+        codes(&d).is_empty(),
+        "both sides binary: no fallback warning"
+    );
+    assert_eq!(
+        d.bytes,
+        [ByteRange {
+            left_offset: 2,
+            left_length: 1,
+            right_offset: 2,
+            right_length: 1,
+            op: OpKind::Replace
+        }]
+    );
+    assert_eq!(
+        d.stats.unwrap().similarity,
+        Similarity::from_basis_points(7500)
+    );
+}
+
+#[test]
+fn binary_documents() {
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0";
+    // Identical binaries.
+    let d = doc(PNG, PNG, "{}");
+    assert_eq!((d.kind, d.status), (Kind::Binary, Status::Identical));
+    assert!(d.bytes.is_empty());
+    assert_eq!(d.stats.as_ref().unwrap().similarity, Similarity::ONE);
+    assert_eq!(d.left.media_type.as_deref(), Some("image/png"));
+    assert_eq!(d.provenance.algorithm, "binary.bytes@1");
+    assert_eq!(d.provenance.adapter.id, "binary");
+    // Empty versus binary: everything inserted, no fallback warning.
+    let d = doc(b"", PNG, "{}");
+    assert_eq!(d.kind, Kind::Binary);
+    assert!(codes(&d).is_empty());
+    assert_eq!(d.bytes.len(), 1);
+    assert_eq!(d.bytes[0].op, OpKind::Insert);
+    assert_eq!(
+        d.stats.as_ref().unwrap().similarity,
+        Similarity::from_basis_points(0)
+    );
+    // Both empty under the binary adapter.
+    let d = doc(b"", b"", r#"{"adapter": "binary"}"#);
+    assert_eq!((d.kind, d.status), (Kind::Binary, Status::Identical));
+    assert_eq!(d.stats.as_ref().unwrap().similarity, Similarity::ONE);
+    // Text forced through the binary adapter.
+    let d = doc(LEFT, RIGHT, r#"{"adapter": "binary", "detectMoves": true}"#);
+    assert_eq!((d.kind, d.status), (Kind::Binary, Status::Different));
+    assert!(codes(&d).is_empty(), "no text warnings and no fallback");
+    assert!(!d.provenance.extra.contains_key("moves"));
+    assert_eq!(d.left.encoding.as_deref(), Some("utf-8"));
+    // Option errors still apply.
+    let d = doc(PNG, b"", r#"{"ignore": {"regex": ["("]}}"#);
+    assert_eq!((d.kind, d.status), (Kind::Binary, Status::Error));
+    assert!(d.stats.is_none() && d.bytes.is_empty());
+    // A binary document's JSON has the byte ranges and the byte stats.
+    let json = diff(b"\x00\x01\x02", b"\x00\x09\x02", "{}").unwrap();
+    assert!(json.contains(r#""bytes":[{"leftLength":1,"leftOffset":1,"op":"replace","rightLength":1,"rightOffset":1}]"#), "{json}");
+    assert!(
+        json.contains(r#""bytes":{"added":1,"left":3,"removed":1,"right":3,"unchanged":2}"#),
+        "{json}"
+    );
+}
+
+#[test]
+fn identical_inputs_with_different_names_get_their_own_media_types() {
+    let options = parse_options("{}").unwrap();
+    let d = diff_document(
+        Input::named(b"a,b\n", "x.txt"),
+        Input::named(b"a,b\n", "x.csv"),
+        &options,
+    )
+    .unwrap();
+    assert_eq!(d.left.media_type.as_deref(), Some("text/plain"));
+    assert_eq!(d.right.media_type.as_deref(), Some("text/csv"));
+    assert_eq!(d.status, Status::Identical);
 }
 
 fn kinds(d: &DiffDocument) -> Vec<Vec<OpKind>> {
@@ -443,7 +568,11 @@ fn bad_regex_patterns_give_error_documents() {
         [("invalid-regex", None), ("limit-exceeded", None)]
     );
     // Pattern errors are reported even when an input does not decode.
-    let d = doc(b"\xff\n", b"b\n", r#"{"ignore": {"regex": ["("]}}"#);
+    let d = doc(
+        b"\xff\n",
+        b"b\n",
+        r#"{"adapter": "text", "ignore": {"regex": ["("]}}"#,
+    );
     assert_eq!(
         codes(&d),
         [("invalid-utf8", Some(Side::Left)), ("invalid-regex", None)]
@@ -738,4 +867,504 @@ fn move_detection_on_identical_and_huge_inputs() {
 
 fn moves_limit() -> usize {
     moves::MOVE_MAX_CANDIDATE_LINES
+}
+
+/// Without change ops, move detection finds nothing and reports no limit,
+/// so the engine skips it (and the per-line contents it needs).
+#[test]
+fn move_detection_without_change_ops_is_empty() {
+    use diffyman_algo::ops::{LineOp, OpKind as AlgoOpKind};
+    let lines: Vec<String> = (0..200)
+        .map(|i| format!("    let value_{i} = compute({i});"))
+        .collect();
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let op = |kind, ls, ll, rs, rl| LineOp {
+        kind,
+        left_start: ls,
+        left_len: ll,
+        right_start: rs,
+        right_len: rl,
+    };
+    for ops in [
+        vec![op(AlgoOpKind::Equal, 0, 200, 0, 200)],
+        vec![
+            op(AlgoOpKind::Equal, 0, 100, 0, 100),
+            op(AlgoOpKind::Ignored, 100, 50, 100, 0),
+            op(AlgoOpKind::Equal, 150, 50, 100, 50),
+        ],
+    ] {
+        let right = if ops.len() == 1 {
+            &lines[..]
+        } else {
+            &lines[..150]
+        };
+        let keys = KeyBuilder::new(&KeyOptions::default()).unwrap();
+        let found = moves::detect_moves(&lines, right, &ops, &keys);
+        assert!(found.moves.is_empty());
+        assert!(!found.skipped_limit);
+    }
+}
+
+/// Byte-identical inputs are decoded once; the right side still gets its
+/// own name and its own copy of every per-side warning.
+#[test]
+fn identical_bytes_report_both_sides() {
+    let text = b"\xEF\xBB\xBFa\r\nb\nc";
+    let d = doc(text, text, "{}");
+    assert_eq!(d.status, Status::Identical);
+    assert_eq!(d.left.name.as_deref(), Some("left.txt"));
+    assert_eq!(d.right.name.as_deref(), Some("right.txt"));
+    let mut right_as_left = d.right.clone();
+    right_as_left.name.clone_from(&d.left.name);
+    assert_eq!(right_as_left, d.left);
+    assert_eq!(d.left.line_count, Some(3));
+    let mut want = Vec::new();
+    for side in [Side::Left, Side::Right] {
+        for code in ["bom-stripped", "mixed-line-endings", "no-newline-at-eof"] {
+            want.push((code, Some(side)));
+        }
+    }
+    let mut got = codes(&d);
+    got.sort_unstable();
+    want.sort_unstable();
+    assert_eq!(got, want);
+    let stats = d.stats.unwrap();
+    assert_eq!((stats.lines_unchanged, stats.change_count), (3, 0));
+}
+
+// ---------------------------------------------------------------------------
+// Kind `tree` (spec §19)
+// ---------------------------------------------------------------------------
+
+/// A zip of stored entries: `(name, data, general purpose flags)`.
+fn stored_zip(entries: &[(&str, &[u8], u16)]) -> Vec<u8> {
+    fn crc32(data: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for &b in data {
+            crc ^= u32::from(b);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xEDB8_8320 & (crc & 1).wrapping_neg());
+            }
+        }
+        !crc
+    }
+    let (mut out, mut central) = (Vec::new(), Vec::new());
+    for (name, data, flags) in entries {
+        let fields = |out: &mut Vec<u8>| {
+            out.extend_from_slice(&20u16.to_le_bytes());
+            out.extend_from_slice(&flags.to_le_bytes());
+            out.extend_from_slice(&[0, 0, 0, 0, 0x21, 0]);
+            out.extend_from_slice(&crc32(data).to_le_bytes());
+            let size = u32::try_from(data.len()).unwrap().to_le_bytes();
+            out.extend_from_slice(&size);
+            out.extend_from_slice(&size);
+            out.extend_from_slice(&u16::try_from(name.len()).unwrap().to_le_bytes());
+            out.extend_from_slice(&[0, 0]);
+        };
+        let offset = u32::try_from(out.len()).unwrap();
+        out.extend_from_slice(b"PK\x03\x04");
+        fields(&mut out);
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+        central.extend_from_slice(b"PK\x01\x02\x14\x00");
+        fields(&mut central);
+        central.extend_from_slice(&[0; 10]);
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
+    }
+    let start = u32::try_from(out.len()).unwrap();
+    let count = u16::try_from(entries.len()).unwrap().to_le_bytes();
+    out.extend_from_slice(&central);
+    out.extend_from_slice(b"PK\x05\x06\0\0\0\0");
+    out.extend_from_slice(&count);
+    out.extend_from_slice(&count);
+    out.extend_from_slice(&u32::try_from(central.len()).unwrap().to_le_bytes());
+    out.extend_from_slice(&start.to_le_bytes());
+    out.extend_from_slice(&[0, 0]);
+    out
+}
+
+fn tree_doc(left: &[u8], right: &[u8], options: &str) -> DiffDocument {
+    let options = parse_options(options).unwrap();
+    diff_document(
+        Input::named(left, "left.zip"),
+        Input::named(right, "right.zip"),
+        &options,
+    )
+    .unwrap()
+}
+
+fn entry<'d>(d: &'d DiffDocument, path: &str) -> &'d model::TreeEntry {
+    d.tree
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .find(|e| e.path == path)
+        .unwrap_or_else(|| panic!("no entry {path}"))
+}
+
+#[test]
+fn archives_give_tree_documents_with_child_documents() {
+    let left = stored_zip(&[
+        ("docs/readme.txt", b"hello\nworld\n", 0),
+        ("same.bin", b"\x00\x01\x02", 0),
+        ("old-name.txt", b"moved content\n", 0),
+        ("gone.txt", b"bye\n", 0),
+    ]);
+    let right = stored_zip(&[
+        ("docs/readme.txt", b"hello\nthere\n", 0),
+        ("same.bin", b"\x00\x01\x02", 0),
+        ("new-name.txt", b"moved content\n", 0),
+        ("added.txt", b"hi\n", 0),
+    ]);
+    let d = tree_doc(&left, &right, "{}");
+    assert_eq!(d.kind, Kind::Tree);
+    assert_eq!(d.status, Status::Different);
+    assert_eq!(d.provenance.algorithm, "tree.entries@1");
+    assert_eq!(d.provenance.adapter.id, "tree");
+    assert_eq!(d.left.media_type.as_deref(), Some("application/zip"));
+    assert_eq!(d.left.line_count, None);
+    let paths: Vec<&str> = d
+        .tree
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|e| e.path.as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "added.txt",
+            "docs",
+            "docs/readme.txt",
+            "gone.txt",
+            "new-name.txt",
+            "same.bin"
+        ]
+    );
+    let readme = entry(&d, "docs/readme.txt");
+    assert_eq!(readme.status, model::EntryStatus::Modified);
+    let child = readme.child_document.as_ref().unwrap();
+    assert_eq!(child.kind, Kind::Text);
+    assert_eq!(child.left.name.as_deref(), Some("readme.txt"));
+    assert_eq!(child.stats.as_ref().unwrap().lines_added, 1);
+    assert!(child.id.starts_with("sha256:"));
+    let moved = entry(&d, "new-name.txt");
+    assert_eq!(moved.status, model::EntryStatus::Moved);
+    assert_eq!(moved.from_path.as_deref(), Some("old-name.txt"));
+    assert!(moved.child_document.is_none());
+    assert_eq!(entry(&d, "same.bin").status, model::EntryStatus::Unchanged);
+    assert_eq!(
+        entry(&d, "docs").left.as_ref().unwrap().entry_type,
+        model::EntryType::Directory
+    );
+    let stats = d.stats.as_ref().unwrap();
+    let t = stats.tree.as_ref().unwrap();
+    assert_eq!(
+        (
+            t.entries_left,
+            t.entries_right,
+            t.added,
+            t.removed,
+            t.modified,
+            t.moved,
+            t.unchanged
+        ),
+        (5, 5, 1, 1, 1, 1, 2)
+    );
+    assert_eq!(stats.change_count, 4);
+    assert_eq!(stats.similarity, Similarity::from_basis_points(4000));
+    // The canonical text never holds a child's provenance, and is stable.
+    let json = diff_inputs(
+        Input::named(&left, "left.zip"),
+        Input::named(&right, "right.zip"),
+        "{}",
+    )
+    .unwrap();
+    assert_eq!(json.matches("\"provenance\"").count(), 1);
+    let again = diff_inputs(
+        Input::named(&left, "left.zip"),
+        Input::named(&right, "right.zip"),
+        "{}",
+    )
+    .unwrap();
+    let strip = |s: &str| {
+        let mut v: Value = serde_json::from_str(s).unwrap();
+        v.as_object_mut().unwrap().remove("provenance");
+        v
+    };
+    assert_eq!(strip(&json), strip(&again));
+    // Without move detection the rename is a removal and an addition.
+    let plain = tree_doc(&left, &right, r#"{"tree": {"detectMoves": false}}"#);
+    assert_eq!(
+        entry(&plain, "new-name.txt").status,
+        model::EntryStatus::Added
+    );
+    assert_eq!(
+        entry(&plain, "old-name.txt").status,
+        model::EntryStatus::Removed
+    );
+}
+
+#[test]
+fn tree_adapter_selection() {
+    let zip = stored_zip(&[("a.txt", b"a\n", 0)]);
+    let same = tree_doc(&zip, &zip, "{}");
+    assert_eq!((same.kind, same.status), (Kind::Tree, Status::Identical));
+    assert_eq!(same.stats.as_ref().unwrap().similarity, Similarity::ONE);
+    let bytes = tree_doc(
+        &zip,
+        &stored_zip(&[("a.txt", b"b\n", 0)]),
+        r#"{"adapter": "binary"}"#,
+    );
+    assert_eq!(bytes.kind, Kind::Binary);
+    // Under `auto`, an archive against a plain file is a byte diff.
+    let mixed = tree_doc(&zip, b"plain text\n", "{}");
+    assert_eq!(mixed.kind, Kind::Binary);
+    // Under `tree`, inputs that are not archives are errors.
+    let forced = tree_doc(b"plain text\n", &zip, r#"{"adapter": "tree"}"#);
+    assert_eq!((forced.kind, forced.status), (Kind::Tree, Status::Error));
+    assert_eq!(codes(&forced), [("invalid-archive", Some(Side::Left))]);
+    assert!(forced.tree.is_none() && forced.stats.is_none());
+    assert_eq!(forced.right.media_type.as_deref(), Some("application/zip"));
+    // A broken archive under `auto` is an error too.
+    let broken = tree_doc(&zip[..zip.len() - 4], &zip, "{}");
+    assert_eq!(codes(&broken), [("invalid-archive", Some(Side::Left))]);
+}
+
+#[test]
+fn tree_option_errors_apply_to_every_kind() {
+    let d = doc(LEFT, LEFT, r#"{"tree": {"exclude": ["[z-a]"]}}"#);
+    assert_eq!((d.kind, d.status), (Kind::Text, Status::Error));
+    assert_eq!(codes(&d), [("invalid-glob", None)]);
+    let many: Vec<String> = (0..65).map(|i| format!("\"p{i}\"")).collect();
+    let d = doc(
+        LEFT,
+        LEFT,
+        &format!(r#"{{"tree": {{"exclude": [{}]}}}}"#, many.join(",")),
+    );
+    assert_eq!(codes(&d), [("limit-exceeded", None)]);
+    let zip = stored_zip(&[("a.log", b"1", 0), ("b.txt", b"2", 0)]);
+    let excluded = tree_doc(
+        &zip,
+        &stored_zip(&[("b.txt", b"2", 0)]),
+        r#"{"tree": {"exclude": ["*.log"]}}"#,
+    );
+    assert_eq!(excluded.status, Status::Identical);
+}
+
+#[test]
+fn encrypted_entries_make_the_tree_partial() {
+    let left = stored_zip(&[("secret", b"0123456789ab-data", 1), ("open.txt", b"x", 0)]);
+    let right = stored_zip(&[("secret", b"0123456789ab-data", 1), ("open.txt", b"x", 0)]);
+    let d = tree_doc(&left, &right, "{}");
+    assert_eq!(d.status, Status::Partial);
+    assert_eq!(
+        codes(&d),
+        [
+            ("encrypted-entry", Some(Side::Left)),
+            ("encrypted-entry", Some(Side::Right))
+        ]
+    );
+    let secret = entry(&d, "secret");
+    assert_eq!(
+        secret.status,
+        model::EntryStatus::Unchanged,
+        "same stored bytes"
+    );
+    assert_eq!(secret.left.as_ref().unwrap().sha256, None);
+    assert_eq!(secret.left.as_ref().unwrap().size, Some(17));
+}
+
+#[test]
+fn child_budget_and_nesting_depth() {
+    let left = stored_zip(&[("a.txt", b"one\n", 0), ("b.txt", b"two\n", 0)]);
+    let right = stored_zip(&[("a.txt", b"ONE\n", 0), ("b.txt", b"TWO\n", 0)]);
+    let full = tree_doc(&left, &right, "{}");
+    let a_size = {
+        let child = entry(&full, "a.txt").child_document.as_ref().unwrap();
+        model::jcs::to_canonical_string(child.as_ref())
+            .unwrap()
+            .len()
+    };
+    // Room for exactly one child: the first in path order gets it.
+    let one = tree_doc(
+        &left,
+        &right,
+        &format!(r#"{{"tree": {{"childBudget": {a_size}}}}}"#),
+    );
+    assert!(entry(&one, "a.txt").child_document.is_some());
+    assert!(entry(&one, "b.txt").child_document.is_none());
+    assert_eq!(codes(&one), [("children-omitted", None)]);
+    let none = tree_doc(&left, &right, r#"{"tree": {"childBudget": 0}}"#);
+    assert!(entry(&none, "a.txt").child_document.is_none());
+    assert!(none.warnings.is_empty(), "no warning when children are off");
+
+    // Archives inside archives: trees down to maxDepth, then bytes.
+    let outer_left = stored_zip(&[("inner.zip", &left, 0)]);
+    let outer_right = stored_zip(&[("inner.zip", &right, 0)]);
+    let nested = tree_doc(&outer_left, &outer_right, "{}");
+    let child = entry(&nested, "inner.zip").child_document.as_ref().unwrap();
+    assert_eq!(child.kind, Kind::Tree);
+    let grandchild = child.tree.as_ref().unwrap().entries[0]
+        .child_document
+        .as_ref()
+        .unwrap();
+    assert_eq!(grandchild.kind, Kind::Text);
+    let flat = tree_doc(&outer_left, &outer_right, r#"{"tree": {"maxDepth": 0}}"#);
+    let child = entry(&flat, "inner.zip").child_document.as_ref().unwrap();
+    assert_eq!(child.kind, Kind::Binary);
+    assert_eq!(
+        child
+            .warnings
+            .iter()
+            .map(|w| w.code.as_str())
+            .collect::<Vec<_>>(),
+        ["depth-limit"]
+    );
+    // `adapter: "tree"` becomes `auto` in children.
+    let forced = tree_doc(&outer_left, &outer_right, r#"{"adapter": "tree"}"#);
+    let child = entry(&forced, "inner.zip").child_document.as_ref().unwrap();
+    assert_eq!(child.options.adapter, Adapter::Auto);
+    assert_eq!(forced.options.adapter, Adapter::Tree);
+}
+
+/// A nested tree sets its own size aside before its children use the
+/// budget, so with a budget a little short of the whole nested child, the
+/// child is embedded with fewer grandchildren instead of being computed in
+/// full and then dropped.
+#[test]
+fn nested_trees_reserve_their_own_size() {
+    let left = stored_zip(&[("a.txt", b"one\n", 0), ("b.txt", b"two\n", 0)]);
+    let right = stored_zip(&[("a.txt", b"ONE\n", 0), ("b.txt", b"TWO\n", 0)]);
+    let outer_left = stored_zip(&[("inner.zip", &left, 0)]);
+    let outer_right = stored_zip(&[("inner.zip", &right, 0)]);
+    let size = |d: &DiffDocument| {
+        let child = entry(d, "inner.zip").child_document.as_ref().unwrap();
+        model::jcs::to_canonical_string(child.as_ref())
+            .unwrap()
+            .len()
+    };
+    let full = tree_doc(&outer_left, &outer_right, "{}");
+    let whole = size(&full);
+    let tight = tree_doc(
+        &outer_left,
+        &outer_right,
+        &format!(r#"{{"tree": {{"childBudget": {}}}}}"#, whole - 1),
+    );
+    assert!(tight.warnings.is_empty(), "the nested child fits");
+    let child = entry(&tight, "inner.zip").child_document.as_ref().unwrap();
+    let grandchildren: Vec<bool> = child
+        .tree
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|e| e.child_document.is_some())
+        .collect();
+    assert_eq!(grandchildren, [true, false]);
+    assert_eq!(
+        child
+            .warnings
+            .iter()
+            .map(|w| w.code.as_str())
+            .collect::<Vec<_>>(),
+        ["children-omitted"]
+    );
+    assert!(size(&tight) < whole);
+    // A budget below the smallest possible child computes no child at all.
+    let tiny = tree_doc(
+        &outer_left,
+        &outer_right,
+        r#"{"tree": {"childBudget": 100}}"#,
+    );
+    assert!(entry(&tiny, "inner.zip").child_document.is_none());
+    assert_eq!(codes(&tiny), [("children-omitted", None)]);
+}
+
+/// Child documents read archive content again, and that counts against the
+/// per-side content budget (spec §19.6) like the listing does.
+#[test]
+fn child_contents_count_against_the_content_budget() {
+    let left = stored_zip(&[("a.txt", &[b'a'; 100], 0)]);
+    let right = stored_zip(&[("a.txt", &[b'b'; 100], 0)]);
+    let options = parse_options("{}").unwrap();
+    let run = |content_budget: u64| {
+        let limits = diffyman_adapter_tree::Limits {
+            content_budget,
+            ..diffyman_adapter_tree::Limits::default()
+        };
+        let mut ctx = tree::Context::with_limits(&options, limits);
+        tree::archive_document(Input::new(&left), Input::new(&right), &options, &mut ctx)
+    };
+    // The listing reads 100 bytes per side, the child 100 more.
+    let enough = run(200);
+    assert!(entry(&enough, "a.txt").child_document.is_some());
+    assert!(enough.warnings.is_empty());
+    let short = run(199);
+    assert!(entry(&short, "a.txt").child_document.is_none());
+    assert_eq!(codes(&short), [("children-omitted", None)]);
+    assert_eq!(short.status, Status::Different);
+}
+
+#[cfg(feature = "fs")]
+#[test]
+fn folders_compare_as_trees() {
+    let dir = tempfile::tempdir().unwrap();
+    let (left, right) = (dir.path().join("left"), dir.path().join("right"));
+    for (root, text) in [(&left, "v1\n"), (&right, "v2\n")] {
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.txt"), text).unwrap();
+        std::fs::write(root.join("same.txt"), "same\n").unwrap();
+    }
+    let options = Options::default();
+    let settings = Settings::default();
+    let d = diff_paths(&left, &right, &options, &settings).unwrap();
+    assert_eq!((d.kind, d.status), (Kind::Tree, Status::Different));
+    assert_eq!(d.left.name.as_deref(), Some("left"));
+    assert_eq!(d.left.media_type.as_deref(), Some("inode/directory"));
+    assert_eq!(d.left.size, 8);
+    assert_ne!(d.left.sha256, d.right.sha256);
+    assert!(entry(&d, "src/main.txt").child_document.is_some());
+    // The manifest digest depends only on the entries.
+    let copy = dir.path().join("copy");
+    std::fs::create_dir_all(copy.join("src")).unwrap();
+    std::fs::write(copy.join("src/main.txt"), "v1\n").unwrap();
+    std::fs::write(copy.join("same.txt"), "same\n").unwrap();
+    let same = diff_paths(&left, &copy, &options, &settings).unwrap();
+    assert_eq!(same.status, Status::Identical);
+    assert_eq!(same.left.sha256, same.right.sha256);
+    // A folder against a zip of the same files.
+    let zip = dir.path().join("right.zip");
+    std::fs::write(
+        &zip,
+        stored_zip(&[("src/main.txt", b"v1\n", 0), ("same.txt", b"same\n", 0)]),
+    )
+    .unwrap();
+    let mixed = diff_paths(&left, &zip, &options, &settings).unwrap();
+    assert_eq!((mixed.kind, mixed.status), (Kind::Tree, Status::Identical));
+    assert_eq!(mixed.right.media_type.as_deref(), Some("application/zip"));
+    // A folder against a plain file, and paths that do not exist.
+    let plain = dir.path().join("plain.txt");
+    std::fs::write(&plain, "text\n").unwrap();
+    let bad = diff_paths(&left, &plain, &options, &settings).unwrap();
+    assert_eq!(codes(&bad), [("invalid-archive", Some(Side::Right))]);
+    let missing = dir.path().join("missing");
+    assert!(matches!(
+        diff_paths(&missing, &plain, &options, &settings),
+        Err(Error::Io(_))
+    ));
+    assert!(matches!(
+        diff_paths(&left, &missing, &options, &settings),
+        Err(Error::Io(_))
+    ));
+    // Two files are an ordinary diff.
+    let file_doc = diff_paths(&plain, &plain, &options, &settings).unwrap();
+    assert_eq!(
+        (file_doc.kind, file_doc.status),
+        (Kind::Text, Status::Identical)
+    );
+    assert_eq!(file_doc.left.name.as_deref(), Some("plain.txt"));
 }

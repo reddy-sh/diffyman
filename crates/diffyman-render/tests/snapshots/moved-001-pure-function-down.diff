@@ -1,0 +1,34 @@
+--- a/left.txt
++++ b/right.txt
+@@ -2,15 +2,6 @@
+ import os
+ import sys
+ 
+-def parse_config(path):
+-  with open(path, encoding="utf-8") as handle:
+-    raw = json.load(handle)
+-  if "version" not in raw:
+-    raise ValueError("config file has no version field")
+-  raw.setdefault("workers", os.cpu_count())
+-  raw.setdefault("log_level", "info")
+-  return raw
+-
+ def load_jobs(directory):
+   jobs = []
+   for name in sorted(os.listdir(directory)):
+@@ -34,6 +25,15 @@
+       break
+     print(f"[{index}] {job}")
+   return 0
++
++def parse_config(path):
++  with open(path, encoding="utf-8") as handle:
++    raw = json.load(handle)
++  if "version" not in raw:
++    raise ValueError("config file has no version field")
++  raw.setdefault("workers", os.cpu_count())
++  raw.setdefault("log_level", "info")
++  return raw
+ 
+ if __name__ == "__main__":
+   sys.exit(main(sys.argv))

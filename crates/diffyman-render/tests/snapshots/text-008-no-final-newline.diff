@@ -1,0 +1,9 @@
+--- a/left.txt
++++ b/right.txt
+@@ -3,4 +3,4 @@
+ Tue: wind 18 knots, showers
+ Wed: wind 9 knots, fog until noon
+ Thu: wind 22 knots, rough sea
+-Fri: calm, high cloud
++Fri: calm, high cloud
+\ No newline at end of file

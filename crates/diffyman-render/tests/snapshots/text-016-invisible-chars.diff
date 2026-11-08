@@ -1,0 +1,11 @@
+--- a/left.txt
++++ b/right.txt
+@@ -1,5 +1,5 @@
+-user name: admin
+-password check passed
++user name: adm﻿in
++password​ check passed
+ spacing  differs   here
+-attachment: report_final.pdf
++attachment: report_‮fdp.exe
+ total due: 120 EUR

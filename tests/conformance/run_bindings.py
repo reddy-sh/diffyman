@@ -1,7 +1,7 @@
 """Cross-binding conformance: CLI, Python and WASM must return the same bytes.
 
-For every case in tests/corpus/text and tests/corpus/moved this gets the
-canonical Diff Document from
+For every case in tests/corpus/text, tests/corpus/moved, tests/corpus/binary
+and tests/corpus/tree this gets the canonical Diff Document from
 
   (a) the Rust CLI:      diffyman diff --json --options options.json left.* right.*
   (b) the Python binding: diffyman.diff(Path(left), Path(right), options_text)
@@ -15,7 +15,12 @@ and checks, per docs/spec/diff-document.md section 3, that
   3. after removing the top-level "provenance" key, the canonical bytes are
      identical across all three and identical to expected.json (canonicalized
      the same way), and
-  4. the CLI exit code matches the status (0 identical, 1 different, 2 error).
+  4. the CLI exit code matches the status (0 identical, 1 different or
+     partial, 2 error).
+
+Tree cases with a folder input (`left/` or `right/`) run on the CLI and the
+Python binding only: the WASM binding takes bytes, not paths. Archive cases
+run on all three.
 
 The moved cases run with "detectMoves": true and carry real moves[]. Unless
 --golden-only is given, the moved inputs also run a second time with
@@ -50,9 +55,9 @@ import jcs  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 CORPUS = REPO / "tests" / "corpus"
-GROUPS = ("text", "moved")
+GROUPS = ("text", "moved", "binary", "tree")
 SURFACES = ("cli", "python", "wasm")
-EXIT_CODES = {"identical": 0, "different": 1, "error": 2}
+EXIT_CODES = {"identical": 0, "different": 1, "partial": 1, "error": 2}
 
 
 @dataclass
@@ -63,6 +68,15 @@ class Case:
     options: pathlib.Path
     # None for the extra cross-surface-only cases, which have no golden file.
     expected: pathlib.Path | None
+
+    @property
+    def folder(self) -> bool:
+        """A side is a folder: the case cannot run on the WASM binding."""
+        return self.left.is_dir() or self.right.is_dir()
+
+    @property
+    def surfaces(self) -> tuple[str, ...]:
+        return ("cli", "python") if self.folder else SURFACES
 
 
 @dataclass
@@ -83,9 +97,13 @@ class Verdict:
 
 
 def only(directory: pathlib.Path, stem: str) -> pathlib.Path:
-    found = sorted(p for p in directory.iterdir() if p.is_file() and p.name.startswith(f"{stem}."))
+    found = sorted(
+        p
+        for p in directory.iterdir()
+        if (p.is_file() and p.name.startswith(f"{stem}.")) or (p.is_dir() and p.name == stem)
+    )
     if len(found) != 1:
-        raise SystemExit(f"{directory}: expected exactly one {stem}.* file, found {len(found)}")
+        raise SystemExit(f"{directory}: expected exactly one {stem}.* file or {stem}/ folder, found {len(found)}")
     return found[0]
 
 
@@ -233,15 +251,17 @@ def run_wasm(node: str, pkg: pathlib.Path, cases: list[Case]) -> list[Output]:
             "`wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node`"
         )
     script = REPO / "tests" / "conformance" / "wasm_diff.mjs"
+    runnable = [c for c in cases if not c.folder]
     proc = subprocess.run(
         [node, str(script), "--pkg", str(pkg), "--batch"],
-        input=json.dumps(jobs_for(cases)).encode("utf-8"),
+        input=json.dumps(jobs_for(runnable)).encode("utf-8"),
         capture_output=True,
         check=False,
     )
     if proc.returncode != 0:
         raise SystemExit(f"wasm_diff.mjs failed:\n{proc.stderr.decode(errors='replace')}")
-    return batch_outputs(proc.stdout, len(cases))
+    results = iter(batch_outputs(proc.stdout, len(runnable)))
+    return [Output(error="folders are not a WASM input") if c.folder else next(results) for c in cases]
 
 
 def batch_outputs(stdout: bytes, count: int) -> list[Output]:
@@ -270,7 +290,7 @@ def judge(case: Case, outputs: dict[str, Output]) -> Verdict:
             verdict.problems.append("expected.json is missing")
 
     stripped: dict[str, bytes] = {}
-    for surface in SURFACES:
+    for surface in case.surfaces:
         out = outputs[surface]
         if out.raw is None:
             verdict.cells[surface] = "error"
@@ -294,9 +314,11 @@ def judge(case: Case, outputs: dict[str, Output]) -> Verdict:
             verdict.problems.append(f"{surface}: differs from expected.json ({first_difference(expected, stripped[surface])})")
         verdict.cells[surface] = cell
 
-    if len(stripped) == len(SURFACES) and len(set(stripped.values())) != 1:
-        verdict.problems.append("the three surfaces disagree with each other")
-    verdict.cells["same"] = "yes" if len(stripped) == len(SURFACES) and len(set(stripped.values())) == 1 else "NO"
+    surfaces = case.surfaces
+    agree = len(stripped) == len(surfaces) and len(set(stripped.values())) == 1
+    if len(stripped) == len(surfaces) and not agree:
+        verdict.problems.append("the surfaces disagree with each other")
+    verdict.cells["same"] = "yes" if agree else "NO"
     return verdict
 
 
@@ -365,7 +387,7 @@ def main() -> int:
     print()
     print(
         f"{len(golden)} corpus cases: {len(golden) - failed['golden']} passed, {failed['golden']} failed "
-        "(cli, python and wasm byte-identical to expected.json, provenance removed)"
+        "(cli, python and, except for folder inputs, wasm byte-identical to expected.json, provenance removed)"
     )
     if extra:
         print(

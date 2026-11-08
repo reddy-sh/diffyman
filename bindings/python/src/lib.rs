@@ -7,7 +7,7 @@
 
 use diffyman::{Error, Input, Settings};
 use pyo3::create_exception;
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyOSError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
 create_exception!(
@@ -43,10 +43,39 @@ fn diff(
             &settings,
         )
     });
-    result.map_err(|e| match e {
+    result.map_err(|e| to_py_error(&e))
+}
+
+/// Diffs two paths and returns the canonical JSON Diff Document.
+///
+/// A folder on either side gives a tree document (folders and archives, spec
+/// §19); two files are diffed like [`diff`], named by their final path
+/// components. The GIL is released while the diff runs.
+#[pyfunction]
+#[pyo3(signature = (left, right, options_json = ""))]
+fn diff_paths(
+    py: Python<'_>,
+    left: std::path::PathBuf,
+    right: std::path::PathBuf,
+    options_json: &str,
+) -> PyResult<String> {
+    let settings = Settings {
+        binding: "python".to_owned(),
+    };
+    let result = py.detach(move || {
+        let options = diffyman::parse_options(options_json)?;
+        let doc = diffyman::diff_paths(&left, &right, &options, &settings)?;
+        Ok::<_, Error>(diffyman::model::to_canonical_json(&doc)?)
+    });
+    result.map_err(|e| to_py_error(&e))
+}
+
+fn to_py_error(e: &Error) -> PyErr {
+    match e {
         Error::InvalidOptions(_) => DiffymanError::new_err(e.to_string()),
+        Error::Io(_) => PyOSError::new_err(e.to_string()),
         Error::Canonical(_) => PyRuntimeError::new_err(e.to_string()),
-    })
+    }
 }
 
 fn input<'a>(bytes: &'a [u8], name: Option<&'a str>) -> Input<'a> {
@@ -59,6 +88,7 @@ fn input<'a>(bytes: &'a [u8], name: Option<&'a str>) -> Input<'a> {
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(diff, m)?)?;
+    m.add_function(wrap_pyfunction!(diff_paths, m)?)?;
     m.add("DiffymanError", m.py().get_type::<DiffymanError>())?;
     m.add("ENGINE_VERSION", diffyman::ENGINE_VERSION)?;
     m.add("SCHEMA_VERSION", diffyman::model::SCHEMA_VERSION)?;

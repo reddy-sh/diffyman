@@ -71,6 +71,13 @@ SPANS: dict[str, list[tuple[str, int, str]]] = {
     ],
     "034-smart-noise": [],
     "035-refine-skipped-limit": [("left", 111, "101"), ("right", 111, "102")],
+    # Masked timestamps and durations never get a span (moves spec 3.2).
+    "041-regex-inline-spans": [
+        ("left", 1, "01"),
+        ("left", 2, "14"),
+        ("right", 1, "02"),
+        ("right", 2, "9"),
+    ],
 }
 
 # Cases whose ignore.regex must fail, with the expected `side: null` codes. The
@@ -209,11 +216,33 @@ def decode(raw: bytes) -> str | None:
         return None
 
 
-def check_meta(c: Checker, side: str, raw: bytes, meta: dict, text: str | None, lines) -> None:
+# Media types of the extensions used under text/ (diff-document.md section 16.1).
+# Any other extension of a text input gives text/plain.
+TEXT_MEDIA_TYPES = {"csv": "text/csv", "yaml": "application/yaml"}
+
+
+def is_utf16_text(raw: bytes) -> bool:
+    if raw[:2] not in (b"\xff\xfe", b"\xfe\xff") or len(raw) % 2:
+        return False
+    try:
+        text = raw[2:].decode("utf-16-le" if raw[:2] == b"\xff\xfe" else "utf-16-be")
+    except UnicodeDecodeError:
+        return False
+    return "\x00" not in text[:4000]
+
+
+def media_type(ext: str, raw: bytes, text: str | None) -> str:
+    """The detected media type of a text/ input (no case here has magic bytes)."""
+    if text is not None or is_utf16_text(raw):
+        return TEXT_MEDIA_TYPES.get(ext.lower(), "text/plain")
+    return "application/octet-stream"
+
+
+def check_meta(c: Checker, side: str, raw: bytes, meta: dict, text: str | None, lines, ext: str) -> None:
     c.eq(f"{side}.size", meta["size"], len(raw))
     c.eq(f"{side}.sha256", meta["sha256"], hashlib.sha256(raw).hexdigest())
     c.eq(f"{side}.bom", meta["bom"], raw.startswith(BOM))
-    c.eq(f"{side}.mediaType", meta["mediaType"], "text/plain")
+    c.eq(f"{side}.mediaType", meta["mediaType"], media_type(ext, raw, text))
     if text is None:
         for field in ("encoding", "lineTerminator", "finalNewline", "lineCount"):
             c.eq(f"{side}.{field}", meta[field], None)
@@ -410,14 +439,21 @@ def check_case(directory: Path) -> list[str]:
     c = Checker(directory.name)
     doc = json.loads((directory / "expected.json").read_text(encoding="utf-8"))
     options = json.loads((directory / "options.json").read_text(encoding="utf-8"))
-    raws = {side: next(directory.glob(f"{side}.*")).read_bytes() for side in ("left", "right")}
+    paths = {side: next(directory.glob(f"{side}.*")) for side in ("left", "right")}
+    raws = {side: path.read_bytes() for side, path in paths.items()}
     texts = {side: decode(raw) for side, raw in raws.items()}
     lines = {side: split_lines(t) if t is not None else None for side, t in texts.items()}
     for side in ("left", "right"):
-        check_meta(c, side, raws[side], doc[side], texts[side], lines[side])
+        check_meta(c, side, raws[side], doc[side], texts[side], lines[side], paths[side].suffix[1:])
     c.eq("options", doc["options"], options)
     c.eq("positionEncoding", doc["positionEncoding"], options["positionEncoding"])
     deferred = bool(options["detectMoves"])  # covered by the moved/ cases, not here
+    c.eq("kind", doc["kind"], "text")
+    c.eq("bytes", doc["bytes"], [])
+    if doc["stats"] is not None:
+        c.eq("stats.bytes", doc["stats"]["bytes"], None)
+    if None in texts.values():
+        c.eq("an input that is not UTF-8 needs the text adapter", options["adapter"], "text")
     regex_errors = REGEX_ERRORS.get(directory.name, [])
     if "invalid-regex" in regex_errors:
         failures = 0

@@ -1,0 +1,29 @@
+Y{
+  "algorithm": "histogram",
+  "granularity": "line",
+  "ignore": {
+    "whitespace": "none",
+    "case": false,
+    "blankLines": false,
+    "regex": [
+      "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+      "\\d+ ms$"
+    ]
+  },
+  "context": 1,
+  "positionEncoding": "utf-8",
+  "detectMoves": false,
+  "adapter": "auto"
+}
+~GET /api/orders 200 req=3f2b8c1e-9a4d-4e7b-8c21-5d6f7a8b9c0d in 12 ms
+GET /api/orders/17 200 req=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d in 8 ms
+POST /api/orders 201 req=0f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f in 31 ms
+GET /health 200 in 1 ms
+GET /api/users/4 200 req=9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a in 5 ms
+DELETE /api/orders/17 204 req=7c6b5a49-3827-4165-9f4e-3d2c1b0a9f8e in 9 ms
+GET /api/orders 200 req=5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a in 15 ms
+GET /api/orders/17 404 req=b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e in 3 ms
+POST /api/orders 201 req=1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d in 28 ms
+GET /health 200 in 2 ms
+GET /api/users/4 200 req= in 6 ms
+DELETE /api/orders/17 204 req=8d7c6b5a-4938-4271-8e6f-5d4c3b2a1f0e in 11 ms

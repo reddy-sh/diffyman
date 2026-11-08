@@ -18,6 +18,9 @@ icu_casemap.workspace = true
 icu_properties.workspace = true
 regex.workspace = true
 regex-automata.workspace = true
+memchr.workspace = true
+hashbrown.workspace = true
+foldhash.workspace = true
 
 [lints]
 workspace = true

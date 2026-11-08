@@ -21,6 +21,17 @@ import unicodedata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent / "text"
+
+# The tree options (diff-document.md section 9) at their defaults. They do
+# not change a text result; they are spelled out like every other key.
+TREE_DEFAULTS = {
+    "followSymlinks": False,
+    "ignoreFiles": False,
+    "exclude": [],
+    "detectMoves": True,
+    "maxDepth": 3,
+    "childBudget": 16777216,
+}
 MAX_FILE_BYTES = 20 * 1024
 
 BOM = b"\xef\xbb\xbf"
@@ -36,6 +47,7 @@ def opts(
     regex: list[str] | None = None,
     context: int = 3,
     position: str = "utf-8",
+    adapter: str = "auto",
 ) -> dict:
     """Return a fully spelled-out options object (diff-document.md section 9).
 
@@ -55,6 +67,8 @@ def opts(
         "context": context,
         "positionEncoding": position,
         "detectMoves": False,
+        "adapter": adapter,
+        "tree": dict(TREE_DEFAULTS),
     }
 
 
@@ -704,10 +718,12 @@ case(
     lf("Invoice 2026-118", "Customer: Harbour Bakery", "Total: 412.50 EUR")[:-1],
     # "Café Lumière" written in Latin-1: 0xE9 and 0xE8 are not valid UTF-8 here.
     b"Invoice 2026-118\nCustomer: Caf\xe9 Lumi\xe8re\nTotal: 412.50 EUR\n",
-    opts(),
+    opts(adapter="text"),
     "The right file holds two Latin-1 bytes (0xE9 and 0xE8 for `é` and `è`), so it is "
-    "not valid UTF-8; the left file is valid UTF-8 with no final newline. 0.1.0 has no "
-    "binary fallback (spec 7.1), so a correct result is `status: \"error\"` with "
+    "not valid UTF-8; the left file is valid UTF-8 with no final newline. The case pins "
+    "`adapter: \"text\"`, so the text adapter must read the right file and fails "
+    "(spec 7.1; under the default `auto` the pair is compared as bytes instead, see "
+    "`binary/009-latin1-vs-utf8`). A correct result is `status: \"error\"` with "
     "`hunks: []`, `moves: []` and `stats: null`. The right side keeps its `size`, "
     "`sha256` and `bom: false`, and its `encoding`, `lineTerminator`, `finalNewline` and "
     "`lineCount` are `null` (spec 8). The left side still decodes, so its meta is filled "
@@ -723,10 +739,12 @@ case(
     "txt",
     _utf16_text.encode("utf-8"),
     b"\xff\xfe" + _utf16_text.encode("utf-16-le"),
-    opts(),
+    opts(adapter="text"),
     "The right file is the left file's text saved as UTF-16LE with its byte order mark "
-    "(FF FE). Only EF BB BF is treated as a BOM, and a UTF-16 BOM fails the UTF-8 check "
-    "(spec 7.1), so a correct result is `status: \"error\"` with one `invalid-utf8` "
+    "(FF FE). The case pins `adapter: \"text\"` (under `auto` it is compared as bytes, "
+    "see `binary/010-utf16-vs-utf8`). Only EF BB BF is treated as a BOM, and a UTF-16 "
+    "BOM fails the UTF-8 check (spec 7.1), so a correct result is `status: \"error\"` "
+    "with one `invalid-utf8` "
     "error for the right side and no `bom-stripped` warning. The right side reports "
     "`bom: false`, `size: 70` and `null` for `encoding`, `lineTerminator`, "
     "`finalNewline` and `lineCount`; the left side decodes normally (`lineCount: 4`). "
@@ -1198,6 +1216,32 @@ case(
     "file metas filled in and the pattern echoed in `options`.",
 )
 
+# 041 -------------------------------------------------------------------------
+case(
+    "041-regex-inline-spans",
+    "log",
+    lf(
+        "2026-05-02T10:00:01Z backup started for volume data-01",
+        "2026-05-02T10:04:17Z backup finished in 256 s with 14 files skipped",
+        "2026-05-02T10:04:18Z upload queued to bucket nightly",
+    ),
+    lf(
+        "2026-05-03T10:00:02Z backup started for volume data-02",
+        "2026-05-03T10:05:44Z backup finished in 342 s with 9 files skipped",
+        "2026-05-03T10:05:45Z upload queued to bucket nightly",
+    ),
+    opts(
+        granularity="word",
+        regex=[r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", r"in \d+ s"],
+    ),
+    "Two backup logs with new timestamps and durations, masked by `ignore.regex`. L3 "
+    "differs only in masked text, so it is equal; L1 and L2 form one `replace` op. "
+    "Inline refinement applies the same masks (moves spec 3.2): each match is one token "
+    "equal to any match of the same pattern, so the timestamps and `in 256 s` / "
+    "`in 342 s` get no span. The only word spans are the volume number (`01` / `02`) "
+    "and the skipped count (`14` / `9`).",
+)
+
 
 def write_case(entry: dict) -> None:
     directory = ROOT / entry["slug"]
@@ -1215,8 +1259,8 @@ def write_case(entry: dict) -> None:
 
 def self_check() -> None:
     slugs = [entry["slug"] for entry in CASES]
-    if len(slugs) != 40 or len(set(slugs)) != 40:
-        raise SystemExit(f"expected 40 unique cases, found {len(slugs)}")
+    if len(slugs) != 41 or len(set(slugs)) != 41:
+        raise SystemExit(f"expected 41 unique cases, found {len(slugs)}")
     for number, slug in enumerate(slugs, start=1):
         if not slug.startswith(f"{number:03d}-"):
             raise SystemExit(f"case {slug} is out of order")

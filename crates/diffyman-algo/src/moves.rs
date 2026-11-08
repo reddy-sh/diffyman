@@ -5,6 +5,16 @@
 //! only pairs blocks of deleted left lines with blocks of inserted right lines
 //! that sit in different ops.
 //!
+//! 0. **Move keys and sub-ops** (spec §4.1 rule 4, §4.4). Every changed line
+//!    gets its move key: the comparison key of the document (regex masks,
+//!    whitespace mode, case folding) without the terminator and the leading
+//!    whitespace. Each `replace` op is then aligned again over the move keys
+//!    of its lines (`text.histogram@1`). Lines that this alignment pairs are
+//!    in place (they differ only in indentation or terminator) and take no
+//!    part in detection; each run of unpaired lines between them is a
+//!    **sub-op**, and rule 4.1.4 applies to sub-ops. So a file converted from
+//!    LF to CRLF under whitespace `none`, which is one `replace` op, still
+//!    shows the blocks that moved inside it.
 //! 1. **Pure moves** (spec §4.3). Seeds come from a key index: a pair of a
 //!    deleted and an inserted line with equal move keys, where the key occurs
 //!    at most [`MOVE_MAX_KEY_OCCURRENCES`] times among the deleted lines and
@@ -20,8 +30,15 @@
 //!    line inside is one edited move instead of two pure pieces.
 //! 3. **Edited moves** (spec §4.5), over the lines that are still unclaimed.
 //!    Line similarity is a grapheme Levenshtein distance (bit-parallel, at most
-//!    [`MOVE_EDIT_MAX_LINE_GRAPHEMES`] graphemes per line; longer lines pair
-//!    only when their keys are equal), behind a length and histogram filter.
+//!    [`MOVE_EDIT_MAX_LINE_GRAPHEMES`] graphemes per line), behind a length and
+//!    histogram filter. A longer line is compared by its common prefix and
+//!    suffix with the other line: the distance of the two remainders is the
+//!    distance of the whole lines, and it is computed when both remainders
+//!    have at most [`MOVE_EDIT_MAX_LINE_GRAPHEMES`] graphemes (otherwise the
+//!    pair does not pair). An edited block must also keep most of its words
+//!    ([`MOVE_EDITED_MIN_WORD_SIM_BP`]), so lines that share only their
+//!    structure, such as `key = value` lines whose values all changed, do not
+//!    make a move.
 //!    For each pair of unclaimed segments in different ops that holds a seed
 //!    (a line pair with similarity >= [`MOVE_EDIT_SEED_BP`]), a forward and a
 //!    backward local alignment give, for every seed, the best-scoring block
@@ -49,6 +66,9 @@
 //!   plus traceback and extension steps in total. When the budget runs out,
 //!   no further segment pair is swept, candidates that need a rebuild are
 //!   dropped (`skipped_limit`) and the blocks already found are kept.
+//! - The prefix and suffix scans of long lines compare at most about
+//!   [`MOVE_EDIT_MAX_LONG_SCAN`] graphemes in total; after that, long lines
+//!   no longer pair (`skipped_limit`).
 //!
 //! The pure pass does work proportional to the number of seed pairs plus the
 //! total length of the runs found; the per-key cap keeps the seed count at
@@ -66,11 +86,11 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 
-use icu_casemap::{CaseMapper, CaseMapperBorrowed};
-use unicode_segmentation::UnicodeSegmentation;
+use unicode_segmentation::{GraphemeIndices, UnicodeSegmentation};
 
-use crate::key::{self, WhitespaceMode};
-use crate::ops::LineOp;
+use crate::key::{self, KeyBuilder, MASK_BYTE, WhitespaceMode};
+use crate::line_diff::{self, LineAlgorithm};
+use crate::ops::{self, LineOp, OpKind};
 
 /// Algorithm ID of moved-block detection.
 pub const MOVES_ID: &str = "text.moves@1";
@@ -92,8 +112,17 @@ pub const MOVE_EDITED_MIN_SIM_BP: u32 = 8_000;
 pub const MOVE_LINE_PAIR_MIN_BP: u32 = 6_000;
 /// Minimum similarity of the seed pair of an edited move, in basis points.
 pub const MOVE_EDIT_SEED_BP: u32 = 9_000;
-/// Longer lines (in graphemes of their move key) pair only when their keys are equal.
+/// Longest move key (in graphemes) compared as a whole; a longer key is
+/// compared by its common prefix and suffix, and the remainders may have at
+/// most this many graphemes each.
 pub const MOVE_EDIT_MAX_LINE_GRAPHEMES: usize = 256;
+/// Minimum word similarity of an edited move, in basis points.
+pub const MOVE_EDITED_MIN_WORD_SIM_BP: u64 = 6_000;
+/// Most graphemes per side left of a long pair after its common prefix and suffix.
+pub const MOVE_EDIT_MAX_LONG_REMAINDER: usize = 4_096;
+/// About the most work the comparison of long lines may do in total: graphemes
+/// scanned for common prefixes and suffixes plus 64-bit distance steps.
+pub const MOVE_EDIT_MAX_LONG_SCAN: u64 = 32_000_000;
 /// Maximum line pairs (and segment pairs) the edited pass compares.
 pub const MOVE_EDIT_MAX_PAIRS: u64 = 1_000_000;
 /// Maximum alignment cells (plus traceback and extension steps) the edited pass computes.
@@ -132,15 +161,6 @@ pub struct DetectedMove {
     pub similarity_bp: u32,
 }
 
-/// The comparison options that shape the move key (spec §4.4).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct MoveOptions {
-    /// The document's `ignore.whitespace`.
-    pub whitespace: WhitespaceMode,
-    /// The document's `ignore.case`.
-    pub ignore_case: bool,
-}
-
 /// Result of [`detect_moves`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Moves {
@@ -152,9 +172,24 @@ pub struct Moves {
 
 /// Detects moved blocks among deleted and inserted lines.
 ///
-/// `left` and `right` are the line contents without terminators, and `ops`
-/// is the full op list (it tiles both files).
-pub fn detect_moves(left: &[&str], right: &[&str], ops: &[LineOp], options: &MoveOptions) -> Moves {
+/// `left` and `right` are the line contents without terminators, `ops` is
+/// the full op list (it tiles both files), and `keys` is the document's key
+/// builder: its regex masks, whitespace mode and case folding shape the move
+/// key (spec §4.4).
+pub fn detect_moves(left: &[&str], right: &[&str], ops: &[LineOp], keys: &KeyBuilder) -> Moves {
+    detect_moves_by(|i| left[i], |j| right[j], ops, keys)
+}
+
+/// [`detect_moves`] with the line contents given by 0-based line number.
+/// Only the lines of change ops are read, and memory grows with their
+/// number (at most [`MOVE_MAX_CANDIDATE_LINES`] per side), not with the
+/// length of the files.
+pub fn detect_moves_by<'t>(
+    left: impl Fn(usize) -> &'t str,
+    right: impl Fn(usize) -> &'t str,
+    ops: &[LineOp],
+    keys: &KeyBuilder,
+) -> Moves {
     let deleted: usize = ops
         .iter()
         .filter(|o| o.kind.is_change())
@@ -171,21 +206,105 @@ pub fn detect_moves(left: &[&str], right: &[&str], ops: &[LineOp], options: &Mov
             skipped_limit: true,
         };
     }
-    let mut keys = Keys::new(*options);
-    let mut l = Side::build(left, ops, true, &mut keys);
-    let mut r = Side::build(right, ops, false, &mut keys);
+    let compact = Compact::new(ops);
+    let content = |lines: &[usize], of: &dyn Fn(usize) -> &'t str| -> Vec<&'t str> {
+        lines
+            .iter()
+            .map(|&i| if i == GAP_LINE { "" } else { of(i) })
+            .collect()
+    };
+    let lc = content(&compact.left, &left);
+    let rc = content(&compact.right, &right);
+    let mut found = detect(&lc, &rc, &compact.ops, keys);
+    for m in &mut found.moves {
+        // A move never holds a gap line, and consecutive compact lines
+        // without a gap between them are consecutive lines of the file.
+        m.left_start = compact.left[m.left_start];
+        m.right_start = compact.right[m.right_start];
+    }
+    found
+}
+
+/// Marks a compact line that stands for a run of lines outside change ops.
+const GAP_LINE: usize = usize::MAX;
+
+/// The lines move detection looks at: every line of a change op, in order,
+/// and one gap line for each run of other lines between them, per side.
+/// Detection never reads or crosses a line outside a change op (every run,
+/// segment and extension stays inside one op), so it finds the same moves
+/// on the compact lines as on the whole files.
+struct Compact {
+    /// `ops` over the compact lines.
+    ops: Vec<LineOp>,
+    /// The file line of each compact line, or [`GAP_LINE`].
+    left: Vec<usize>,
+    right: Vec<usize>,
+}
+
+impl Compact {
+    fn new(ops: &[LineOp]) -> Compact {
+        let mut out = Compact {
+            ops: Vec::new(),
+            left: Vec::new(),
+            right: Vec::new(),
+        };
+        for op in ops {
+            if op.kind.is_change() {
+                out.ops.push(LineOp {
+                    kind: op.kind,
+                    left_start: out.left.len(),
+                    left_len: op.left_len,
+                    right_start: out.right.len(),
+                    right_len: op.right_len,
+                });
+                out.left.extend(op.left_start..op.left_start + op.left_len);
+                out.right
+                    .extend(op.right_start..op.right_start + op.right_len);
+                continue;
+            }
+            // One gap line per side for a run of unchanged lines, however
+            // long and however many ops it spans.
+            let gap = |lines: &[usize], len: usize| {
+                usize::from(len > 0 && lines.last() != Some(&GAP_LINE))
+            };
+            let (gl, gr) = (gap(&out.left, op.left_len), gap(&out.right, op.right_len));
+            if gl + gr == 0 {
+                continue;
+            }
+            out.ops.push(LineOp {
+                kind: op.kind,
+                left_start: out.left.len(),
+                left_len: gl,
+                right_start: out.right.len(),
+                right_len: gr,
+            });
+            out.left.extend(std::iter::repeat_n(GAP_LINE, gl));
+            out.right.extend(std::iter::repeat_n(GAP_LINE, gr));
+        }
+        out
+    }
+}
+
+/// Detection over line contents and ops that tile them.
+fn detect(left: &[&str], right: &[&str], ops: &[LineOp], keys: &KeyBuilder) -> Moves {
+    let mut interner = Keys::new(keys);
+    let mut l = Side::build(left, ops, true, &mut interner);
+    let mut r = Side::build(right, ops, false, &mut interner);
+    let texts = interner.texts;
+    split_replace_ops(&mut l, &mut r, ops, texts.len());
     let check_delta = matches!(
-        options.whitespace,
+        keys.whitespace(),
         WhitespaceMode::None | WhitespaceMode::Trailing
     );
+    let mut scan = LongScan::default();
     let mut moves = Vec::new();
-    pure_pass(&mut l, &mut r, keys.texts.len(), check_delta, &mut moves);
-    join_pure(&mut l, &mut r, &keys.texts, &mut moves);
-    let skipped_limit = edited_pass(&mut l, &mut r, &keys.texts, check_delta, &mut moves);
+    pure_pass(&mut l, &mut r, texts.len(), check_delta, &mut moves);
+    join_pure(&mut l, &mut r, &texts, &mut scan, &mut moves);
+    let limited = edited_pass(&mut l, &mut r, &texts, check_delta, &mut scan, &mut moves);
     moves.sort_by_key(|m| (m.left_start, m.right_start));
     Moves {
         moves,
-        skipped_limit,
+        skipped_limit: limited || scan.exhausted,
     }
 }
 
@@ -193,44 +312,82 @@ pub fn detect_moves(left: &[&str], right: &[&str], ops: &[LineOp], options: &Mov
 // Line data
 // ---------------------------------------------------------------------------
 
-/// Interns move keys (spec §4.4) to dense ids, in first-seen order.
-struct Keys {
-    whitespace: WhitespaceMode,
-    fold: Option<CaseMapperBorrowed<'static>>,
-    ids: HashMap<String, u32>,
-    texts: Vec<String>,
+/// Interns move keys (spec §4.4) to dense ids, in first-seen order. A key is
+/// UTF-8 text with placeholders written as by [`KeyBuilder::key_into`]
+/// ([`MASK_BYTE`] and the pattern index).
+struct Keys<'b> {
+    builder: &'b KeyBuilder,
+    ids: HashMap<Vec<u8>, u32>,
+    texts: Vec<Vec<u8>>,
+    buf: Vec<u8>,
 }
 
-impl Keys {
-    fn new(options: MoveOptions) -> Keys {
+impl Keys<'_> {
+    fn new(builder: &KeyBuilder) -> Keys<'_> {
         Keys {
-            whitespace: options.whitespace,
-            fold: options.ignore_case.then(CaseMapper::new),
+            builder,
             ids: HashMap::new(),
             texts: Vec::new(),
+            buf: Vec::new(),
         }
     }
 
     fn intern(&mut self, content: &str) -> u32 {
-        let rest = content.trim_start_matches(key::is_whitespace);
-        let normalized = key::normalize_whitespace(rest, self.whitespace);
-        let text = match self.fold {
-            Some(fold) => normalized.chars().map(|c| fold.simple_fold(c)).collect(),
-            None => normalized.into_owned(),
-        };
-        if let Some(id) = self.ids.get(&text) {
+        self.builder.move_key_into(content, &mut self.buf);
+        if let Some(id) = self.ids.get(&self.buf) {
             return *id;
         }
         let id = u32::try_from(self.texts.len()).unwrap_or(NO_KEY - 1);
-        self.texts.push(text.clone());
-        self.ids.insert(text, id);
+        self.texts.push(self.buf.clone());
+        self.ids.insert(self.buf.clone(), id);
         id
+    }
+}
+
+/// Splits every `replace` op into sub-ops (spec §4.1 rule 4): its lines are
+/// aligned again over their move keys with `text.histogram@1`; lines paired
+/// by that alignment are in place and leave detection (`NO_OP`), and each run
+/// of unpaired lines between them becomes a sub-op of its own. `insert` and
+/// `delete` ops are one sub-op each. Sub-op ids are dense, in op order.
+fn split_replace_ops(ls: &mut Side<'_>, rs: &mut Side<'_>, ops: &[LineOp], num_keys: usize) {
+    let num_tokens = u32::try_from(num_keys).unwrap_or(u32::MAX);
+    let mut next = 0u32;
+    for op in ops.iter().filter(|o| o.kind.is_change()) {
+        let l0 = op.left_start.min(ls.len());
+        let l1 = (op.left_start + op.left_len).min(ls.len());
+        let r0 = op.right_start.min(rs.len());
+        let r1 = (op.right_start + op.right_len).min(rs.len());
+        if l0 == l1 || r0 == r1 {
+            ls.op[l0..l1].fill(next);
+            rs.op[r0..r1].fill(next);
+            next += 1;
+            continue;
+        }
+        let alignment = line_diff::align(
+            LineAlgorithm::Histogram,
+            &ls.key[l0..l1],
+            &rs.key[r0..r1],
+            num_tokens,
+        );
+        for sub in ops::full_ops(&alignment) {
+            let (a0, a1) = (l0 + sub.left_start, l0 + sub.left_start + sub.left_len);
+            let (b0, b1) = (r0 + sub.right_start, r0 + sub.right_start + sub.right_len);
+            let id = if sub.kind == OpKind::Equal {
+                NO_OP
+            } else {
+                next += 1;
+                next - 1
+            };
+            ls.op[a0..a1].fill(id);
+            rs.op[b0..b1].fill(id);
+        }
     }
 }
 
 /// Per-line data of one side. Only changed lines get a key and an op.
 struct Side<'a> {
-    /// Index of the change op holding the line, or `NO_OP`.
+    /// Sub-op (spec §4.1 rule 4) holding the line, or `NO_OP` for a line
+    /// that is not changed or is in place under its move key.
     op: Vec<u32>,
     key: Vec<u32>,
     indent: Vec<&'a str>,
@@ -240,7 +397,7 @@ struct Side<'a> {
 }
 
 impl<'a> Side<'a> {
-    fn build(lines: &[&'a str], ops: &[LineOp], left: bool, keys: &mut Keys) -> Side<'a> {
+    fn build(lines: &[&'a str], ops: &[LineOp], left: bool, keys: &mut Keys<'_>) -> Side<'a> {
         let n = lines.len();
         let mut side = Side {
             op: vec![NO_OP; n],
@@ -589,11 +746,13 @@ struct Step {
 /// [`MOVE_EDITED_MIN_SIM_BP`]. The block ends at the last pure move it
 /// absorbed whose join is a real edit (the joined lines are not all equal
 /// keys pairwise; pieces split only by the indentation rule stay apart). A
-/// move that absorbs none is left exactly as it is.
+/// joined block must also meet the word similarity of spec §4.5; a move that
+/// absorbs none, or whose join falls short of it, is left exactly as it is.
 fn join_pure(
     ls: &mut Side<'_>,
     rs: &mut Side<'_>,
-    key_texts: &[String],
+    key_texts: &[Vec<u8>],
+    scan: &mut LongScan,
     moves: &mut Vec<DetectedMove>,
 ) {
     if moves.len() < 2 {
@@ -625,8 +784,19 @@ fn join_pure(
         let (mut l1, mut r1) = (l0 + m.left_len, r0 + m.right_len);
         let core = nontrivial(ls, l0, l1);
         let (mut sum, mut n) = (u64::from(FULL_BP) * core, 2 * core);
-        // The block as of the last accepted join: (l1, r1, sum, n, absorbed).
-        let mut joined: Option<(usize, usize, u64, u64, Vec<usize>)> = None;
+        // The non-trivial line pairs of the block, by move key.
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+        let piece_pairs = |pairs: &mut Vec<(u32, u32)>, l: usize, r: usize, len: usize| {
+            for t in 0..len {
+                if !ls.trivial(l + t) {
+                    pairs.push((ls.key[l + t], rs.key[r + t]));
+                }
+            }
+        };
+        piece_pairs(&mut pairs, l0, r0, m.left_len);
+        // The block as of the last accepted join: (l1, r1, sum, n, absorbed,
+        // number of pairs).
+        let mut joined: Option<(usize, usize, u64, u64, Vec<usize>, usize)> = None;
         let mut absorbed = Vec::new();
         loop {
             let mut best: Option<Step> = None;
@@ -641,7 +811,7 @@ fn join_pure(
                         if ls.trivial(i) || rs.trivial(j) {
                             continue;
                         }
-                        let Some(s) = sim.pairable(ls.key[i], rs.key[j]) else {
+                        let Some(s) = sim.pairable(ls.key[i], rs.key[j], scan) else {
                             continue;
                         };
                         Step {
@@ -689,20 +859,40 @@ fn join_pure(
                 }
             }
             let Some(step) = best else { break };
+            let (i, j) = (l1 + step.skip.0, r1 + step.skip.1);
             (l1, r1, sum, n) = (step.l1, step.r1, step.sum, step.n);
             if let Some(k2) = step.absorbs {
+                piece_pairs(&mut pairs, i, j, moves[k2].left_len);
                 absorbed.push(k2);
                 let equal =
                     l1 - l0 == r1 - r0 && (0..l1 - l0).all(|t| ls.key[l0 + t] == rs.key[r0 + t]);
                 if !equal {
-                    joined = Some((l1, r1, sum, n, absorbed.clone()));
+                    joined = Some((l1, r1, sum, n, absorbed.clone(), pairs.len()));
                 }
+            } else {
+                pairs.push((ls.key[i], rs.key[j]));
             }
         }
-        let Some((l1, r1, sum, n, absorbed)) = joined else {
+        let Some((l1, r1, sum, n, absorbed, num_pairs)) = joined else {
             out.push(m);
             continue;
         };
+        let keys_of = |side: &Side<'_>, from: usize, to: usize| -> Vec<u32> {
+            (from..to)
+                .filter(|&i| !side.trivial(i))
+                .map(|i| side.key[i])
+                .collect()
+        };
+        let (left_keys, right_keys) = (keys_of(ls, l0, l1), keys_of(rs, r0, r1));
+        let (common, words) = sim.word_counts(
+            &pairs[..num_pairs],
+            left_keys.into_iter(),
+            right_keys.into_iter(),
+        );
+        if !enough_words(common, words) {
+            out.push(m);
+            continue;
+        }
         for k2 in absorbed {
             open[k2] = false;
         }
@@ -725,104 +915,220 @@ fn join_pure(
 // Line similarity (spec §4.5)
 // ---------------------------------------------------------------------------
 
-/// Graphemes of one line's move key, as dense ids, with a 64-bucket histogram.
+/// One piece of a move key: a run of text, a grapheme or word of it, or a
+/// placeholder (by pattern index). A placeholder equals only a placeholder of
+/// the same pattern, and it is one grapheme and one word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Unit<'t> {
+    Text(&'t str),
+    Mask(u8),
+}
+
+impl Unit<'_> {
+    /// Length in key bytes.
+    fn len(self) -> usize {
+        match self {
+            Unit::Text(s) => s.len(),
+            Unit::Mask(_) => 2,
+        }
+    }
+}
+
+/// The text runs and placeholders of a move key, with their byte offsets,
+/// from either end. Every [`MASK_BYTE`] in a key starts a placeholder (it
+/// never occurs in UTF-8 and pattern indices are small), so a key can be
+/// split from the back as well as from the front.
+struct Pieces<'t> {
+    key: &'t [u8],
+    front: usize,
+    back: usize,
+}
+
+/// A text run of a key. Runs are cut from valid UTF-8 at placeholders, so
+/// they are valid UTF-8 themselves.
+fn run_text(bytes: &[u8]) -> &str {
+    std::str::from_utf8(bytes).unwrap_or("")
+}
+
+impl<'t> Iterator for Pieces<'t> {
+    type Item = (usize, Unit<'t>);
+
+    fn next(&mut self) -> Option<(usize, Unit<'t>)> {
+        let at = self.front;
+        if at >= self.back {
+            return None;
+        }
+        if self.key[at] == MASK_BYTE {
+            self.front = (at + 2).min(self.back);
+            return Some((at, Unit::Mask(self.key.get(at + 1).copied().unwrap_or(0))));
+        }
+        let end = self.key[at..self.back]
+            .iter()
+            .position(|&b| b == MASK_BYTE)
+            .map_or(self.back, |p| at + p);
+        self.front = end;
+        Some((at, Unit::Text(run_text(&self.key[at..end]))))
+    }
+}
+
+impl DoubleEndedIterator for Pieces<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let end = self.back;
+        if end <= self.front {
+            return None;
+        }
+        if end >= self.front + 2 && self.key[end - 2] == MASK_BYTE {
+            self.back = end - 2;
+            return Some((end - 2, Unit::Mask(self.key[end - 1])));
+        }
+        let start = self.key[self.front..end]
+            .iter()
+            .rposition(|&b| b == MASK_BYTE)
+            .map_or(self.front, |p| (self.front + p + 2).min(end));
+        self.back = start;
+        Some((start, Unit::Text(run_text(&self.key[start..end]))))
+    }
+}
+
+fn pieces(key: &[u8]) -> Pieces<'_> {
+    Pieces {
+        key,
+        front: 0,
+        back: key.len(),
+    }
+}
+
+/// The graphemes of one piece, with key byte offsets.
+enum PieceUnits<'t> {
+    Text(usize, GraphemeIndices<'t>),
+    Mask(Option<(usize, u8)>),
+}
+
+impl<'t> Iterator for PieceUnits<'t> {
+    type Item = (usize, Unit<'t>);
+
+    fn next(&mut self) -> Option<(usize, Unit<'t>)> {
+        match self {
+            PieceUnits::Text(at, g) => g.next().map(|(o, s)| (*at + o, Unit::Text(s))),
+            PieceUnits::Mask(m) => m.take().map(|(at, i)| (at, Unit::Mask(i))),
+        }
+    }
+}
+
+impl DoubleEndedIterator for PieceUnits<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self {
+            PieceUnits::Text(at, g) => g.next_back().map(|(o, s)| (*at + o, Unit::Text(s))),
+            PieceUnits::Mask(m) => m.take().map(|(at, i)| (at, Unit::Mask(i))),
+        }
+    }
+}
+
+/// The graphemes of a move key with their byte offsets, from either end.
+/// Text runs are segmented on their own: a placeholder always ends a
+/// grapheme.
+fn units(key: &[u8]) -> impl DoubleEndedIterator<Item = (usize, Unit<'_>)> {
+    pieces(key).flat_map(|(at, piece)| match piece {
+        Unit::Text(s) => PieceUnits::Text(at, s.grapheme_indices(true)),
+        Unit::Mask(i) => PieceUnits::Mask(Some((at, i))),
+    })
+}
+
+/// The words of a move key (spec §4.5), as ids from `ids`, sorted: its word
+/// segments that hold an alphanumeric code point, and its placeholders.
+fn words_of<'t>(key: &'t [u8], ids: &mut HashMap<Unit<'t>, u32>) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut push = |unit: Unit<'t>| {
+        let next = u32::try_from(ids.len()).unwrap_or(u32::MAX);
+        out.push(*ids.entry(unit).or_insert(next));
+    };
+    for (_, piece) in pieces(key) {
+        match piece {
+            Unit::Text(s) => {
+                for w in s.split_word_bounds() {
+                    if w.chars().any(char::is_alphanumeric) {
+                        push(Unit::Text(w));
+                    }
+                }
+            }
+            Unit::Mask(_) => push(piece),
+        }
+    }
+    out.sort_unstable();
+    out
+}
+
+/// The size of the multiset intersection of two sorted word lists.
+fn common_words(a: &[u32], b: &[u32]) -> u64 {
+    let (mut i, mut j, mut n) = (0, 0, 0u64);
+    while i < a.len() && j < b.len() {
+        match a[i].cmp(&b[j]) {
+            Ordering::Less => i += 1,
+            Ordering::Greater => j += 1,
+            Ordering::Equal => {
+                n += 1;
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+    n
+}
+
+/// True when the word similarity `2*common / words` (spec §4.5) reaches
+/// [`MOVE_EDITED_MIN_WORD_SIM_BP`].
+fn enough_words(common: u64, words: u64) -> bool {
+    20_000 * common >= MOVE_EDITED_MIN_WORD_SIM_BP * words
+}
+
+/// Graphemes of one line's move key: their count, a 64-bucket histogram of
+/// their ids and, for a key of at most [`MOVE_EDIT_MAX_LINE_GRAPHEMES`]
+/// graphemes, the ids themselves.
 struct Graphemes {
     ids: Vec<u32>,
     histogram: [u16; 64],
+    len: usize,
     long: bool,
 }
 
 /// The graphemes of a move key, with ids from `ids` (new graphemes get the next id).
-fn graphemes_of<'t>(text: &'t str, ids: &mut HashMap<&'t str, u32>) -> Graphemes {
+fn graphemes_of<'t>(key: &'t [u8], ids: &mut HashMap<Unit<'t>, u32>) -> Graphemes {
     let mut g = Graphemes {
         ids: Vec::new(),
         histogram: [0; 64],
+        len: 0,
         long: false,
     };
-    for grapheme in text.graphemes(true) {
+    for (_, unit) in units(key) {
         let next = u32::try_from(ids.len()).unwrap_or(u32::MAX);
-        let id = *ids.entry(grapheme).or_insert(next);
-        g.ids.push(id);
+        let id = *ids.entry(unit).or_insert(next);
+        if g.len < MOVE_EDIT_MAX_LINE_GRAPHEMES {
+            g.ids.push(id);
+        }
+        g.len += 1;
         let bucket = &mut g.histogram[(id % 64) as usize];
         *bucket = bucket.saturating_add(1);
     }
-    if g.ids.len() > MOVE_EDIT_MAX_LINE_GRAPHEMES {
+    if g.len > MOVE_EDIT_MAX_LINE_GRAPHEMES {
         g.long = true;
         g.ids = Vec::new();
     }
     g
 }
 
-/// Line similarity of spec §4.5 computed on demand, for the few pairs next
-/// to a pure move (spec §4.3 step 4). Graphemes are cached per move key.
-struct LineSim<'k> {
-    key_texts: &'k [String],
-    ids: HashMap<&'k str, u32>,
-    graphemes: HashMap<u32, Graphemes>,
+/// The work spent on the prefix and suffix scans of long lines.
+#[derive(Debug, Default)]
+struct LongScan {
+    spent: u64,
+    exhausted: bool,
 }
 
-impl<'k> LineSim<'k> {
-    fn new(key_texts: &'k [String]) -> LineSim<'k> {
-        LineSim {
-            key_texts,
-            ids: HashMap::new(),
-            graphemes: HashMap::new(),
-        }
-    }
-
-    fn ensure(&mut self, key: u32) {
-        if !self.graphemes.contains_key(&key) {
-            let g = graphemes_of(self.key_texts[key as usize].as_str(), &mut self.ids);
-            self.graphemes.insert(key, g);
-        }
-    }
-
-    /// The similarity of two move keys if the pair is pairable.
-    fn pairable(&mut self, a: u32, b: u32) -> Option<u32> {
-        if a == b {
-            return Some(FULL_BP);
-        }
-        self.ensure(a);
-        self.ensure(b);
-        let (ga, gb) = (&self.graphemes[&a], &self.graphemes[&b]);
-        if ga.long || gb.long {
-            return None;
-        }
-        // Pattern masks over a compact alphabet: the distinct graphemes of `a`,
-        // plus one all-zero row for graphemes that do not occur in `a`.
-        let mut local: HashMap<u32, usize> = HashMap::new();
-        for &g in &ga.ids {
-            let next = local.len();
-            local.entry(g).or_insert(next);
-        }
-        let absent = local.len();
-        let mut peq = vec![0u64; (absent + 1) * WORDS];
-        for (p, g) in ga.ids.iter().enumerate() {
-            peq[local[g] * WORDS + p / 64] |= 1 << (p % 64);
-        }
-        let text = Graphemes {
-            ids: gb
-                .ids
-                .iter()
-                .map(|g| u32::try_from(local.get(g).copied().unwrap_or(absent)).unwrap_or(0))
-                .collect(),
-            histogram: gb.histogram,
-            long: false,
-        };
-        pair_similarity(ga, &text, &peq)
-    }
-}
-
-/// `floor(10000 * (m - d) / m)` if it is at least [`MOVE_LINE_PAIR_MIN_BP`].
-fn pair_similarity(a: &Graphemes, b: &Graphemes, peq: &[u64]) -> Option<u32> {
-    if a.long || b.long {
-        return None;
-    }
-    let (la, lb) = (a.ids.len(), b.ids.len());
+/// The length and histogram filters of spec §4.5: `Some((m, max_d))` when
+/// the pair may still be pairable, with `m` the larger length and `max_d`
+/// the largest distance a pairable pair can have.
+fn prefilter(a: &Graphemes, b: &Graphemes) -> Option<(usize, usize)> {
+    let (la, lb) = (a.len, b.len);
     let m = la.max(lb);
-    if m == 0 {
-        return Some(FULL_BP);
-    }
     // sim >= 6000 bp  <=>  d <= 0.4 m.
     let max_d = 2 * m / 5;
     if la.abs_diff(lb) > max_d {
@@ -838,28 +1144,223 @@ fn pair_similarity(a: &Graphemes, b: &Graphemes, peq: &[u64]) -> Option<u32> {
     if l1.div_ceil(2) > max_d {
         return None;
     }
-    let d = if la == 0 {
-        lb
-    } else {
-        myers_distance(peq, la, &b.ids)
-    };
+    Some((m, max_d))
+}
+
+/// `floor(10000 * (m - d) / m)` if `d <= max_d`.
+fn similarity_of(m: usize, d: usize, max_d: usize) -> Option<u32> {
+    if m == 0 {
+        return Some(FULL_BP);
+    }
     if d > max_d {
         return None;
     }
     u32::try_from(10_000 * (m - d) / m).ok()
 }
 
+/// Similarity of two keys of at most [`MOVE_EDIT_MAX_LINE_GRAPHEMES`]
+/// graphemes each, if pairable. `peq` holds the match masks of `a` (`WORDS`
+/// words per grapheme id) in the id space of `b.ids`.
+fn pair_similarity(a: &Graphemes, b: &Graphemes, peq: &[u64]) -> Option<u32> {
+    let (m, max_d) = prefilter(a, b)?;
+    let d = if a.len == 0 {
+        b.len
+    } else {
+        myers_distance(peq, a.len, &b.ids)
+    };
+    similarity_of(m, d, max_d)
+}
+
+/// Levenshtein distance between two grapheme sequences of any length. The
+/// cost is `ceil(|a| / 64) * |b|` word steps.
+fn unit_distance(a: &[Unit<'_>], b: &[Unit<'_>]) -> usize {
+    if a.is_empty() || b.is_empty() {
+        return a.len().max(b.len());
+    }
+    let stride = a.len().div_ceil(64);
+    // Pattern masks over a compact alphabet: the distinct graphemes of `a`,
+    // plus one all-zero row for graphemes that do not occur in `a`.
+    let mut local: HashMap<Unit<'_>, usize> = HashMap::new();
+    for &u in a {
+        let next = local.len();
+        local.entry(u).or_insert(next);
+    }
+    let absent = local.len();
+    let mut peq = vec![0u64; (absent + 1) * stride];
+    for (p, u) in a.iter().enumerate() {
+        peq[local[u] * stride + p / 64] |= 1 << (p % 64);
+    }
+    let text: Vec<u32> = b
+        .iter()
+        .map(|u| u32::try_from(local.get(u).copied().unwrap_or(absent)).unwrap_or(0))
+        .collect();
+    let mut pv = vec![u64::MAX; stride];
+    let mut mv = vec![0u64; stride];
+    myers_core(&peq, stride, a.len(), &text, &mut pv, &mut mv)
+}
+
+/// Similarity of two keys of which at least one is longer than
+/// [`MOVE_EDIT_MAX_LINE_GRAPHEMES`] graphemes (spec §4.5), if pairable.
+///
+/// The common prefix and then the common suffix of what is left are
+/// removed; that never changes the Levenshtein distance. The pair is
+/// pairable only when both remainders have at most
+/// [`MOVE_EDIT_MAX_LONG_REMAINDER`] graphemes and their distance passes the
+/// threshold. The scans and the distance count against
+/// [`MOVE_EDIT_MAX_LONG_SCAN`].
+fn long_similarity(
+    ka: &[u8],
+    kb: &[u8],
+    a: &Graphemes,
+    b: &Graphemes,
+    scan: &mut LongScan,
+) -> Option<u32> {
+    let (m, max_d) = prefilter(a, b)?;
+    if scan.spent >= MOVE_EDIT_MAX_LONG_SCAN {
+        scan.exhausted = true;
+        return None;
+    }
+    // Equal units have equal byte lengths, so the prefix ends at the same
+    // byte offset on both sides.
+    let (mut p, mut prefix_end) = (0usize, 0usize);
+    for ((at, ua), (_, ub)) in units(ka).zip(units(kb)) {
+        if ua != ub {
+            break;
+        }
+        p += 1;
+        prefix_end = at + ua.len();
+    }
+    let (mut s, mut end_a, mut end_b) = (0usize, ka.len(), kb.len());
+    for ((at_a, ua), (at_b, ub)) in units(ka).rev().zip(units(kb).rev()) {
+        if ua != ub || at_a < prefix_end || at_b < prefix_end {
+            break;
+        }
+        s += 1;
+        (end_a, end_b) = (at_a, at_b);
+    }
+    scan.spent += (p + s + 1) as u64;
+    let rest = |len: usize| len.saturating_sub(p + s);
+    if rest(a.len) > MOVE_EDIT_MAX_LONG_REMAINDER || rest(b.len) > MOVE_EDIT_MAX_LONG_REMAINDER {
+        return None;
+    }
+    let ra: Vec<Unit<'_>> = units(&ka[prefix_end..end_a]).map(|u| u.1).collect();
+    let rb: Vec<Unit<'_>> = units(&kb[prefix_end..end_b]).map(|u| u.1).collect();
+    if ra.len().abs_diff(rb.len()) > max_d {
+        return None;
+    }
+    // The shorter remainder is the pattern: fewer words per step.
+    let (pattern, text) = if ra.len() <= rb.len() {
+        (&ra, &rb)
+    } else {
+        (&rb, &ra)
+    };
+    scan.spent += (pattern.len().div_ceil(64) * text.len()) as u64;
+    similarity_of(m, unit_distance(pattern, text), max_d)
+}
+
+/// Line similarity of spec §4.5 computed on demand, for the few pairs next
+/// to a pure move (spec §4.3 step 4). Graphemes and words are cached per
+/// move key.
+struct LineSim<'k> {
+    key_texts: &'k [Vec<u8>],
+    ids: HashMap<Unit<'k>, u32>,
+    word_ids: HashMap<Unit<'k>, u32>,
+    graphemes: HashMap<u32, Graphemes>,
+    words: HashMap<u32, Vec<u32>>,
+}
+
+impl<'k> LineSim<'k> {
+    fn new(key_texts: &'k [Vec<u8>]) -> LineSim<'k> {
+        LineSim {
+            key_texts,
+            ids: HashMap::new(),
+            word_ids: HashMap::new(),
+            graphemes: HashMap::new(),
+            words: HashMap::new(),
+        }
+    }
+
+    fn ensure(&mut self, key: u32) {
+        if !self.graphemes.contains_key(&key) {
+            let g = graphemes_of(&self.key_texts[key as usize], &mut self.ids);
+            self.graphemes.insert(key, g);
+        }
+    }
+
+    /// The similarity of two move keys if the pair is pairable.
+    fn pairable(&mut self, a: u32, b: u32, scan: &mut LongScan) -> Option<u32> {
+        if a == b {
+            return Some(FULL_BP);
+        }
+        self.ensure(a);
+        self.ensure(b);
+        let (ga, gb) = (&self.graphemes[&a], &self.graphemes[&b]);
+        let (ka, kb) = (&self.key_texts[a as usize], &self.key_texts[b as usize]);
+        if ga.long || gb.long {
+            return long_similarity(ka, kb, ga, gb, scan);
+        }
+        let (m, max_d) = prefilter(ga, gb)?;
+        let ua: Vec<Unit<'_>> = units(ka).map(|u| u.1).collect();
+        let ub: Vec<Unit<'_>> = units(kb).map(|u| u.1).collect();
+        similarity_of(m, unit_distance(&ua, &ub), max_d)
+    }
+
+    /// The sorted word ids of a move key.
+    fn words(&mut self, key: u32) -> &[u32] {
+        let texts = self.key_texts;
+        let ids = &mut self.word_ids;
+        self.words
+            .entry(key)
+            .or_insert_with(|| words_of(&texts[key as usize], ids))
+    }
+
+    /// Word similarity counts (common, total) of a block: `pairs` are its
+    /// non-trivial line pairs, `left` and `right` the move keys of all its
+    /// non-trivial lines.
+    fn word_counts(
+        &mut self,
+        pairs: &[(u32, u32)],
+        left: impl Iterator<Item = u32>,
+        right: impl Iterator<Item = u32>,
+    ) -> (u64, u64) {
+        let mut common = 0;
+        for &(a, b) in pairs {
+            let wa = self.words(a).to_vec();
+            common += common_words(&wa, self.words(b));
+        }
+        let mut total = 0;
+        for k in left.chain(right) {
+            total += self.words(k).len() as u64;
+        }
+        (common, total)
+    }
+}
+
 /// Levenshtein distance between a pattern of `m` graphemes (1..=256), whose
 /// match masks are in `peq` (`WORDS` words per grapheme id), and `text`.
 /// Myers' bit-parallel algorithm in Hyyrö's multi-word form.
 fn myers_distance(peq: &[u64], m: usize, text: &[u32]) -> usize {
-    let words = m.div_ceil(64);
-    let last_bit = 1u64 << ((m - 1) % 64);
     let mut pv = [u64::MAX; WORDS];
     let mut mv = [0u64; WORDS];
+    myers_core(peq, WORDS, m, text, &mut pv, &mut mv)
+}
+
+/// [`myers_distance`] for a pattern of any length `m >= 1`: `peq` has
+/// `stride >= ceil(m / 64)` words per grapheme id, and `pv` and `mv` hold
+/// `stride` words, all ones and all zeros.
+fn myers_core(
+    peq: &[u64],
+    stride: usize,
+    m: usize,
+    text: &[u32],
+    pv: &mut [u64],
+    mv: &mut [u64],
+) -> usize {
+    let words = m.div_ceil(64);
+    let last_bit = 1u64 << ((m - 1) % 64);
     let mut score = m;
     for &g in text {
-        let base = g as usize * WORDS;
+        let base = g as usize * stride;
         // The top row is D[0][j] = j, so every column starts with a +1 delta.
         let mut hin: i8 = 1;
         for w in 0..words {
@@ -1158,6 +1659,9 @@ struct Edited<'s, 'a, 'b> {
     check_delta: bool,
     /// Pairable right lines of each left line: (right line, similarity bp), by right line.
     pairable: Vec<Vec<(usize, u32)>>,
+    /// Sorted word ids of each non-trivial line in a segment, per side.
+    lwords: Vec<Vec<u32>>,
+    rwords: Vec<Vec<u32>>,
     heap: BinaryHeap<Block>,
     /// Sweeps made to repair candidates, by segment bounds. Segment bounds
     /// only change when lines are claimed, so an entry never goes stale.
@@ -1170,8 +1674,9 @@ struct Edited<'s, 'a, 'b> {
 fn edited_pass(
     ls: &mut Side<'_>,
     rs: &mut Side<'_>,
-    key_texts: &[String],
+    key_texts: &[Vec<u8>],
     check_delta: bool,
+    scan: &mut LongScan,
     out: &mut Vec<DetectedMove>,
 ) -> bool {
     let lsegs = segments(ls);
@@ -1211,23 +1716,26 @@ fn edited_pass(
         list.sort_unstable();
     }
 
-    // Grapheme ids of the non-trivial lines in segments.
-    let mut ids: HashMap<&str, u32> = HashMap::new();
-    let mut graphemes = |side: &Side<'_>, segs: &[Seg]| -> Vec<Option<Graphemes>> {
+    // Grapheme ids and words of the non-trivial lines in segments.
+    let mut ids: HashMap<Unit<'_>, u32> = HashMap::new();
+    let mut word_ids: HashMap<Unit<'_>, u32> = HashMap::new();
+    let mut graphemes = |side: &Side<'_>, segs: &[Seg]| {
         let mut out: Vec<Option<Graphemes>> = (0..side.len()).map(|_| None).collect();
+        let mut words: Vec<Vec<u32>> = vec![Vec::new(); side.len()];
         for s in segs {
             for i in s.start..s.end {
                 if side.trivial(i) {
                     continue;
                 }
-                let text = key_texts[side.key[i] as usize].as_str();
-                out[i] = Some(graphemes_of(text, &mut ids));
+                let key = key_texts[side.key[i] as usize].as_slice();
+                out[i] = Some(graphemes_of(key, &mut ids));
+                words[i] = words_of(key, &mut word_ids);
             }
         }
-        out
+        (out, words)
     };
-    let lgr = graphemes(ls, &lsegs);
-    let rgr = graphemes(rs, &rsegs);
+    let (lgr, lwords) = graphemes(ls, &lsegs);
+    let (rgr, rwords) = graphemes(rs, &rsegs);
     let num_ids = ids.len();
 
     let mut pairable: Vec<Vec<(usize, u32)>> = vec![Vec::new(); ls.len()];
@@ -1243,6 +1751,12 @@ fn edited_pass(
                     let Some(b) = b else { continue };
                     let sim = if ls.key[i] == rs.key[j] {
                         Some(FULL_BP)
+                    } else if a.long || b.long {
+                        let (ka, kb) = (
+                            &key_texts[ls.key[i] as usize],
+                            &key_texts[rs.key[j] as usize],
+                        );
+                        long_similarity(ka, kb, a, b, scan)
                     } else {
                         pair_similarity(a, b, &peq)
                     };
@@ -1264,6 +1778,8 @@ fn edited_pass(
         rs,
         check_delta,
         pairable,
+        lwords,
+        rwords,
         heap: BinaryHeap::new(),
         repairs: HashMap::new(),
         cells: 0,
@@ -1562,6 +2078,27 @@ impl Edited<'_, '_, '_> {
             return None;
         }
         let pure = l1 - l0 == r1 - r0 && is_pure(ls, rs, l0, r0, l1 - l0, self.check_delta);
+        if !pure {
+            // Word similarity: the block keeps most of its words.
+            let mut common = 0;
+            for &(i, j, _) in &pairs {
+                let (wa, wb) = (&self.lwords[i], &self.rwords[j]);
+                *steps += 1 + (wa.len() + wb.len()) as u64 / 64;
+                common += common_words(wa, wb);
+            }
+            let words: u64 = (l0..l1)
+                .filter(|&i| !ls.trivial(i))
+                .map(|i| self.lwords[i].len() as u64)
+                .chain(
+                    (r0..r1)
+                        .filter(|&j| !rs.trivial(j))
+                        .map(|j| self.rwords[j].len() as u64),
+                )
+                .sum();
+            if !enough_words(common, words) {
+                return None;
+            }
+        }
         Some(Block {
             alnum,
             pairs: pairs.len() as u64,

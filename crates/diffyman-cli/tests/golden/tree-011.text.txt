@@ -1,0 +1,6 @@
+M	docs/guide.txt
+M	latest
+A	new
+R	old/name.txt	new/name.txt
+D	old
+A	src/main.js

@@ -4,7 +4,7 @@ The normative specs for diffyman. Spec text comes first: the Rust types in `diff
 
 | File | Status | Covers |
 |---|---|---|
-| [diff-document.md](diff-document.md) | Draft, schema `0.2.0` | The Diff Document JSON: fields (including the `moves[]` shape), canonical form (RFC 8785) and `id`, positions, line handling, options, the warning table, algorithm IDs, conformance, worked example |
+| [diff-document.md](diff-document.md) | Draft, schema `0.3.0` | The Diff Document JSON: fields (including the `moves[]`, `bytes[]` and `tree` shapes), canonical form (RFC 8785) and `id`, positions, line handling, options, the warning table, algorithm IDs, conformance, worked example, type detection, the binary diff, and folders and archives |
 | [text-granularity-and-moves.md](text-granularity-and-moves.md) | Draft | How inline spans (`word`, `char`, `smart`) and moved blocks are computed, their constants, and the labeled moved-block corpus with its metrics |
 
 `diff-document.md` is the single source for every output shape, option and warning code. `text-granularity-and-moves.md` refers to it for those and only defines the algorithms. Where the two disagree, `diff-document.md` wins.

@@ -1,0 +1,29 @@
+[package]
+name = "diffyman-adapter-tree"
+description = "Folder and archive listing for diffyman: entries, content hashes and renames"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[features]
+# Walk folders on disk. Off for wasm32-unknown-unknown, which reads archives
+# from bytes only.
+fs = []
+
+[dependencies]
+sha2.workspace = true
+memchr.workspace = true
+zip.workspace = true
+flate2.workspace = true
+ruzstd.workspace = true
+ignore.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

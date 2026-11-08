@@ -1,0 +1,67 @@
+[package]
+name = "diffyman-fuzz"
+description = "cargo-fuzz targets for the diffyman engine"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/reddy-sh/diffyman"
+authors = ["Sankara Reddy Telukutla <sankara@reddy.sh>"]
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace: the fuzz targets need a nightly toolchain and sanitizer
+# flags, so the root workspace excludes this directory.
+[workspace]
+members = ["."]
+
+[lib]
+name = "diffyman_fuzz"
+path = "src/lib.rs"
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+diffyman = { path = "../crates/diffyman-engine" }
+diffyman-model = { path = "../crates/diffyman-model" }
+diffyman-algo = { path = "../crates/diffyman-algo" }
+# Same pin and features as the root workspace.
+serde_json = { version = "=1.0.154", features = ["float_roundtrip"] }
+
+[[bin]]
+name = "diff"
+path = "fuzz_targets/diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "options"
+path = "fuzz_targets/options.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jcs_roundtrip"
+path = "fuzz_targets/jcs_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "refine"
+path = "fuzz_targets/refine.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "moves"
+path = "fuzz_targets/moves.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

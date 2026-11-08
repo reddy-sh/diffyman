@@ -1,0 +1,27 @@
+[package]
+name = "diffyman-render"
+description = "Renderers for diffyman Diff Documents: unified diff, self-contained HTML report and text summary"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords = ["diff", "unified", "html", "report"]
+categories = ["text-processing"]
+
+[lib]
+name = "diffyman_render"
+
+# No filesystem, threads or clocks: the crate builds for wasm32-unknown-unknown.
+[dependencies]
+diffyman-model.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+diffyman.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

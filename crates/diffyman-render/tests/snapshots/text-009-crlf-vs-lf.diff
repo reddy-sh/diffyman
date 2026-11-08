@@ -1,0 +1,13 @@
+--- a/left.ini
++++ b/right.ini
+@@ -1,5 +1,5 @@
+-[general]
+-name = field-sensor-07
+-interval_seconds = 300
+-upload = true
+-timezone = UTC
++[general]
++name = field-sensor-07
++interval_seconds = 300
++upload = true
++timezone = UTC

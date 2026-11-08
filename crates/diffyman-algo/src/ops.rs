@@ -125,22 +125,60 @@ fn push_change(ops: &mut Vec<LineOp>, ls: usize, ll: usize, rs: usize, rl: usize
     ops.push(LineOp::change(ls, ll, rs, rl));
 }
 
+/// [`full_ops`] of a diff whose first `prefix` and last `suffix` lines match
+/// on both sides and were left out: `core` aligns the lines in between.
+/// `left_len` and `right_len` are the full line counts.
+pub fn full_ops_trimmed(
+    core: &Alignment,
+    prefix: usize,
+    suffix: usize,
+    left_len: usize,
+    right_len: usize,
+) -> Vec<LineOp> {
+    let expand = |flags: &[bool], len: usize| -> Vec<bool> {
+        let mut full = vec![false; len];
+        full[prefix..prefix + flags.len()].copy_from_slice(flags);
+        debug_assert_eq!(prefix + flags.len() + suffix, len);
+        full
+    };
+    full_ops(&Alignment {
+        removed: expand(&core.removed, left_len),
+        added: expand(&core.added, right_len),
+    })
+}
+
 /// True for a change op whose lines are all blank (empty or whitespace only),
 /// on both sides. The terminators do not matter.
 pub fn is_blank_change(op: &LineOp, left: &[&str], right: &[&str]) -> bool {
+    is_blank_change_by(op, |i| left[i], |j| right[j])
+}
+
+/// [`is_blank_change`] with line contents looked up by 0-based line number.
+pub fn is_blank_change_by<'t>(
+    op: &LineOp,
+    left: impl Fn(usize) -> &'t str,
+    right: impl Fn(usize) -> &'t str,
+) -> bool {
     op.kind.is_change()
-        && left[op.left_start..op.left_start + op.left_len]
-            .iter()
-            .chain(&right[op.right_start..op.right_start + op.right_len])
-            .all(|line| crate::key::is_blank(line))
+        && (op.left_start..op.left_start + op.left_len).all(|i| crate::key::is_blank(left(i)))
+        && (op.right_start..op.right_start + op.right_len).all(|j| crate::key::is_blank(right(j)))
 }
 
 /// `ignore.blankLines` (Diff Document spec §7.3 step 3): turns every change op
 /// whose lines are all blank into an [`OpKind::Ignored`] op. `left` and
 /// `right` are the line contents without terminators.
 pub fn ignore_blank_changes(ops: &mut [LineOp], left: &[&str], right: &[&str]) {
+    ignore_blank_changes_by(ops, |i| left[i], |j| right[j]);
+}
+
+/// [`ignore_blank_changes`] with line contents looked up by 0-based line number.
+pub fn ignore_blank_changes_by<'t>(
+    ops: &mut [LineOp],
+    left: impl Fn(usize) -> &'t str,
+    right: impl Fn(usize) -> &'t str,
+) {
     for op in ops.iter_mut() {
-        if is_blank_change(op, left, right) {
+        if is_blank_change_by(op, &left, &right) {
             op.kind = OpKind::Ignored;
         }
     }

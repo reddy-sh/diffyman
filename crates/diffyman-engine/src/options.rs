@@ -7,8 +7,8 @@
 //! `limit-exceeded` error instead (spec §9).
 
 use diffyman_model::{
-    Algorithm, Granularity, IgnoreOptions, MAX_CONTEXT, Options, OptionsInput, PositionEncoding,
-    WhitespaceMode,
+    Adapter, Algorithm, Granularity, IgnoreOptions, MAX_CHILD_BUDGET, MAX_CONTEXT, MAX_TREE_DEPTH,
+    Options, OptionsInput, PositionEncoding, TreeOptions, WhitespaceMode,
 };
 use serde_json::Value;
 
@@ -27,8 +27,10 @@ pub fn parse_options(json: &str) -> Result<Options, Error> {
 /// Parses and resolves an options JSON value.
 pub fn parse_options_value(value: Value) -> Result<Options, Error> {
     check_object(&value, "options")?;
-    if let Some(ignore) = value.get("ignore") {
-        check_object(ignore, "ignore")?;
+    for key in ["ignore", "tree"] {
+        if let Some(inner) = value.get(key) {
+            check_object(inner, key)?;
+        }
     }
     let input: OptionsInput =
         serde_json::from_value(value).map_err(|e| Error::InvalidOptions(e.to_string()))?;
@@ -76,9 +78,43 @@ pub fn resolve_options(input: &OptionsInput) -> Result<Options, Error> {
             .position_encoding
             .unwrap_or(defaults.position_encoding),
         detect_moves: input.detect_moves.unwrap_or(defaults.detect_moves),
+        adapter: input.adapter.unwrap_or(defaults.adapter),
+        tree: resolve_tree(input.tree.clone().unwrap_or_default(), &defaults.tree)?,
     };
     validate_options(&options)?;
     Ok(options)
+}
+
+/// Fills the `tree` defaults and checks the integer ranges.
+fn resolve_tree(
+    input: diffyman_model::TreeOptionsInput,
+    defaults: &TreeOptions,
+) -> Result<TreeOptions, Error> {
+    let bounded = |value: Option<u64>, default: u32, max: u32, what: &str| match value {
+        None => Ok(default),
+        Some(v) => u32::try_from(v)
+            .ok()
+            .filter(|v| *v <= max)
+            .ok_or_else(|| Error::InvalidOptions(format!("{what} must be 0 to {max}"))),
+    };
+    Ok(TreeOptions {
+        follow_symlinks: input.follow_symlinks.unwrap_or(defaults.follow_symlinks),
+        ignore_files: input.ignore_files.unwrap_or(defaults.ignore_files),
+        exclude: input.exclude.unwrap_or_default(),
+        detect_moves: input.detect_moves.unwrap_or(defaults.detect_moves),
+        max_depth: bounded(
+            input.max_depth,
+            defaults.max_depth,
+            MAX_TREE_DEPTH,
+            "tree.maxDepth",
+        )?,
+        child_budget: bounded(
+            input.child_budget,
+            defaults.child_budget,
+            MAX_CHILD_BUDGET,
+            "tree.childBudget",
+        )?,
+    })
 }
 
 /// Checks resolved options with the same rules as the JSON path: an `Unknown`
@@ -100,9 +136,22 @@ pub fn validate_options(options: &Options) -> Result<(), Error> {
     if options.position_encoding == PositionEncoding::Unknown {
         return unknown("positionEncoding");
     }
+    if options.adapter == Adapter::Unknown {
+        return unknown("adapter");
+    }
     if options.context > MAX_CONTEXT {
         return Err(Error::InvalidOptions(format!(
             "context must be 0 to {MAX_CONTEXT}"
+        )));
+    }
+    if options.tree.max_depth > MAX_TREE_DEPTH {
+        return Err(Error::InvalidOptions(format!(
+            "tree.maxDepth must be 0 to {MAX_TREE_DEPTH}"
+        )));
+    }
+    if options.tree.child_budget > MAX_CHILD_BUDGET {
+        return Err(Error::InvalidOptions(format!(
+            "tree.childBudget must be 0 to {MAX_CHILD_BUDGET}"
         )));
     }
     Ok(())
@@ -120,6 +169,25 @@ mod tests {
         assert_eq!(o.context, 1);
         assert!(o.ignore.case);
         assert_eq!(o.ignore.whitespace, WhitespaceMode::None);
+        assert_eq!(o.adapter, Adapter::Auto);
+        assert_eq!(o.tree, TreeOptions::default());
+        let t = parse_options(
+            r#"{"tree": {"exclude": ["b", "a"], "maxDepth": 16, "childBudget": 0, "detectMoves": false}}"#,
+        )
+        .unwrap()
+        .tree;
+        assert_eq!(t.exclude, ["b", "a"]);
+        assert_eq!((t.max_depth, t.child_budget), (16, 0));
+        assert!(!t.detect_moves && !t.follow_symlinks && !t.ignore_files);
+        for (text, adapter) in [
+            ("auto", Adapter::Auto),
+            ("text", Adapter::Text),
+            ("binary", Adapter::Binary),
+            ("tree", Adapter::Tree),
+        ] {
+            let json = format!(r#"{{"adapter": "{text}"}}"#);
+            assert_eq!(parse_options(&json).unwrap().adapter, adapter);
+        }
     }
 
     #[test]
@@ -131,6 +199,8 @@ mod tests {
             r#"{"granularity": "sentence"}"#,
             r#"{"positionEncoding": "utf-32"}"#,
             r#"{"ignore": {"whitespace": "some"}}"#,
+            r#"{"adapter": "hex"}"#,
+            r#"{"adapter": null}"#,
             r#"{"context": -1}"#,
             r#"{"context": 2147483648}"#,
             r#"{"context": 1.5}"#,
@@ -139,6 +209,17 @@ mod tests {
             r#"{"ignore": null}"#,
             r#"{"ignore": {"case": null}}"#,
             r#"{"ignore": []}"#,
+            r#"{"adapter": "folder"}"#,
+            r#"{"tree": null}"#,
+            r#"{"tree": []}"#,
+            r#"{"tree": {"follow": true}}"#,
+            r#"{"tree": {"followSymlinks": null}}"#,
+            r#"{"tree": {"exclude": "*.log"}}"#,
+            r#"{"tree": {"exclude": [1]}}"#,
+            r#"{"tree": {"maxDepth": 17}}"#,
+            r#"{"tree": {"maxDepth": -1}}"#,
+            r#"{"tree": {"childBudget": 2147483648}}"#,
+            r#"{"tree": {"detectMoves": "yes"}}"#,
             "[]",
             "3",
             "{",
@@ -183,11 +264,29 @@ mod tests {
                 ..Options::default()
             },
             Options {
+                adapter: Adapter::Unknown,
+                ..Options::default()
+            },
+            Options {
                 context: MAX_CONTEXT + 1,
                 ..Options::default()
             },
             Options {
                 context: u32::MAX,
+                ..Options::default()
+            },
+            Options {
+                tree: TreeOptions {
+                    max_depth: MAX_TREE_DEPTH + 1,
+                    ..TreeOptions::default()
+                },
+                ..Options::default()
+            },
+            Options {
+                tree: TreeOptions {
+                    child_budget: MAX_CHILD_BUDGET + 1,
+                    ..TreeOptions::default()
+                },
                 ..Options::default()
             },
             Options::unset(),

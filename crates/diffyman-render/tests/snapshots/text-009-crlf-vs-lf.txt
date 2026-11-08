@@ -1,0 +1,4 @@
+left.ini -> right.ini: different, 1 change in 1 hunk, +5 -5 lines, 0% similar
+  left:     5 lines, 85 bytes, LF
+  right:    5 lines, 90 bytes, CRLF
+  lines:    5 added, 5 removed, 0 unchanged

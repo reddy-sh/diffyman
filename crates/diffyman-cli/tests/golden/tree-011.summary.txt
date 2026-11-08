@@ -1,0 +1,4 @@
+left.zip -> right.zip: different, 6 changed entries (2 added, 1 removed, 2 modified, 1 moved), 40% similar
+  left:     application/zip, 7 entries, 556 bytes
+  right:    application/zip, 8 entries, 597 bytes
+  entries:  2 added, 1 removed, 2 modified, 1 moved, 0 type changes, 3 unchanged

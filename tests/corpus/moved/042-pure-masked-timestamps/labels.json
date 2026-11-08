@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 6,
+        "count": 3
+      },
+      "right": {
+        "start": 2,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A golden log was regenerated: the cleanup steps now run before the import, and every timestamp is new. ignore.regex masks the timestamps, so the line diff matches the import and report lines, and the cleanup lines have equal move keys under the same masks (moves spec 4.4): a pure move, although no line is equal byte for byte."
+}

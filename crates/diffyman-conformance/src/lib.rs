@@ -1,8 +1,9 @@
 //! Golden-corpus conformance runner (Diff Document spec §3; moves spec §5).
 //!
 //! Each case is a folder `tests/corpus/<group>/<case>/` with `left.*`,
-//! `right.*`, `options.json` and `expected.json`; the groups are `text` and
-//! `moved`. For every case the runner diffs the inputs (passing the file names,
+//! `right.*` (or `left/` and `right/` folders), `options.json` and
+//! `expected.json`; the groups are `text`,
+//! `moved`, `binary` and `tree`. For every case the runner diffs the inputs (passing the file names,
 //! such as `left.txt`, as input names), removes the top-level `provenance` key
 //! and compares the RFC 8785 bytes with `expected.json`, which is canonicalized
 //! the same way first (so it may be pretty-printed).
@@ -26,7 +27,7 @@ use diffyman::{Input, model};
 use serde_json::Value;
 
 /// Groups of cases, in run order.
-pub const GROUPS: [&str; 2] = ["text", "moved"];
+pub const GROUPS: [&str; 4] = ["text", "moved", "binary", "tree"];
 
 /// How a case ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +115,7 @@ pub fn run_case(name: &str, dir: &Path, options: &RunOptions) -> CaseResult {
     result
 }
 
+/// The input `stem.*` (a file) or `stem/` (a folder, for `tree` cases).
 fn find_input(dir: &Path, stem: &str) -> Result<PathBuf, String> {
     let prefix = format!("{stem}.");
     let mut found: Vec<PathBuf> = fs::read_dir(dir)
@@ -121,20 +123,23 @@ fn find_input(dir: &Path, stem: &str) -> Result<PathBuf, String> {
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| {
-            p.is_file()
-                && p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with(&prefix))
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            (p.is_file() && name.starts_with(&prefix)) || (p.is_dir() && name == stem)
         })
         .collect();
     found.sort();
     match found.len() {
         1 => Ok(found.remove(0)),
-        0 => Err(format!("no {stem}.* file")),
-        _ => Err(format!("more than one {stem}.* file")),
+        0 => Err(format!("no {stem}.* file or {stem}/ folder")),
+        _ => Err(format!("more than one {stem}.* file or {stem}/ folder")),
     }
 }
 
-/// Diffs a case's inputs with its options.
+/// Diffs a case's inputs with its options. A folder input goes through
+/// [`diffyman::diff_paths`], whose names are the folder names.
 pub fn diff_case(dir: &Path) -> Result<DiffDocument, String> {
     let left = find_input(dir, "left")?;
     let right = find_input(dir, "right")?;
@@ -143,6 +148,10 @@ pub fn diff_case(dir: &Path) -> Result<DiffDocument, String> {
         fs::read_to_string(&options_path).map_err(|e| format!("options.json: {e}"))?;
     let options =
         diffyman::parse_options(&options_text).map_err(|e| format!("options.json: {e}"))?;
+    if left.is_dir() || right.is_dir() {
+        return diffyman::diff_paths(&left, &right, &options, &diffyman::Settings::default())
+            .map_err(|e| e.to_string());
+    }
     let left_bytes = fs::read(&left).map_err(|e| e.to_string())?;
     let right_bytes = fs::read(&right).map_err(|e| e.to_string())?;
     let left_name = file_name(&left);

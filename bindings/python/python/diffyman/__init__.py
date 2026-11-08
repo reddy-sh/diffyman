@@ -1,6 +1,6 @@
 """diffyman: compare two inputs and get one canonical JSON Diff Document.
 
-The result follows ``docs/spec/diff-document.md`` (schema ``0.2.0``). The JSON
+The result follows ``docs/spec/diff-document.md`` (schema ``0.3.0``). The JSON
 returned by :func:`diff` is byte-identical to ``diffyman diff --json`` and to
 every other binding once the top-level ``provenance`` key is removed.
 
@@ -16,7 +16,8 @@ Inputs may be:
   file name; wrap paths in :class:`pathlib.Path`.
 - ``os.PathLike`` (for example :class:`pathlib.Path`): the file is read as
   bytes, and its final path component becomes the input name unless
-  ``left_name``/``right_name`` is given.
+  ``left_name``/``right_name`` is given. Two paths of which one is a folder
+  are compared as folders and archives (a tree document).
 
 Options may be a mapping (serialized to JSON), a JSON string, or ``None`` for
 the defaults. Invalid options raise :class:`DiffymanError` (a ``ValueError``)
@@ -32,6 +33,7 @@ from typing import Any, Union
 
 from ._native import ENGINE_VERSION, SCHEMA_VERSION, DiffymanError
 from ._native import diff as _native_diff
+from ._native import diff_paths as _native_diff_paths
 
 __all__ = [
     "ENGINE_VERSION",
@@ -71,6 +73,13 @@ def _load(source: Source, name: str | None) -> tuple[bytes, str | None]:
     )
 
 
+def _is_folder_pair(left: Source, right: Source) -> bool:
+    """Both inputs are paths, and at least one is a folder."""
+    if not (isinstance(left, os.PathLike) and isinstance(right, os.PathLike)):
+        return False
+    return os.path.isdir(os.fspath(left)) or os.path.isdir(os.fspath(right))
+
+
 def _options_json(options: Options) -> str:
     if options is None:
         return ""
@@ -96,7 +105,18 @@ def diff(
 
     ``left_name`` and ``right_name`` set ``left.name`` and ``right.name``, which
     are part of the document ``id``. Only the final path component is kept.
+
+    When both inputs are paths and one of them is a folder, the result is a
+    tree document (folders and archives, diff-document.md section 19); the
+    names are then the folders' own names and ``left_name``/``right_name``
+    must not be given.
     """
+    if _is_folder_pair(left, right):
+        if left_name is not None or right_name is not None:
+            raise TypeError("left_name and right_name cannot be used with folders")
+        return _native_diff_paths(
+            os.fspath(left), os.fspath(right), _options_json(options)  # type: ignore[arg-type]
+        )
     left_bytes, left_name = _load(left, left_name)
     right_bytes, right_name = _load(right, right_name)
     return _native_diff(left_bytes, right_bytes, _options_json(options), left_name, right_name)

@@ -1,0 +1,26 @@
+{
+  "algorithm": "histogram",
+  "granularity": "line",
+  "ignore": {
+    "whitespace": "none",
+    "case": false,
+    "blankLines": false,
+    "regex": []
+  },
+  "context": 3,
+  "positionEncoding": "utf-8",
+  "detectMoves": false,
+  "adapter": "auto",
+  "tree": {
+    "followSymlinks": false,
+    "ignoreFiles": false,
+    "exclude": [
+      "*.log",
+      "build/",
+      "!keep.log"
+    ],
+    "detectMoves": true,
+    "maxDepth": 3,
+    "childBudget": 16777216
+  }
+}

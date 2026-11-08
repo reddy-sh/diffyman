@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "The [limits] section was removed and written again at the end with a new value for every key. Each value line keeps its key, so line by line the two blocks look alike (block similarity above 0.9), but they share only their structure: one word in two changed on every value line. The word similarity rule of moves spec 4.5 rejects it; a section that keeps most of its values still moves."
+}

@@ -1,0 +1,4 @@
+left.txt -> right.txt: error: invalid-utf8 (right)
+  left:     3 lines, 59 bytes, LF, no final newline
+  right:    not UTF-8, 58 bytes
+  warnings: no-newline-at-eof (left), invalid-utf8 (right)

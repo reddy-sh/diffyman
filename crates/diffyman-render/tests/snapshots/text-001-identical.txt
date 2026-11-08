@@ -1,0 +1,4 @@
+left.txt -> right.txt: identical
+  left:     7 lines, 220 bytes, LF
+  right:    7 lines, 220 bytes, LF
+  lines:    0 added, 0 removed, 7 unchanged

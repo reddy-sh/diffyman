@@ -1,7 +1,5 @@
 use super::*;
-use crate::key::Interner;
-use crate::line_diff::{self, LineAlgorithm};
-use crate::ops::{self, OpKind};
+use crate::key::{Interner, KeyOptions};
 
 /// Full op list of a histogram line diff over exact line contents.
 fn diff_ops(left: &[&str], right: &[&str]) -> Vec<LineOp> {
@@ -18,12 +16,26 @@ fn diff_ops(left: &[&str], right: &[&str]) -> Vec<LineOp> {
     ops::full_ops(&alignment)
 }
 
-fn detect_with(left: &[&str], right: &[&str], options: MoveOptions) -> Moves {
-    detect_moves(left, right, &diff_ops(left, right), &options)
+/// The key builder of `whitespace`, `ignore_case` and `regex`.
+fn keys(whitespace: WhitespaceMode, ignore_case: bool, regex: &[&str]) -> KeyBuilder {
+    KeyBuilder::new(&KeyOptions {
+        whitespace,
+        ignore_case,
+        regex: regex.iter().map(|r| (*r).to_owned()).collect(),
+    })
+    .unwrap()
+}
+
+fn plain() -> KeyBuilder {
+    keys(WhitespaceMode::None, false, &[])
+}
+
+fn detect_with(left: &[&str], right: &[&str], options: &KeyBuilder) -> Moves {
+    detect_moves(left, right, &diff_ops(left, right), options)
 }
 
 fn detect(left: &[&str], right: &[&str]) -> Moves {
-    detect_with(left, right, MoveOptions::default())
+    detect_with(left, right, &plain())
 }
 
 /// (left start, left len, right start, right len, kind) per move, 0-based.
@@ -149,11 +161,7 @@ fn copies_and_in_place_rewrites_are_not_moves() {
     ];
     let ops = diff_ops(&left, &right);
     assert!(ops.iter().any(|o| o.kind == OpKind::Replace));
-    assert!(
-        detect_moves(&left, &right, &ops, &MoveOptions::default())
-            .moves
-            .is_empty()
-    );
+    assert!(detect_moves(&left, &right, &ops, &plain()).moves.is_empty());
 }
 
 #[test]
@@ -196,10 +204,7 @@ fn indentation_change_is_allowed_when_constant() {
     let m = detect(&left, &right_mixed);
     assert!(m.moves.iter().all(|mv| mv.kind != MoveKind::Pure), "{m:?}");
     // ... but whitespace "change" does not check the delta.
-    let change = MoveOptions {
-        whitespace: WhitespaceMode::Change,
-        ignore_case: false,
-    };
+    let change = keys(WhitespaceMode::Change, false, &[]);
     let ops = diff_ops(&left, &right_mixed);
     let m = detect_moves(&left, &right_mixed, &ops, &change);
     assert_eq!(spans(&m), [(1, 2, 2, 2, MoveKind::Pure)]);
@@ -225,11 +230,8 @@ fn case_folding_shapes_the_key() {
             .iter()
             .all(|m| m.kind != MoveKind::Pure)
     );
-    let fold = MoveOptions {
-        whitespace: WhitespaceMode::None,
-        ignore_case: true,
-    };
-    let m = detect_with(&left, &right, fold);
+    let fold = keys(WhitespaceMode::None, true, &[]);
+    let m = detect_with(&left, &right, &fold);
     assert_eq!(spans(&m), [(0, 2, 2, 2, MoveKind::Pure)]);
 }
 
@@ -560,7 +562,7 @@ fn too_many_changed_lines_skip_detection() {
         right_start: 0,
         right_len: 0,
     }];
-    let m = detect_moves(&left, &[], &ops, &MoveOptions::default());
+    let m = detect_moves(&left, &[], &ops, &plain());
     assert!(m.skipped_limit);
     assert!(m.moves.is_empty());
 }
@@ -670,4 +672,409 @@ fn many_edited_blocks_in_one_op_pair() {
             .iter()
             .all(|mv| mv.kind == MoveKind::Edited && mv.left_len == 3)
     );
+}
+
+/// Full op list of a histogram line diff over the comparison keys of `keys`
+/// (every line ends with LF).
+fn diff_ops_keyed(left: &[&str], right: &[&str], keys: &KeyBuilder) -> Vec<LineOp> {
+    let mut interner = Interner::new();
+    let mut tokens = |side: &[&str]| -> Vec<u32> {
+        side.iter()
+            .map(|s| interner.intern(keys.key(s, crate::lines::Terminator::Lf)))
+            .collect()
+    };
+    let lt = tokens(left);
+    let rt = tokens(right);
+    let alignment = line_diff::align(LineAlgorithm::Histogram, &lt, &rt, interner.num_tokens());
+    ops::full_ops(&alignment)
+}
+
+const LOG_STABLE: [&str; 3] = [
+    "scheduler: next run in five minutes",
+    "health check passed for every node",
+    "metrics endpoint listening on port 9100",
+];
+
+#[test]
+fn regex_masks_shape_the_move_key() {
+    // A log block that moved and was written again with new timestamps.
+    let left = [
+        "2026-03-14T08:00:01Z worker started pid=4412",
+        "2026-03-14T08:00:02Z loading queue configuration",
+        "2026-03-14T08:00:03Z connected to broker queue.internal",
+        LOG_STABLE[0],
+        LOG_STABLE[1],
+        LOG_STABLE[2],
+    ];
+    let right = [
+        LOG_STABLE[0],
+        LOG_STABLE[1],
+        LOG_STABLE[2],
+        "2026-03-15T19:42:51Z worker started pid=4412",
+        "2026-03-15T19:42:52Z loading queue configuration",
+        "2026-03-15T19:42:58Z connected to broker queue.internal",
+    ];
+    // Unmasked, the timestamps keep every pair below the seed similarity.
+    assert!(detect(&left, &right).moves.is_empty());
+    let masked = keys(
+        WhitespaceMode::None,
+        false,
+        &[r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"],
+    );
+    let ops = diff_ops_keyed(&left, &right, &masked);
+    let m = detect_moves(&left, &right, &ops, &masked);
+    assert_eq!(spans(&m), [(0, 3, 3, 3, MoveKind::Pure)]);
+    // A masked value is still a value: a line without the timestamp is not
+    // the same line.
+    let mut right_missing = right;
+    right_missing[4] = "loading queue configuration";
+    let ops = diff_ops_keyed(&left, &right_missing, &masked);
+    let m = detect_moves(&left, &right_missing, &ops, &masked);
+    assert!(!spans(&m).contains(&(0, 3, 3, 3, MoveKind::Pure)), "{m:?}");
+}
+
+/// A prose line of `words` words, longer than the whole-line limit.
+fn long_line(words: usize, typo: bool) -> String {
+    let mut s: Vec<String> = (0..words).map(|i| format!("term{i}")).collect();
+    if typo {
+        s[words / 2] = format!("tewm{}", words / 2);
+    }
+    s.join(" ")
+}
+
+#[test]
+fn long_lines_with_small_edits_pair() {
+    let long_l = long_line(80, false);
+    let long_r = long_line(80, true);
+    assert!(long_l.len() > MOVE_EDIT_MAX_LINE_GRAPHEMES);
+    let left = [
+        "## Shipping rules",
+        long_l.as_str(),
+        "Ask the warehouse lead when unsure.",
+        "stays in place one",
+        "stays in place two",
+        "stays in place three",
+    ];
+    let right = [
+        "stays in place one",
+        "stays in place two",
+        "stays in place three",
+        "## Shipping rules",
+        long_r.as_str(),
+        "Ask the warehouse lead when unsure.",
+    ];
+    let m = detect(&left, &right);
+    assert_eq!(spans(&m), [(0, 3, 3, 3, MoveKind::Edited)]);
+    assert!(!m.skipped_limit);
+    // 559 graphemes with one substitution: floor(10000 * 558 / 559).
+    let sim = m.moves[0].similarity_bp;
+    assert!(sim > 9_900, "{sim}");
+}
+
+#[test]
+fn long_line_similarity_is_the_full_distance() {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = |n: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % n
+    };
+    let alphabet = ['a', 'b', 'c', ' ', 'é', '猫'];
+    for round in 0..200 {
+        let len = 257 + usize::try_from(next(400)).unwrap();
+        let a: String = (0..len)
+            .map(|_| alphabet[usize::try_from(next(6)).unwrap()])
+            .collect();
+        let mut b: Vec<char> = a.chars().collect();
+        for _ in 0..next(if round % 5 == 0 { 120 } else { 6 }) {
+            let at = usize::try_from(next(b.len() as u64)).unwrap();
+            match next(3) {
+                0 => b[at] = alphabet[usize::try_from(next(6)).unwrap()],
+                1 => b.insert(at, 'x'),
+                _ => {
+                    b.remove(at);
+                }
+            }
+        }
+        let b: String = b.into_iter().collect();
+        let mut ids = HashMap::new();
+        let (ka, kb) = (a.as_bytes(), b.as_bytes());
+        let ga = graphemes_of(ka, &mut ids);
+        let gb = graphemes_of(kb, &mut ids);
+        let ua: Vec<u32> = units(ka).map(|u| ids[&u.1]).collect();
+        let ub: Vec<u32> = units(kb).map(|u| ids[&u.1]).collect();
+        let d = naive(&ua, &ub);
+        let m = ua.len().max(ub.len());
+        let expected = (d <= 2 * m / 5).then(|| u32::try_from(10_000 * (m - d) / m).unwrap());
+        let mut scan = LongScan::default();
+        let got = long_similarity(ka, kb, &ga, &gb, &mut scan);
+        // Remainders here are far below MOVE_EDIT_MAX_LONG_REMAINDER, so the
+        // result is exact.
+        assert_eq!(got, expected, "round {round}");
+        assert!(!scan.exhausted);
+    }
+    // A remainder over the limit does not pair, however similar the lines.
+    let a = "ab".repeat(MOVE_EDIT_MAX_LONG_REMAINDER);
+    let b = format!("x{}x", &a[1..a.len() - 1]);
+    let mut ids = HashMap::new();
+    let (ga, gb) = (
+        graphemes_of(a.as_bytes(), &mut ids),
+        graphemes_of(b.as_bytes(), &mut ids),
+    );
+    let mut scan = LongScan::default();
+    assert_eq!(
+        long_similarity(a.as_bytes(), b.as_bytes(), &ga, &gb, &mut scan),
+        None
+    );
+}
+
+#[test]
+fn long_line_work_is_bounded() {
+    // 300 x 300 pairs of 3000-grapheme lines that pass the length and
+    // histogram filters but differ at both ends, so every pair would need a
+    // full distance. The long-line budget stops the comparisons and says so.
+    let base: String = (0..3_000u32)
+        .map(|i| char::from_u32(u32::from('a') + i % 26).unwrap())
+        .collect();
+    let left_owned: Vec<String> = (0..300).map(|i| format!("L{i:03}{base}L")).collect();
+    let right_owned: Vec<String> = (0..300).map(|i| format!("R{i:03}{base}R")).collect();
+    let mut left: Vec<&str> = left_owned.iter().map(String::as_str).collect();
+    left.push("anchor line in place");
+    let mut right: Vec<&str> = vec!["anchor line in place"];
+    right.extend(right_owned.iter().map(String::as_str));
+    let start = std::time::Instant::now();
+    let m = detect(&left, &right);
+    assert!(m.skipped_limit);
+    assert!(start.elapsed().as_secs() < 30, "{:?}", start.elapsed());
+}
+
+#[test]
+fn whole_file_terminator_change_keeps_moves() {
+    // Under whitespace "none" a file converted from LF to CRLF is one
+    // replace op. Its move-key alignment keeps the in-place lines out and
+    // still finds the block that moved.
+    let left = lines(&format!(
+        "import json\n\n{PARSE}\n\n{OTHER}\n\nprint('done')\n"
+    ));
+    let right = lines(&format!(
+        "import json\n\n{OTHER}\n\n{PARSE}\n\nprint('done')\n"
+    ));
+    let all = [LineOp {
+        kind: OpKind::Replace,
+        left_start: 0,
+        left_len: left.len(),
+        right_start: 0,
+        right_len: right.len(),
+    }];
+    let m = detect_moves(&left, &right, &all, &plain());
+    assert_eq!(m.moves.len(), 1, "{m:?}");
+    let mv = m.moves[0];
+    assert_eq!((mv.kind, mv.left_len), (MoveKind::Pure, 3));
+    assert_eq!(left[mv.left_start], "def main():");
+    assert_eq!(right[mv.right_start], "def main():");
+    // An in-place reindent inside one replace op is not a move.
+    let left = [
+        "def run(jobs):",
+        "for job in jobs:",
+        "    job.start(now)",
+        "    job.wait(forever)",
+    ];
+    let right = [
+        "def run(jobs):",
+        "  for job in jobs:",
+        "      job.start(now)",
+        "      job.wait(forever)",
+    ];
+    let ops = diff_ops(&left, &right);
+    assert!(detect_moves(&left, &right, &ops, &plain()).moves.is_empty());
+}
+
+#[test]
+fn structure_alone_is_not_an_edited_move() {
+    let section = |values: [&str; 4]| -> Vec<String> {
+        vec![
+            "[limits]".to_owned(),
+            format!("max_connections = {}", values[0]),
+            format!("max_requests = {}", values[1]),
+            format!("timeout_ms = {}", values[2]),
+            format!("retry_count = {}", values[3]),
+        ]
+    };
+    let stable = ["[server]", "host = 0.0.0.0", "port = 8443", "workers = 8"];
+    let build = |first: bool, block: &[String]| -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        if first {
+            out.extend(block.iter().cloned());
+        }
+        out.extend(stable.iter().map(|s| (*s).to_owned()));
+        if !first {
+            out.extend(block.iter().cloned());
+        }
+        out
+    };
+    let left_owned = build(true, &section(["100", "2000", "1500", "3"]));
+    let left: Vec<&str> = left_owned.iter().map(String::as_str).collect();
+    // Every value changed: the lines share only their keys.
+    let right_owned = build(false, &section(["250", "5000", "3000", "5"]));
+    let right: Vec<&str> = right_owned.iter().map(String::as_str).collect();
+    assert!(detect(&left, &right).moves.is_empty());
+    // Two values changed: the whole section is still found as moved (a pure
+    // piece above the first changed line, an edited block from there on).
+    let right_owned = build(false, &section(["100", "4000", "3000", "3"]));
+    let right: Vec<&str> = right_owned.iter().map(String::as_str).collect();
+    let m = detect(&left, &right);
+    assert_eq!(
+        m.moves.iter().map(|mv| mv.left_len).sum::<usize>(),
+        5,
+        "{m:?}"
+    );
+    assert!(m.moves.iter().any(|mv| mv.kind == MoveKind::Edited));
+}
+
+#[test]
+fn key_pieces_split_from_both_ends() {
+    let builder = keys(WhitespaceMode::None, false, &[r"\d+", "x+"]);
+    let mut key = Vec::new();
+    builder.move_key_into("  a12bxx\tc 7", &mut key);
+    let forward: Vec<(usize, Unit<'_>)> = pieces(&key).collect();
+    let mut backward: Vec<(usize, Unit<'_>)> = pieces(&key).rev().collect();
+    backward.reverse();
+    assert_eq!(forward, backward);
+    assert_eq!(
+        forward.iter().map(|p| p.1).collect::<Vec<_>>(),
+        [
+            Unit::Text("a"),
+            Unit::Mask(0),
+            Unit::Text("b"),
+            Unit::Mask(1),
+            Unit::Text("\tc "),
+            Unit::Mask(0),
+        ]
+    );
+    let forward: Vec<_> = units(&key).collect();
+    let mut backward: Vec<_> = units(&key).rev().collect();
+    backward.reverse();
+    assert_eq!(forward, backward);
+    assert_eq!(forward.len(), 8);
+}
+
+/// Detection reads only the lines of change ops: a long unchanged run is
+/// one gap line per side, whatever its length.
+#[test]
+fn compact_lines_follow_the_changed_lines() {
+    let op = |kind, left_start, left_len, right_start, right_len| LineOp {
+        kind,
+        left_start,
+        left_len,
+        right_start,
+        right_len,
+    };
+    let n = 10_000_000;
+    let ops = [
+        op(OpKind::Equal, 0, n, 0, n),
+        op(OpKind::Replace, n, 1, n, 1),
+        op(OpKind::Equal, n + 1, n, n + 1, n),
+        op(OpKind::Ignored, 2 * n + 1, 0, 2 * n + 1, 3),
+        op(OpKind::Insert, 2 * n + 1, 0, 2 * n + 4, 2),
+        op(OpKind::Ignored, 2 * n + 1, 2, 2 * n + 6, 0),
+        op(OpKind::Equal, 2 * n + 3, 5, 2 * n + 6, 5),
+    ];
+    let compact = Compact::new(&ops);
+    assert_eq!(compact.left, [GAP_LINE, n, GAP_LINE]);
+    assert_eq!(
+        compact.right,
+        [GAP_LINE, n, GAP_LINE, 2 * n + 4, 2 * n + 5, GAP_LINE]
+    );
+    let lens: Vec<(usize, usize, usize, usize)> = compact
+        .ops
+        .iter()
+        .map(|o| (o.left_start, o.left_len, o.right_start, o.right_len))
+        .collect();
+    assert_eq!(
+        lens,
+        [
+            (0, 1, 0, 1),
+            (1, 1, 1, 1),
+            (2, 1, 2, 1),
+            (3, 0, 3, 2),
+            (3, 0, 5, 1)
+        ]
+    );
+}
+
+/// The compact lines give exactly the moves of the whole files, mapped
+/// back to file lines, on random files with moved, edited and copied
+/// blocks between long unchanged runs.
+#[test]
+fn compact_detection_matches_whole_files() {
+    let mut state = 0x2545_F491_4F6C_DD1D_u64;
+    let mut next = |bound: usize| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        usize::try_from(state % bound as u64).unwrap()
+    };
+    let words = [
+        "alpha", "beta", "gamma", "delta", "total", "price", "count", "value", "return", "let",
+        "{", "}", "",
+    ];
+    let (mut found, mut edited) = (0, 0);
+    for round in 0..40 {
+        let mut blocks: Vec<Vec<String>> = (0..8)
+            .map(|b| {
+                (0..2 + next(6))
+                    .map(|i| {
+                        let mut line = format!("    b{b} l{i}");
+                        for _ in 0..next(6) {
+                            line.push(' ');
+                            line.push_str(words[next(words.len())]);
+                        }
+                        line
+                    })
+                    .collect()
+            })
+            .collect();
+        let unchanged = |tag: usize, len: usize| -> Vec<String> {
+            (0..len).map(|i| format!("ctx {round} {tag} {i}")).collect()
+        };
+        let mut left = Vec::new();
+        for (b, block) in blocks.iter().enumerate() {
+            left.extend(unchanged(b, next(40)));
+            left.extend(block.iter().cloned());
+        }
+        // Right: blocks in another order, some lines edited, one dropped.
+        for block in &mut blocks {
+            if next(3) == 0 {
+                let at = next(block.len());
+                block[at].push_str(" edited");
+            }
+        }
+        let mut order: Vec<usize> = (0..blocks.len()).collect();
+        for i in (1..order.len()).rev() {
+            order.swap(i, next(i + 1));
+        }
+        let mut right = Vec::new();
+        for (k, &b) in order.iter().enumerate() {
+            right.extend(unchanged(k, next(40)));
+            if k != 3 {
+                right.extend(blocks[b].iter().cloned());
+            }
+        }
+        let left = lines(&(left.join("\n") + "\n"));
+        let right = lines(&(right.join("\n") + "\n"));
+        let ops = diff_ops(&left, &right);
+        for builder in [plain(), keys(WhitespaceMode::All, true, &[r"\d+"])] {
+            let whole = super::detect(&left, &right, &ops, &builder);
+            let compact = detect_moves(&left, &right, &ops, &builder);
+            assert_eq!(compact, whole, "round {round}");
+            found += whole.moves.len();
+            edited += whole
+                .moves
+                .iter()
+                .filter(|m| m.kind == MoveKind::Edited)
+                .count();
+        }
+    }
+    assert!(found > 100 && edited > 10, "{found} moves, {edited} edited");
 }

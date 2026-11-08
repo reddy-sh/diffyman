@@ -23,3 +23,12 @@ insert_final_newline = unset
 trim_trailing_whitespace = unset
 indent_style = unset
 indent_size = unset
+
+# Renderer snapshots and CLI golden outputs are exact output bytes.
+[{crates/diffyman-render/tests/snapshots/**,crates/diffyman-cli/tests/golden/**}]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+indent_style = unset
+indent_size = unset

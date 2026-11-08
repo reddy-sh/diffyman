@@ -16,14 +16,19 @@
 //!   non-whitespace graphemes outside every span left by steps 1 to 3, and
 //!   uses their sum `eqL + eqR` in place of `2*eq`.
 //! - The token limit applies to the token stream of the level actually used.
+//! - Each `ignore.regex` match (spec §3.2) is one token that equals a match
+//!   of the same pattern, whatever its text; the text on either side of a
+//!   match is segmented on its own. Matches count like text for the token
+//!   limit, the spaceless share and the noise cutoff.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use icu_properties::CodePointMapData;
 use icu_properties::props::Script;
+use regex::Regex;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::key::{WhitespaceMode, is_whitespace, simple_fold};
+use crate::key::{WhitespaceMode, is_whitespace, masked_ranges, simple_fold};
 use crate::line_diff::align_tokens_myers;
 use crate::lines::Terminator;
 use crate::ops::full_ops;
@@ -89,6 +94,8 @@ pub struct RefineOptions {
     pub ignore_case: bool,
     /// Offset unit.
     pub position_encoding: PositionEncoding,
+    /// The compiled `ignore.regex` patterns, in priority order.
+    pub masks: Vec<Regex>,
 }
 
 /// One line of an op side.
@@ -142,6 +149,8 @@ enum TokKind {
     Text,
     Space,
     Eol,
+    /// A regex match, by pattern index.
+    Mask(u8),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -188,8 +197,8 @@ pub fn refine(left: &[SideLine<'_>], right: &[SideLine<'_>], options: &RefineOpt
             }
         }
     };
-    let lt = tokenize(left, level);
-    let rt = tokenize(right, level);
+    let lt = tokenize(left, level, &options.masks);
+    let rt = tokenize(right, level, &options.masks);
     if lt.len() > REFINE_MAX_TOKENS || rt.len() > REFINE_MAX_TOKENS {
         return Refined::SkippedLimit;
     }
@@ -295,17 +304,32 @@ fn is_noise(
 }
 
 /// Non-whitespace graphemes of one side: (all, outside every span).
+///
+/// Linear in graphemes plus spans: the spans are walked once, sorted by
+/// `(line, start)`, with a cursor that only moves forward (graphemes come in
+/// increasing offset order, so a span that ends at or before one grapheme
+/// can contain no later one).
 fn equal_graphemes(lines: &[SideLine<'_>], spans: &[ByteSpan]) -> (u64, u64) {
+    let mut sorted: Vec<&ByteSpan> = spans.iter().collect();
+    sorted.sort_by_key(|s| (s.line, s.start));
     let (mut total, mut equal) = (0_u64, 0_u64);
+    let mut next = 0;
     for (li, line) in lines.iter().enumerate() {
+        while next < sorted.len() && sorted[next].line < li {
+            next += 1;
+        }
+        let mut cursor = next;
         for (off, g) in line.content.grapheme_indices(true) {
             if g.chars().all(is_whitespace) {
                 continue;
             }
             total += 1;
-            let changed = spans
-                .iter()
-                .any(|s| s.line == li && s.start <= off && off < s.end);
+            while cursor < sorted.len() && sorted[cursor].line == li && sorted[cursor].end <= off {
+                cursor += 1;
+            }
+            let changed = sorted
+                .get(cursor)
+                .is_some_and(|s| s.line == li && s.start <= off);
             if !changed {
                 equal += 1;
             }
@@ -357,31 +381,59 @@ fn is_word_like(token: &str) -> bool {
     token.chars().any(char::is_alphanumeric)
 }
 
-fn tokenize(lines: &[SideLine<'_>], level: Level) -> Vec<Tok> {
+/// Appends the tokens of `content[from..to]`, a piece of line `li` without
+/// regex matches.
+fn push_segments(
+    toks: &mut Vec<Tok>,
+    li: usize,
+    content: &str,
+    from: usize,
+    to: usize,
+    level: Level,
+) {
+    let piece = &content[from..to];
+    let segments: Vec<(usize, &str)> = match level {
+        Level::Word => piece.split_word_bound_indices().collect(),
+        Level::Char => piece.grapheme_indices(true).collect(),
+    };
+    for (off, seg) in segments {
+        let off = from + off;
+        let space = seg.chars().all(is_whitespace);
+        if space
+            && let Some(last) = toks.last_mut()
+            && last.kind == TokKind::Space
+            && last.line == li
+            && last.end == off
+        {
+            last.end = off + seg.len();
+            continue;
+        }
+        toks.push(Tok {
+            line: li,
+            start: off,
+            end: off + seg.len(),
+            kind: if space { TokKind::Space } else { TokKind::Text },
+        });
+    }
+}
+
+fn tokenize(lines: &[SideLine<'_>], level: Level, masks: &[Regex]) -> Vec<Tok> {
     let mut toks: Vec<Tok> = Vec::new();
     for (li, line) in lines.iter().enumerate() {
-        let segments: Vec<(usize, &str)> = match level {
-            Level::Word => line.content.split_word_bound_indices().collect(),
-            Level::Char => line.content.grapheme_indices(true).collect(),
-        };
-        for (off, seg) in segments {
-            let space = seg.chars().all(is_whitespace);
-            if space
-                && let Some(last) = toks.last_mut()
-                && last.kind == TokKind::Space
-                && last.line == li
-                && last.end == off
-            {
-                last.end = off + seg.len();
-                continue;
+        let mut pos = 0;
+        if !masks.is_empty() {
+            for (start, end, index) in masked_ranges(masks, line.content) {
+                push_segments(&mut toks, li, line.content, pos, start, level);
+                toks.push(Tok {
+                    line: li,
+                    start,
+                    end,
+                    kind: TokKind::Mask(index),
+                });
+                pos = end;
             }
-            toks.push(Tok {
-                line: li,
-                start: off,
-                end: off + seg.len(),
-                kind: if space { TokKind::Space } else { TokKind::Text },
-            });
         }
+        push_segments(&mut toks, li, line.content, pos, line.content.len(), level);
         if !line.terminator.is_empty() {
             let len = line.content.len();
             toks.push(Tok {
@@ -395,9 +447,11 @@ fn tokenize(lines: &[SideLine<'_>], level: Level) -> Vec<Tok> {
     toks
 }
 
-/// Interns token keys. ID 0 is the line terminator.
+/// Interns token keys. ID 0 is the line terminator; regex matches get one
+/// ID per pattern, apart from every text ID.
 struct KeyTable {
     ids: HashMap<String, u32>,
+    masks: HashMap<u8, u32>,
     ignore_case: bool,
 }
 
@@ -405,8 +459,13 @@ impl KeyTable {
     fn new(ignore_case: bool) -> KeyTable {
         KeyTable {
             ids: HashMap::new(),
+            masks: HashMap::new(),
             ignore_case,
         }
+    }
+
+    fn next_id(&self) -> u32 {
+        u32::try_from(self.ids.len() + self.masks.len() + 1).unwrap_or(u32::MAX)
     }
 
     fn text(&mut self, text: &str) -> u32 {
@@ -415,8 +474,13 @@ impl KeyTable {
         } else {
             text.to_owned()
         };
-        let next = u32::try_from(self.ids.len() + 1).unwrap_or(u32::MAX);
+        let next = self.next_id();
         *self.ids.entry(key).or_insert(next)
+    }
+
+    fn mask(&mut self, index: u8) -> u32 {
+        let next = self.next_id();
+        *self.masks.entry(index).or_insert(next)
     }
 }
 
@@ -432,6 +496,7 @@ fn comparison_stream(
     for (i, tok) in toks.iter().enumerate() {
         let id = match tok.kind {
             TokKind::Eol => Some(0),
+            TokKind::Mask(index) => Some(keys.mask(index)),
             TokKind::Text => Some(keys.text(&lines[tok.line].content[tok.start..tok.end])),
             TokKind::Space => {
                 let trailing = toks
@@ -481,10 +546,17 @@ fn collect_spans(
             });
         }
     }
-    let space_between = |line: usize, start: usize, end: usize| {
+    // Whitespace tokens by position, so each lookup is O(1) instead of a scan.
+    let spaces: HashSet<(usize, usize, usize)> = if ws_merge {
         toks.iter()
-            .any(|t| t.kind == TokKind::Space && t.line == line && t.start == start && t.end == end)
+            .filter(|t| t.kind == TokKind::Space)
+            .map(|t| (t.line, t.start, t.end))
+            .collect()
+    } else {
+        HashSet::new()
     };
+    let space_between =
+        |line: usize, start: usize, end: usize| spaces.contains(&(line, start, end));
     let mut merged: Vec<ByteSpan> = Vec::with_capacity(raw.len());
     for span in raw {
         if let Some(last) = merged.last_mut()
@@ -515,6 +587,56 @@ fn units(content: &str, byte_offset: usize, encoding: PositionEncoding) -> u64 {
 mod tests {
     use super::*;
 
+    /// The linear `equal_graphemes` counts exactly what a scan of every span
+    /// for every grapheme counts, for unsorted and overlapping spans too.
+    #[test]
+    fn equal_graphemes_matches_a_full_scan() {
+        let naive = |lines: &[SideLine<'_>], spans: &[ByteSpan]| {
+            let (mut total, mut equal) = (0_u64, 0_u64);
+            for (li, l) in lines.iter().enumerate() {
+                for (off, g) in l.content.grapheme_indices(true) {
+                    if g.chars().all(is_whitespace) {
+                        continue;
+                    }
+                    total += 1;
+                    if !spans
+                        .iter()
+                        .any(|s| s.line == li && s.start <= off && off < s.end)
+                    {
+                        equal += 1;
+                    }
+                }
+            }
+            (total, equal)
+        };
+        let texts = ["ab cd é👍🏽 x", "", "  ", "lorem ipsum dolor", "a\u{301}bc"];
+        let mut state = 0x1234_5678_9ABC_DEF1_u64;
+        let mut next = |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            usize::try_from(state % (n as u64).max(1)).unwrap()
+        };
+        for _ in 0..500 {
+            let lines: Vec<SideLine<'_>> = (0..=next(4))
+                .map(|_| line(texts[next(texts.len())]))
+                .collect();
+            let spans: Vec<ByteSpan> = (0..next(6))
+                .map(|_| {
+                    let l = next(lines.len());
+                    let len = lines[l].content.len();
+                    let start = next(len + 1);
+                    ByteSpan {
+                        line: l,
+                        start,
+                        end: start + next(len + 1 - start),
+                    }
+                })
+                .collect();
+            assert_eq!(equal_graphemes(&lines, &spans), naive(&lines, &spans));
+        }
+    }
+
     fn line(content: &str) -> SideLine<'_> {
         SideLine {
             content,
@@ -528,6 +650,7 @@ mod tests {
             whitespace: WhitespaceMode::None,
             ignore_case: false,
             position_encoding: PositionEncoding::Utf8,
+            masks: Vec::new(),
         }
     }
 
@@ -703,6 +826,44 @@ mod tests {
             texts(&["ab x"], &["a b y"], &o),
             [(L, 0, "ab x"), (R, 0, "a b y")]
         );
+    }
+
+    #[test]
+    fn regex_masks_are_single_tokens() {
+        let mut o = opts(Granularity::Word);
+        o.masks = vec![
+            Regex::new(r"\d{2}:\d{2}:\d{2}").unwrap(),
+            Regex::new(r"id=\d+").unwrap(),
+        ];
+        // A masked value that changed gets no span.
+        assert_eq!(
+            texts(&["12:00:01 start job"], &["12:00:07 stop job"], &o),
+            [(L, 0, "start"), (R, 0, "stop")]
+        );
+        // A match without a counterpart is one span over the whole match.
+        assert_eq!(
+            texts(&["at 12:00:01 ok"], &["at noon ok"], &o),
+            [(L, 0, "12:00:01"), (R, 0, "noon")]
+        );
+        // Matches of different patterns differ; text around a match is
+        // segmented on its own, so `x` stays equal next to the match.
+        assert_eq!(
+            texts(&["run 10:00:00x"], &["run id=7x"], &o),
+            [(L, 0, "10:00:00"), (R, 0, "id=7")]
+        );
+        // Every granularity applies the masks.
+        for g in [Granularity::Char, Granularity::Smart] {
+            o.granularity = g;
+            assert_eq!(
+                texts(
+                    &["10:00:00 copied file one"],
+                    &["11:30:59 copied file six"],
+                    &o
+                ),
+                [(L, 0, "one"), (R, 0, "six")],
+                "{g:?}"
+            );
+        }
     }
 
     #[test]

@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 11,
+        "count": 3
+      },
+      "right": {
+        "start": 3,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "The right file was converted from LF to CRLF and settings_path() moved to the top. Under ignore.whitespace none every line differs by its terminator, so the line diff gives one replace op for the whole file. Its lines are aligned again by move key, which ignores terminators (moves spec 4.1 rule 4): the other functions are in place, and settings_path() is a pure move."
+}

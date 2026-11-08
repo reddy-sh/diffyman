@@ -1,0 +1,14 @@
+{
+  "algorithm": "histogram",
+  "granularity": "char",
+  "ignore": {
+    "whitespace": "none",
+    "case": false,
+    "blankLines": false,
+    "regex": []
+  },
+  "context": 3,
+  "positionEncoding": "codepoint",
+  "detectMoves": false,
+  "adapter": "auto"
+}

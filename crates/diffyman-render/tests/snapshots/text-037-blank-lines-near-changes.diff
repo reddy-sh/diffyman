@@ -1,0 +1,19 @@
+--- a/left.txt
++++ b/right.txt
+@@ -1,7 +1,8 @@
+ # Shopping
+-
+ apples
+ bread
++butter
+ cheese
++
+ 
+ dates
+@@ -12,4 +13,5 @@
+ ice cream
+ 
+-
+ jam
++
++kale

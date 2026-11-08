@@ -25,7 +25,7 @@ use diffyman_conformance::{
     about = "Run the diffyman golden corpus"
 )]
 struct Cli {
-    /// Corpus root holding `text/` and `moved/` (default: the repository's `tests/corpus`).
+    /// Corpus root holding `text/`, `moved/`, `binary/` and `tree/` (default: the repository's `tests/corpus`).
     #[arg(long, value_name = "DIR")]
     root: Option<PathBuf>,
     /// Write `expected.json` (exact canonical bytes, no trailing newline) for every case.

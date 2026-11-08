@@ -10,38 +10,53 @@
 //! assert!(json.contains(r#""status":"different""#));
 //! ```
 //!
-//! Behavior follows `docs/spec/diff-document.md` (schema `0.2.0`):
+//! Behavior follows `docs/spec/diff-document.md` (schema `0.3.0`):
 //!
+//! - Each input is detected as text or binary, with a media type
+//!   (`diffyman-detect`, spec §16). With `adapter: "auto"` (the default), two
+//!   UTF-8 texts give `kind: "text"`; anything else gives `kind: "binary"`,
+//!   compared byte by byte (`diffyman-adapter-binary`, spec §17), with a
+//!   `binary-fallback` warning when one side is text.
 //! - A UTF-8 BOM is removed before comparison (`bom-stripped`).
 //! - Lines end with LF, CRLF or a lone CR. A missing final newline is reported
 //!   (`no-newline-at-eof`) and, under whitespace mode `none`, compares as a change.
-//! - Invalid UTF-8 gives `status: "error"` with an `invalid-utf8` error; there is
-//!   no binary fallback yet.
+//! - With `adapter: "text"`, an input that is not UTF-8 gives `status: "error"`
+//!   with an `invalid-utf8` error.
 //! - `ignore.regex` masks matches before comparison; `ignore.blankLines` turns
 //!   blank-only changes into `ignored` ops, which are not changes.
-//! - Invalid options are rejected with [`Error::InvalidOptions`]. A regex that
-//!   does not compile, or is over a limit, gives a document with an
-//!   `invalid-regex` or `limit-exceeded` error.
+//! - Two archives (zip, tar, gzip- or zstd-compressed tar) give `kind: "tree"`
+//!   (`diffyman-adapter-tree`, spec §19): one entry per path, renames found by
+//!   content, and a child document for each changed file. With the `fs`
+//!   feature (on by default), `diff_paths` also compares folders on disk.
+//!   Archives are never extracted, and their paths are never resolved.
+//! - Invalid options are rejected with [`Error::InvalidOptions`]. A regex or
+//!   `tree.exclude` pattern that does not compile, or is over a limit, gives a
+//!   document with an `invalid-regex`, `invalid-glob` or `limit-exceeded` error.
 //! - Timing appears only in `provenance`.
 
 mod options;
+mod tree;
 
 use std::collections::BTreeMap;
 
-pub use diffyman_algo::lines::{Line, Terminator, split_lines};
+use diffyman_adapter_binary as binary;
+pub use diffyman_algo::lines::{Line, LineCursor, LineIndex, Terminator, split_lines};
+use diffyman_detect::{self as detect, Class, Detection, Encoding};
 pub use diffyman_model as model;
 use diffyman_model::{
-    AdapterInfo, DiffDocument, FileMeta, Granularity, Hunk, JcsError, Kind, LineTerminator, Move,
-    MoveEnd, MoveKind, NameVersion, Op, OpKind, OpRef, Options, Platform, PositionEncoding,
-    Provenance, Range, SCHEMA_VERSION, Side, Similarity, Span, Stats, Status, Timing, Warning,
-    WarningCode, WhitespaceMode,
+    Adapter, AdapterInfo, ByteRange, ByteStats, DiffDocument, FileMeta, Granularity, Hunk,
+    JcsError, Kind, LineTerminator, Move, MoveEnd, MoveKind, NameVersion, Op, OpKind, OpRef,
+    Options, Platform, PositionEncoding, Provenance, Range, SCHEMA_VERSION, Side, Similarity, Span,
+    Stats, Status, Timing, Warning, WarningCode, WhitespaceMode,
 };
 pub use options::{parse_options, parse_options_value, resolve_options, validate_options};
 use serde_json::Value;
+#[cfg(feature = "fs")]
+pub use tree::diff_paths;
 
-use diffyman_algo::key::{self, Interner, KeyBuilder, KeyOptions};
+use diffyman_algo::key::{self, KeyBuilder, KeyOptions, TextLines};
 use diffyman_algo::line_diff::{self, LineAlgorithm};
-use diffyman_algo::moves::{self, MoveOptions};
+use diffyman_algo::moves;
 use diffyman_algo::ops::{self as algo_ops, LineOp};
 use diffyman_algo::refine::{self, RefineOptions, Refined, SideLine, SpanSide};
 
@@ -59,6 +74,9 @@ pub enum Error {
     /// The document could not be serialized canonically.
     #[error(transparent)]
     Canonical(#[from] JcsError),
+    /// An input path could not be read (`diff_paths` only, feature `fs`).
+    #[error("{0}")]
+    Io(String),
 }
 
 /// One input: its bytes and an optional name.
@@ -156,10 +174,88 @@ pub fn diff_document_with(
 ) -> Result<DiffDocument, Error> {
     validate_options(options)?;
     let timer = Timer::start();
-    let mut warnings = Vec::new();
-    let l = decode_side(left, Side::Left, &mut warnings);
-    let r = decode_side(right, Side::Right, &mut warnings);
-    let builder = match KeyBuilder::new(&KeyOptions {
+    let mut ctx = tree::Context::new(options);
+    let doc = document(left, right, options, &mut ctx);
+    finish_document(doc, options, settings, &timer)
+}
+
+/// Fills in provenance and `id`.
+fn finish_document(
+    mut doc: DiffDocument,
+    options: &Options,
+    settings: &Settings,
+    timer: &Timer,
+) -> Result<DiffDocument, Error> {
+    doc.provenance = provenance(doc.kind, options, settings, 0);
+    doc.id = diffyman_model::compute_id(&doc)?;
+    doc.provenance.timing.total_micros = timer.elapsed_micros();
+    Ok(doc)
+}
+
+/// The document of two inputs, without `id` and provenance. Child documents
+/// of a tree come here too, one level deeper in `ctx` (spec §19.5).
+fn document(
+    left: Input<'_>,
+    right: Input<'_>,
+    options: &Options,
+    ctx: &mut tree::Context,
+) -> DiffDocument {
+    let archives =
+        tree::archive_format(left.bytes).is_some() && tree::archive_format(right.bytes).is_some();
+    let below_depth = ctx.depth > options.tree.max_depth;
+    match options.adapter {
+        Adapter::Tree => return tree::archive_document(left, right, options, ctx),
+        Adapter::Auto if archives && !below_depth => {
+            return tree::archive_document(left, right, options, ctx);
+        }
+        _ => {}
+    }
+    let depth_limited = options.adapter == Adapter::Auto && archives;
+    // Byte-identical inputs are detected and decoded once: same hash, same
+    // lines, same per-side warnings. Only the name (and so the media type
+    // from the extension) can differ.
+    let (l, r) = if left.bytes == right.bytes {
+        let l = decode_side(left, options.adapter);
+        let detection = l.detection.renamed(right.bytes, right.name);
+        let r = DecodedSide {
+            meta: FileMeta {
+                name: right.name.map(str::to_owned),
+                media_type: Some(detection.media_type.to_owned()),
+                ..l.meta.clone()
+            },
+            detection,
+            text: l.text,
+            lines: None,
+            codes: l.codes.clone(),
+        };
+        (l, r)
+    } else {
+        decode_pair(left, right, options.adapter)
+    };
+    let kind = match options.adapter {
+        Adapter::Text => Kind::Text,
+        Adapter::Binary => Kind::Binary,
+        _ if depth_limited => Kind::Binary,
+        _ if l.is_utf8_text() && r.is_utf8_text() => Kind::Text,
+        _ => Kind::Binary,
+    };
+
+    // Option errors apply whatever the kind (spec §7.2.1, §9).
+    let mut warnings = ctx.option_warnings.clone();
+    if depth_limited {
+        warnings.push(Warning::new(WarningCode::DepthLimit, None));
+    }
+    if kind == Kind::Binary {
+        binary_document(left.bytes, right.bytes, &l, &r, options, warnings)
+    } else {
+        text_document(l, r, ctx.key_builder.as_ref(), options, warnings)
+    }
+}
+
+/// The comparison key builder of the options, or the option errors that stop
+/// it (spec §7.2.1).
+fn key_builder(options: &Options, warnings: &mut Vec<Warning>) -> Option<KeyBuilder> {
+    match KeyBuilder::new(&KeyOptions {
         whitespace: whitespace_mode(options),
         ignore_case: options.ignore.case,
         regex: options.ignore.regex.clone(),
@@ -174,28 +270,88 @@ pub fn diff_document_with(
             }
             None
         }
-    };
-    let too_big =
-        [&l, &r].iter().any(|s| {
-            s.lines
-                .as_ref()
-                .is_some_and(|lines| lines.len() > line_diff::MAX_LINES)
-        }) || !line_diff::within_size_limit(line_algorithm(options), l.meta.size, r.meta.size);
+    }
+}
+
+/// True when the list holds an entry with severity `error`.
+fn has_error(warnings: &[Warning]) -> bool {
+    warnings
+        .iter()
+        .any(|w| w.code.severity() == diffyman_model::Severity::Error)
+}
+
+/// Sorts and deduplicates `warnings` (spec §10) and derives the status.
+fn finish_warnings(warnings: &mut Vec<Warning>, changed: bool) -> Status {
+    warnings.sort_by_key(Warning::sort_key);
+    warnings.dedup_by(|a, b| a.sort_key() == b.sort_key());
+    if has_error(warnings) {
+        Status::Error
+    } else if changed {
+        Status::Different
+    } else {
+        Status::Identical
+    }
+}
+
+/// A document with every block empty, to be filled in by one adapter.
+fn empty_document(kind: Kind, left: FileMeta, right: FileMeta, options: &Options) -> DiffDocument {
+    DiffDocument {
+        schema_version: SCHEMA_VERSION.to_owned(),
+        id: String::new(),
+        kind,
+        status: Status::Identical,
+        left,
+        right,
+        position_encoding: options.position_encoding,
+        stats: None,
+        hunks: Vec::new(),
+        moves: Vec::new(),
+        structural: Vec::new(),
+        table: None,
+        regions: Vec::new(),
+        bytes: Vec::new(),
+        tree: None,
+        warnings: Vec::new(),
+        options: options.clone(),
+        provenance: Provenance::default(),
+        extensions: BTreeMap::new(),
+    }
+}
+
+/// `kind: "text"`: the line diff (spec §7).
+fn text_document(
+    l: DecodedSide<'_>,
+    r: DecodedSide<'_>,
+    builder: Option<&KeyBuilder>,
+    options: &Options,
+    mut warnings: Vec<Warning>,
+) -> DiffDocument {
+    for (side, codes) in [(Side::Left, &l.codes), (Side::Right, &r.codes)] {
+        for code in codes {
+            warnings.push(Warning::new(*code, Some(side)));
+        }
+    }
+    let left_lines = l.text.zip(l.lines.as_ref());
+    let right_lines = r.text.zip(r.lines.as_ref().or(l.lines.as_ref()));
+    let too_big = [left_lines, right_lines]
+        .iter()
+        .any(|s| s.is_some_and(|(_, lines)| lines.len() > line_diff::MAX_LINES))
+        || !line_diff::within_size_limit(line_algorithm(options), l.meta.size, r.meta.size);
     if too_big {
         warnings.push(Warning::new(WarningCode::LimitExceeded, None));
     }
 
-    let failed = warnings
-        .iter()
-        .any(|w| w.code.severity() == diffyman_model::Severity::Error);
-    let (hunks, stats, moves) = match (&l.text, &l.lines, &r.text, &r.lines, &builder) {
-        (Some(lt), Some(ll), Some(rt), Some(rl), Some(builder)) if !failed => {
+    let failed = has_error(&warnings);
+    let (hunks, stats, moves) = match (left_lines, right_lines, builder) {
+        (Some((lt, ll)), Some((rt, rl)), Some(builder)) if !failed => {
             let (hunks, stats, moves) = compare(
-                Sides {
-                    left_text: lt,
-                    left: ll,
-                    right_text: rt,
-                    right: rl,
+                TextLines {
+                    text: lt,
+                    lines: ll,
+                },
+                TextLines {
+                    text: rt,
+                    lines: rl,
                 },
                 builder,
                 options,
@@ -205,48 +361,101 @@ pub fn diff_document_with(
         }
         _ => (Vec::new(), None, Vec::new()),
     };
-    warnings.sort_by_key(Warning::sort_key);
-    warnings.dedup_by(|a, b| a.sort_key() == b.sort_key());
-    let status = if warnings
-        .iter()
-        .any(|w| w.code.severity() == diffyman_model::Severity::Error)
-    {
-        Status::Error
-    } else if stats.as_ref().is_some_and(|s| s.change_count > 0) {
-        Status::Different
-    } else {
-        Status::Identical
-    };
-    let (hunks, stats, moves) = if status == Status::Error {
-        (Vec::new(), None, Vec::new())
-    } else {
-        (hunks, stats, moves)
-    };
+    let changed = stats.as_ref().is_some_and(|s| s.change_count > 0);
+    let status = finish_warnings(&mut warnings, changed);
+    let mut doc = empty_document(Kind::Text, l.meta, r.meta, options);
+    doc.status = status;
+    doc.warnings = warnings;
+    if status != Status::Error {
+        doc.stats = stats;
+        doc.hunks = hunks;
+        doc.moves = moves;
+    }
+    doc
+}
 
-    let mut doc = DiffDocument {
-        schema_version: SCHEMA_VERSION.to_owned(),
-        id: String::new(),
-        kind: Kind::Text,
-        status,
-        left: l.meta,
-        right: r.meta,
-        position_encoding: options.position_encoding,
-        stats,
-        hunks,
-        moves,
-        structural: Vec::new(),
-        table: None,
-        regions: Vec::new(),
-        bytes: Vec::new(),
-        tree: None,
-        warnings,
-        options: options.clone(),
-        provenance: provenance(options, settings, 0),
-        extensions: BTreeMap::new(),
+/// `kind: "binary"`: changed byte ranges (spec §17). Text-only meta and
+/// per-side text warnings do not apply.
+fn binary_document(
+    left: &[u8],
+    right: &[u8],
+    l: &DecodedSide<'_>,
+    r: &DecodedSide<'_>,
+    options: &Options,
+    mut warnings: Vec<Warning>,
+) -> DiffDocument {
+    let binary_meta = |side: &DecodedSide<'_>| FileMeta {
+        encoding: match side.detection.class {
+            Class::Binary => None,
+            _ => side.detection.encoding.map(|e| e.as_str().to_owned()),
+        },
+        line_terminator: None,
+        final_newline: None,
+        line_count: None,
+        ..side.meta.clone()
     };
-    doc.id = diffyman_model::compute_id(&doc)?;
-    doc.provenance.timing.total_micros = timer.elapsed_micros();
-    Ok(doc)
+    let (left_meta, right_meta) = (binary_meta(l), binary_meta(r));
+    if options.adapter == Adapter::Auto
+        && (l.detection.class == Class::Text || r.detection.class == Class::Text)
+    {
+        warnings.push(Warning::new(WarningCode::BinaryFallback, None));
+    }
+    if !binary::within_size_limit(left_meta.size, right_meta.size) {
+        warnings.push(Warning::new(WarningCode::LimitExceeded, None));
+    }
+    let diff = if has_error(&warnings) {
+        None
+    } else {
+        Some(binary::diff_bytes(left, right))
+    };
+    if diff.as_ref().is_some_and(|d| d.coarse) {
+        warnings.push(Warning::new(WarningCode::BytesCoarseLimit, None));
+    }
+    let changed = diff.as_ref().is_some_and(|d| !d.ranges.is_empty());
+    let status = finish_warnings(&mut warnings, changed);
+    let mut doc = empty_document(Kind::Binary, left_meta, right_meta, options);
+    doc.status = status;
+    doc.warnings = warnings;
+    if let (Some(diff), true) = (diff, status != Status::Error) {
+        let removed: u64 = diff.ranges.iter().map(|b| b.left_len).sum();
+        let added: u64 = diff.ranges.iter().map(|b| b.right_len).sum();
+        let (size_left, size_right) = (doc.left.size, doc.right.size);
+        let unchanged = size_left - removed;
+        doc.stats = Some(Stats {
+            lines_left: 0,
+            lines_right: 0,
+            lines_added: 0,
+            lines_removed: 0,
+            lines_unchanged: 0,
+            change_count: diff.ranges.len() as u64,
+            hunk_count: 0,
+            similarity: similarity(unchanged, size_left, size_right),
+            bytes: Some(ByteStats {
+                left: size_left,
+                right: size_right,
+                added,
+                removed,
+                unchanged,
+            }),
+            tree: None,
+        });
+        doc.bytes = diff
+            .ranges
+            .iter()
+            .map(|b| ByteRange {
+                left_offset: b.left_offset,
+                left_length: b.left_len,
+                right_offset: b.right_offset,
+                right_length: b.right_len,
+                op: match b.op() {
+                    binary::RangeOp::Insert => OpKind::Insert,
+                    binary::RangeOp::Delete => OpKind::Delete,
+                    binary::RangeOp::Replace => OpKind::Replace,
+                },
+            })
+            .collect();
+    }
+    doc
 }
 
 /// Strips a UTF-8 BOM and validates UTF-8. Returns `None` for invalid input.
@@ -255,18 +464,68 @@ pub fn decode_text(bytes: &[u8]) -> Option<&str> {
     std::str::from_utf8(body).ok()
 }
 
+/// One detected and decoded input. `text` and `lines` are `None` when the
+/// input is not decoded as text (not UTF-8, or not needed for the adapter),
+/// and `lines` also for the right side of byte-identical inputs (which shares
+/// the left side's lines).
 struct DecodedSide<'a> {
     meta: FileMeta,
+    detection: Detection<'a>,
     text: Option<&'a str>,
-    lines: Option<Vec<Line>>,
+    lines: Option<LineIndex>,
+    /// Warnings about this side, in the order found.
+    codes: Vec<WarningCode>,
 }
 
-fn decode_side<'a>(input: Input<'a>, side: Side, warnings: &mut Vec<Warning>) -> DecodedSide<'a> {
+impl DecodedSide<'_> {
+    /// UTF-8 text or empty: the text adapter can compare it.
+    fn is_utf8_text(&self) -> bool {
+        match self.detection.class {
+            Class::Empty => true,
+            Class::Text => self.detection.encoding == Some(Encoding::Utf8),
+            Class::Binary => false,
+        }
+    }
+}
+
+/// Detects and decodes both sides, on two threads where the platform has
+/// them. The result does not depend on how the work is scheduled.
+fn decode_pair<'a>(
+    left: Input<'a>,
+    right: Input<'a>,
+    adapter: Adapter,
+) -> (DecodedSide<'a>, DecodedSide<'a>) {
+    /// Below this many bytes per side a thread costs more than it saves.
+    #[cfg(not(target_family = "wasm"))]
+    const PARALLEL_MIN_BYTES: usize = 4 << 20;
+    #[cfg(not(target_family = "wasm"))]
+    if left.bytes.len().min(right.bytes.len()) >= PARALLEL_MIN_BYTES {
+        let decoded = std::thread::scope(|scope| {
+            let handle = std::thread::Builder::new()
+                .name("diffyman-decode".to_owned())
+                .spawn_scoped(scope, || decode_side(right, adapter));
+            let l = decode_side(left, adapter);
+            let r = handle.ok().and_then(|h| h.join().ok());
+            (l, r)
+        });
+        if let (l, Some(r)) = decoded {
+            return (l, r);
+        }
+    }
+    (decode_side(left, adapter), decode_side(right, adapter))
+}
+
+/// Detects one input and, when the text adapter may need it, splits it into
+/// lines. Under `auto`, an input that is not UTF-8 text is not split: the
+/// document will be binary.
+fn decode_side(input: Input<'_>, adapter: Adapter) -> DecodedSide<'_> {
     let bytes = input.bytes;
+    let detection = detect::detect(bytes, input.name);
     let bom = bytes.starts_with(b"\xEF\xBB\xBF");
+    let mut codes = Vec::new();
     let mut meta = FileMeta {
         name: input.name.map(str::to_owned),
-        media_type: Some("text/plain".to_owned()),
+        media_type: Some(detection.media_type.to_owned()),
         size: bytes.len() as u64,
         sha256: diffyman_model::sha256_hex(bytes),
         encoding: None,
@@ -275,25 +534,28 @@ fn decode_side<'a>(input: Input<'a>, side: Side, warnings: &mut Vec<Warning>) ->
         final_newline: None,
         line_count: None,
     };
-    let Some(text) = decode_text(bytes) else {
-        warnings.push(Warning::new(WarningCode::InvalidUtf8, Some(side)));
+    let wanted = match adapter {
+        Adapter::Binary => false,
+        Adapter::Text => true,
+        _ => detection.class != Class::Binary,
+    };
+    let Some(text) = detection.utf8.filter(|_| wanted) else {
+        if detection.utf8.is_none() {
+            codes.push(WarningCode::InvalidUtf8);
+        }
         return DecodedSide {
             meta,
+            detection,
             text: None,
             lines: None,
+            codes,
         };
     };
     if bom {
-        warnings.push(Warning::new(WarningCode::BomStripped, Some(side)));
+        codes.push(WarningCode::BomStripped);
     }
-    let lines = split_lines(text);
-    let mut styles: Vec<Terminator> = Vec::new();
-    for line in &lines {
-        if !line.terminator.is_empty() && !styles.contains(&line.terminator) {
-            styles.push(line.terminator);
-        }
-    }
-    let style = match styles.as_slice() {
+    let lines = LineIndex::new(text);
+    let style = match lines.terminators().as_slice() {
         [] => LineTerminator::None,
         [Terminator::Lf] => LineTerminator::Lf,
         [Terminator::CrLf] => LineTerminator::Crlf,
@@ -301,11 +563,12 @@ fn decode_side<'a>(input: Input<'a>, side: Side, warnings: &mut Vec<Warning>) ->
         _ => LineTerminator::Mixed,
     };
     if style == LineTerminator::Mixed {
-        warnings.push(Warning::new(WarningCode::MixedLineEndings, Some(side)));
+        codes.push(WarningCode::MixedLineEndings);
     }
-    let final_newline = lines.last().is_some_and(|l| !l.terminator.is_empty());
-    if lines.last().is_some_and(|l| l.terminator.is_empty()) {
-        warnings.push(Warning::new(WarningCode::NoNewlineAtEof, Some(side)));
+    let last = lines.last_terminator();
+    let final_newline = last.is_some_and(|t| !t.is_empty());
+    if last.is_some_and(Terminator::is_empty) {
+        codes.push(WarningCode::NoNewlineAtEof);
     }
     meta.encoding = Some("utf-8".to_owned());
     meta.line_terminator = Some(style);
@@ -313,8 +576,10 @@ fn decode_side<'a>(input: Input<'a>, side: Side, warnings: &mut Vec<Warning>) ->
     meta.line_count = Some(lines.len() as u64);
     DecodedSide {
         meta,
+        detection,
         text: Some(text),
         lines: Some(lines),
+        codes,
     }
 }
 
@@ -335,7 +600,7 @@ fn whitespace_mode(options: &Options) -> key::WhitespaceMode {
     }
 }
 
-fn refine_options(options: &Options) -> Option<RefineOptions> {
+fn refine_options(options: &Options, builder: &KeyBuilder) -> Option<RefineOptions> {
     let granularity = match options.granularity {
         Granularity::Word => refine::Granularity::Word,
         Granularity::Char => refine::Granularity::Char,
@@ -351,66 +616,50 @@ fn refine_options(options: &Options) -> Option<RefineOptions> {
             PositionEncoding::Codepoint => refine::PositionEncoding::Codepoint,
             _ => refine::PositionEncoding::Utf8,
         },
+        masks: builder.masks().to_vec(),
     })
-}
-
-/// Both decoded inputs and their lines.
-#[derive(Clone, Copy)]
-struct Sides<'a> {
-    left_text: &'a str,
-    left: &'a [Line],
-    right_text: &'a str,
-    right: &'a [Line],
 }
 
 /// Runs the line diff, applies `ignore.blankLines`, groups hunks, detects
 /// moves and computes stats.
+///
+/// The common prefix and suffix are trimmed before interning, and only the
+/// lines in between are tokenized; the result is the same as diffing the
+/// full token sequences (see `diffyman_algo::key::tokenize_core`).
 fn compare(
-    sides: Sides<'_>,
+    left: TextLines<'_>,
+    right: TextLines<'_>,
     builder: &KeyBuilder,
     options: &Options,
     warnings: &mut Vec<Warning>,
 ) -> (Vec<Hunk>, Stats, Vec<Move>) {
-    let Sides {
-        left_text,
-        left,
-        right_text,
-        right,
-    } = sides;
-    let mut interner = Interner::new();
-    let (lt, rt) = key::intern_sides(builder, &mut interner, left_text, left, right_text, right);
-    let alignment = line_diff::align(line_algorithm(options), &lt, &rt, interner.num_tokens());
-    if line_diff::is_approximate(&lt, &rt, &alignment) {
+    let core = key::tokenize_core(builder, left, right);
+    let alignment = line_diff::align(
+        line_algorithm(options),
+        &core.left,
+        &core.right,
+        core.num_tokens,
+    );
+    if key::is_approximate_core(builder, left, right, &core, &alignment) {
         warnings.push(Warning::new(WarningCode::Approximate, None));
     }
-    let mut full = algo_ops::full_ops(&alignment);
-    let contents = (options.ignore.blank_lines || options.detect_moves).then(|| {
-        let lc: Vec<&str> = left.iter().map(|l| l.content(left_text)).collect();
-        let rc: Vec<&str> = right.iter().map(|l| l.content(right_text)).collect();
-        (lc, rc)
-    });
-    if options.ignore.blank_lines
-        && let Some((lc, rc)) = &contents
-    {
-        algo_ops::ignore_blank_changes(&mut full, lc, rc);
+    let (prefix, suffix) = (core.prefix, core.suffix);
+    drop(core);
+    let mut full = algo_ops::full_ops_trimmed(&alignment, prefix, suffix, left.len(), right.len());
+    drop(alignment);
+    if options.ignore.blank_lines {
+        algo_ops::ignore_blank_changes_by(&mut full, content_of(left), content_of(right));
     }
     let context = usize::try_from(options.context).unwrap_or(usize::MAX);
     let groups = algo_ops::group_hunks(&full, context);
 
     // Moved-block detection runs before refinement: moved lines get no spans.
     // Lines of `ignored` ops are not changed lines, so they are never moved.
-    let detected = if options.detect_moves
-        && let Some((lc, rc)) = &contents
-    {
-        let found = moves::detect_moves(
-            lc,
-            rc,
-            &full,
-            &MoveOptions {
-                whitespace: whitespace_mode(options),
-                ignore_case: options.ignore.case,
-            },
-        );
+    // Without change ops there is nothing to move (and no limit to reach).
+    let detected = if options.detect_moves && full.iter().any(|op| op.kind.is_change()) {
+        // Only the lines of change ops are read, so memory follows the
+        // changed lines, not the file length.
+        let found = moves::detect_moves_by(content_of(left), content_of(right), &full, builder);
         if found.skipped_limit {
             warnings.push(Warning::new(WarningCode::MovesSkippedLimit, None));
         }
@@ -418,16 +667,17 @@ fn compare(
     } else {
         Vec::new()
     };
-    let mut moved = Moved {
-        left: vec![false; left.len()],
-        right: vec![false; right.len()],
-    };
+    let mut moved = Moved::default();
+    if !detected.is_empty() {
+        moved.left = vec![false; left.len()];
+        moved.right = vec![false; right.len()];
+    }
     for m in &detected {
         moved.left[m.left_start..m.left_start + m.left_len].fill(true);
         moved.right[m.right_start..m.right_start + m.right_len].fill(true);
     }
 
-    let refine_opts = refine_options(options);
+    let refine_opts = refine_options(options, builder);
     let mut skipped = false;
     let hunks: Vec<Hunk> = groups
         .iter()
@@ -437,14 +687,9 @@ fn compare(
                 .iter()
                 .map(|op| {
                     let inline = match (&refine_opts, op.kind) {
-                        (Some(ro), algo_ops::OpKind::Replace) => inline_spans(
-                            op,
-                            (left_text, left),
-                            (right_text, right),
-                            &moved,
-                            ro,
-                            &mut skipped,
-                        ),
+                        (Some(ro), algo_ops::OpKind::Replace) => {
+                            inline_spans(op, left, right, &moved, ro, &mut skipped)
+                        }
                         _ => Vec::new(),
                     };
                     to_model_op(op, inline)
@@ -502,15 +747,30 @@ fn compare(
             lines_left - ignored_left,
             lines_right - ignored_right,
         ),
+        bytes: None,
+        tree: None,
     };
     let moves = to_model_moves(&detected, &hunks);
     (hunks, stats, moves)
 }
 
-/// Which lines belong to a move (0-based), per side.
+/// The content (without terminator) of each line of `side`, by 0-based number.
+fn content_of<'t>(side: TextLines<'t>) -> impl Fn(usize) -> &'t str + Copy {
+    move |i| side.line(i).content(side.text)
+}
+
+/// Which lines belong to a move (0-based), per side. Empty when there are
+/// no moves.
+#[derive(Default)]
 struct Moved {
     left: Vec<bool>,
     right: Vec<bool>,
+}
+
+impl Moved {
+    fn is_moved(flags: &[bool], line: usize) -> bool {
+        flags.get(line).copied().unwrap_or(false)
+    }
 }
 
 /// One op of the hunk list, flattened for range lookups (0-based lines).
@@ -626,26 +886,26 @@ fn to_model_op(op: &LineOp, inline: Vec<Span>) -> Op {
 /// of both token streams (moves spec §2), so they never carry spans.
 fn inline_spans(
     op: &LineOp,
-    left: (&str, &[Line]),
-    right: (&str, &[Line]),
+    left: TextLines<'_>,
+    right: TextLines<'_>,
     moved: &Moved,
     options: &RefineOptions,
     skipped: &mut bool,
 ) -> Vec<Span> {
     /// The op side's unmoved lines and their absolute 0-based line numbers.
     fn side_lines<'t>(
-        (text, lines): (&'t str, &[Line]),
+        side: TextLines<'t>,
         moved: &[bool],
         start: usize,
         len: usize,
     ) -> (Vec<SideLine<'t>>, Vec<usize>) {
         (start..start + len)
-            .filter(|i| !moved[*i])
+            .filter(|i| !Moved::is_moved(moved, *i))
             .map(|i| {
-                let l = lines[i];
+                let l = side.line(i);
                 (
                     SideLine {
-                        content: &text[l.start..l.end],
+                        content: l.content(side.text),
                         terminator: l.terminator,
                     },
                     i,
@@ -679,10 +939,13 @@ fn inline_spans(
     }
 }
 
-fn provenance(options: &Options, settings: &Settings, total_micros: u64) -> Provenance {
+fn provenance(kind: Kind, options: &Options, settings: &Settings, total_micros: u64) -> Provenance {
     let mut extra = BTreeMap::new();
     let libraries: serde_json::Map<String, Value> = diffyman_algo::LIBRARY_VERSIONS
         .iter()
+        .chain(&binary::LIBRARY_VERSIONS)
+        .chain(&tree::LIBRARY_VERSIONS)
+        .chain(&[("infer", detect::INFER_VERSION)])
         .map(|(name, version)| ((*name).to_owned(), Value::String((*version).to_owned())))
         .collect();
     extra.insert("libraries".to_owned(), Value::Object(libraries));
@@ -690,13 +953,18 @@ fn provenance(options: &Options, settings: &Settings, total_micros: u64) -> Prov
         "unicodeVersion".to_owned(),
         Value::String(diffyman_algo::segmentation_unicode_version()),
     );
-    if options.granularity != Granularity::Line {
+    extra.insert(
+        "detect".to_owned(),
+        Value::String(detect::DETECT_ID.to_owned()),
+    );
+    let text = kind == Kind::Text;
+    if text && options.granularity != Granularity::Line {
         extra.insert(
             "refine".to_owned(),
             Value::String(refine::REFINE_ID.to_owned()),
         );
     }
-    if options.detect_moves {
+    if text && options.detect_moves {
         extra.insert(
             "moves".to_owned(),
             Value::String(moves::MOVES_ID.to_owned()),
@@ -707,9 +975,18 @@ fn provenance(options: &Options, settings: &Settings, total_micros: u64) -> Prov
             name: ENGINE_NAME.to_owned(),
             version: ENGINE_VERSION.to_owned(),
         },
-        algorithm: line_algorithm(options).id().to_owned(),
+        algorithm: match kind {
+            Kind::Text => line_algorithm(options).id().to_owned(),
+            Kind::Tree => tree::TREE_ID.to_owned(),
+            _ => binary::BINARY_ID.to_owned(),
+        },
         adapter: AdapterInfo {
-            id: "text".to_owned(),
+            id: match kind {
+                Kind::Text => "text",
+                Kind::Tree => "tree",
+                _ => "binary",
+            }
+            .to_owned(),
             version: ENGINE_VERSION.to_owned(),
         },
         binding: settings.binding.clone(),

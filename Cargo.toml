@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "bindings/python", "bindings/wasm"]
-exclude = ["spikes"]
+exclude = ["spikes", "fuzz"]
 
 [workspace.package]
 version = "0.0.1"
@@ -18,7 +18,12 @@ authors = ["Sankara Reddy Telukutla <sankara@reddy.sh>"]
 # Workspace crates
 diffyman-model = { path = "crates/diffyman-model", version = "=0.0.1" }
 diffyman-algo = { path = "crates/diffyman-algo", version = "=0.0.1" }
-diffyman = { path = "crates/diffyman-engine", version = "=0.0.1" }
+# Without `fs` for the WASM binding; native surfaces turn it on.
+diffyman = { path = "crates/diffyman-engine", version = "=0.0.1", default-features = false }
+diffyman-render = { path = "crates/diffyman-render", version = "=0.0.1" }
+diffyman-detect = { path = "crates/diffyman-detect", version = "=0.0.1" }
+diffyman-adapter-binary = { path = "crates/diffyman-adapter-binary", version = "=0.0.1" }
+diffyman-adapter-tree = { path = "crates/diffyman-adapter-tree", version = "=0.0.1" }
 
 # Serialization and hashing
 serde = { version = "=1.0.229", features = ["derive"] }
@@ -37,6 +42,43 @@ icu_properties = "=2.4.0"
 regex = "=1.13.1"
 # Used only to measure a pattern's compiled size deterministically (ignore.regex limits).
 regex-automata = { version = "=0.4.18", default-features = false, features = ["std", "syntax", "unicode", "nfa-thompson"] }
+# Line splitting and interning for large inputs. Token ids are assigned in
+# first-seen order, so the hash function never affects output.
+memchr = "=2.8.3"
+hashbrown = { version = "=0.15.5", default-features = false }
+foldhash = { version = "=0.1.5", default-features = false }
+
+# Type detection and the binary adapter. `infer` without default features
+# skips its Compound File parser (no parsing of untrusted containers); blake3
+# uses its portable Rust code only (`pure`: no C or assembly, same on every
+# target). Chunk hashes only decide which chunks are equal; they never
+# appear in the output.
+infer = { version = "=0.22.0", default-features = false }
+fastcdc = { version = "=5.0.0", default-features = false }
+blake3 = { version = "=1.8.7", default-features = false, features = ["pure"] }
+
+# Folders and archives (diffyman-adapter-tree). Pure Rust only: zip reads
+# stored and deflate entries through flate2's miniz_oxide backend, zstd
+# frames go through ruzstd, and tar is parsed in the adapter itself (so every
+# header limit is ours). `ignore` matches `.gitignore`-style patterns
+# everywhere and walks folders on native targets.
+zip = { version = "=9.4.1", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "=1.1.11", default-features = false, features = ["rust_backend"] }
+ruzstd = { version = "=0.9.1", default-features = false, features = ["std"] }
+ignore = "=0.4.34"
+tempfile = "=3.27.0"
+
+# Benchmarks only (dev-dependency of the engine). Without the default
+# `rayon` and `plotters` features: statistics run on one thread and no
+# charts are drawn, which keeps the dependency tree small.
+criterion = { version = "=0.8.2", default-features = false, features = ["cargo_bench_support"] }
+
+# Input files are memory-mapped by the CLI (native targets only).
+memmap2 = "=0.9.12"
+# The CLI refuses an output file that is one of its inputs (device and inode
+# on Unix, volume and file index on Windows). Already in the tree through
+# `ignore`.
+same-file = "=1.0.6"
 
 # Command line
 clap = { version = "=4.6.7", features = ["derive"] }
@@ -46,7 +88,9 @@ pyo3 = { version = "=0.30.1", features = ["abi3-py311"] }
 wasm-bindgen = "=0.2.130"
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# Denied everywhere. The one exception is the CLI's memory map of input files
+# (`#[allow(unsafe_code)]` on that function, with its safety argument).
+unsafe_code = "deny"
 unused_qualifications = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }
 

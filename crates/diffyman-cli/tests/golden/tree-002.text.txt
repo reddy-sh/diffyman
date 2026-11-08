@@ -1,0 +1,6 @@
+M	README.md
+M	data/blob.bin
+A	new
+A	new/feature.txt
+D	old.txt
+M	src/app.py

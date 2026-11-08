@@ -1,0 +1,36 @@
+?{
+  "algorithm": "histogram",
+  "granularity": "line",
+  "ignore": {
+    "whitespace": "none",
+    "case": false,
+    "blankLines": false,
+    "regex": [
+      "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z"
+    ]
+  },
+  "context": 3,
+  "positionEncoding": "utf-8",
+  "detectMoves": false,
+  "adapter": "auto"
+}
+*2026-03-14T08:00:01.120Z INFO  worker-1 started, pid 4120
+2026-03-14T08:00:01.348Z INFO  worker-2 started, pid 4121
+2026-03-14T08:00:02.007Z INFO  queue connected: jobs-main
+2026-03-14T08:00:05.511Z WARN  slow response from inventory (812 ms)
+2026-03-14T08:00:09.903Z INFO  batch 1 done: 250 items
+2026-03-14T08:00:14.260Z INFO  batch 2 done: 250 items
+2026-03-14T08:00:18.775Z INFO  batch 3 done: 250 items
+2026-03-14T08:00:19.002Z INFO  shutdown requested
+2026-03-14T08:00:19.450Z INFO  worker-1 stopped
+2026-03-14T08:00:19.481Z INFO  worker-2 stopped
+2026-03-15T08:00:00.981Z INFO  worker-1 started, pid 5307
+2026-03-15T08:00:01.204Z INFO  worker-2 started, pid 5308
+2026-03-15T08:00:01.866Z INFO  queue connected: jobs-main
+2026-03-15T08:00:05.102Z WARN  slow response from inventory (790 ms)
+2026-03-15T08:00:09.415Z INFO  batch 1 done: 250 items
+2026-03-15T08:00:13.988Z INFO  batch 2 done: 250 items
+2026-03-15T08:00:18.390Z ERROR batch 3 failed: inventory timeout
+2026-03-15T08:00:18.611Z INFO  shutdown requested
+2026-03-15T08:00:19.036Z INFO  worker-1 stopped
+2026-03-15T08:00:19.070Z INFO  worker-2 stopped

@@ -13,10 +13,31 @@ authors.workspace = true
 name = "diffyman"
 path = "src/main.rs"
 
+[features]
+default = ["mmap"]
+# Memory-map input files instead of reading them into memory. Only used on
+# native targets; without it (or with `--no-mmap`) inputs are read.
+mmap = ["dep:memmap2"]
+
 [dependencies]
-diffyman.workspace = true
+diffyman = { workspace = true, features = ["fs"] }
+diffyman-render.workspace = true
+# Algorithm IDs, the detection table and the comparison-key rules, for
+# `diffyman formats` and `diffyman textconv`.
+diffyman-algo.workspace = true
+diffyman-detect.workspace = true
+diffyman-adapter-binary.workspace = true
+diffyman-adapter-tree.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 clap.workspace = true
+same-file.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+memmap2 = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

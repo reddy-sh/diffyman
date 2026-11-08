@@ -124,10 +124,59 @@ The 1 GB pair through the CLI (`diffyman diff --json`, release) takes 10.4 s wal
 max RSS and 5.7 GB peak footprint, and reports the same 48,485 changes (196,662 changed lines) as the
 spike. Time is within budget; memory is not, because the CLI reads both files into memory and the
 engine keeps a record and an owned comparison key per line. Large-file mode (memory-mapped input and
-borrowed keys) is the next increment.
+borrowed keys) followed in increment 1b, below.
 
 Regression tests are in `crates/diffyman-algo/tests/line_diff_guard.rs`: 5 M identical lines with 10
 edits, swapped pairs (budget hit, linear work growth, unguarded work quadratic), the low-frequency and
 all-different cases, and random inputs checked for validity, equality with upstream Histogram below the
 budget, and Myers minimality when `approximate` is not set. The full-size swapped-pairs timing check
 runs in release with `cargo test --release -p diffyman-algo --test line_diff_guard -- --ignored`.
+
+### Large-file mode
+
+Added in Phase 1, increment 1b. The output is unchanged: every golden file passes in strict
+conformance without re-blessing, CLI, Python and WASM stay byte-identical, and the spike-A outputs
+below match the earlier build byte for byte (text, and JSON without `provenance`).
+
+- **Input.** The CLI memory-maps regular files (`memmap2` 0.9.12, feature `mmap`, on by default and
+  native-only; `--no-mmap`, pipes and empty files are read instead), with a read-ahead hint. Mapped
+  pages stay in the file cache, outside the process footprint. Unsafe code is denied workspace-wide;
+  the map is the one allowed exception.
+- **Lines.** `lines::LineIndex` keeps only line start offsets (4 bytes per line under 4 GiB); content
+  and terminator are derived from the text on demand. The text renderer walks lines with a forward
+  `LineCursor` instead of a line table.
+- **Identical inputs.** Byte-identical sides are decoded once (one SHA-256, one line index) and never
+  tokenized: the whole file is the common prefix.
+- **Trim before interning.** `key::tokenize_core` finds the common prefix and suffix on raw bytes,
+  extends them by comparison keys when an ignore option normalizes lines, and interns only the lines
+  in between. The trimmed region is exactly the one `align` trims, so the alignment is the same, and
+  token ids are a relabeling that the algorithms do not depend on. `key::is_approximate_core` gives the
+  same answer as `is_approximate` on the full sequences: a changed line also counts when its key occurs
+  only in the trimmed lines, which are read only when the core alone cannot decide.
+- **Keys and interning.** With no normalizing option, the key of a line is its raw bytes, borrowed from
+  the text (equal raw bytes mean equal content and terminator). Otherwise each distinct key is copied
+  once into one arena, built in a reused buffer. The table (`hashbrown` 0.15.5 `HashTable`, `foldhash`
+  0.1.5, fixed seed) stores a token and a 32-bit hash per distinct key, so it grows without reading keys
+  again. Ids are assigned in first-seen order, so the hash function never affects output.
+- **Threads.** On native targets, the two sides are decoded (SHA-256, UTF-8 check, line index) on two
+  threads above 4 MiB per side, and line keys are hashed on two threads above 65,536 lines per side;
+  ids are still assigned in order on one thread. WASM builds have no threads.
+- **Output.** The canonical writer streams to any `io::Write` (and the document id is hashed as it is
+  produced): each object is serialized once to read its keys, then once per key in sorted order,
+  writing only that member. No text or JSON tree is held, whatever the document size.
+
+Measured with `spikes/line-diff-bench/cli-bench.sh` (the real CLI, one process per run, file cache
+warm, peak memory footprint from `/usr/bin/time -l`), release build on the development Mac:
+
+| Case | Before: wall, footprint | After `--json` | After text diff |
+|---|---|---|---|
+| 1 GB log pair (9.65 M lines per side) | 8.5 s, 4,537 MB | 1.9 s, 536 MB | 2.3 s, 536 MB |
+| 100 MB log pair | 0.52 s, 416 MB | 0.14 s, 52 MB | 0.17 s, 56 MB |
+| 5 M copies of one line, 1,038 edits | 0.90 s, 561 MB | 0.48 s, 205 MB | 0.58 s, 205 MB |
+| 1 GB log against itself | 7.3 s, 4,424 MB | 0.65 s, 58 MB | 0.66 s, 58 MB |
+
+On the 1 GB pair about 0.6 s goes to hashing and indexing both sides, 0.9 s to interning, 0.3 s to
+the line diff and 0.1 s to writing the 19 MB document. The remaining footprint is mostly the line
+index (77 MB), the tokens (77 MB), the interning table (about 210 MB while it exists) and the
+Histogram working set. With a cold file cache, the first pass reads the files from disk and the run
+is I/O bound.

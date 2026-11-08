@@ -40,21 +40,45 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
+      - name: Fetch dependencies
+        # The only step of this job that may use the network for Cargo.
+        run: cargo fetch --locked
+
       - name: Format
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+        # --all-targets also checks the benchmarks, which run nightly
+        # (nightly.yml).
+        run: cargo clippy --locked --offline --workspace --all-targets -- -D warnings
 
-      - name: Test
-        run: cargo test --locked --workspace
+      # Tests and the conformance corpus run offline: Cargo may not touch the
+      # network, and HTTP clients that honor the proxy variables get a port
+      # nothing listens on. No test needs the network (the git tests use local
+      # repositories and a temporary configuration only), so a test that starts
+      # to need it fails here instead of passing by luck.
+      - name: Test (offline)
+        env:
+          CARGO_NET_OFFLINE: "true"
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
+        run: cargo test --locked --offline --workspace
 
-      - name: Conformance corpus
-        run: cargo run --locked -p diffyman-conformance -- --strict
+      - name: Conformance corpus (offline)
+        env:
+          CARGO_NET_OFFLINE: "true"
+          HTTP_PROXY: http://127.0.0.1:9
+          HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
+          NO_PROXY: ""
+        run: cargo run --locked --offline -p diffyman-conformance -- --strict
 
       - name: Build the engine for wasm32
         if: runner.os == 'Linux'
-        run: cargo build --locked -p diffyman --target wasm32-unknown-unknown
+        # As the WASM binding uses it: without `fs` (no folder walking).
+        run: cargo build --locked -p diffyman --no-default-features --target wasm32-unknown-unknown
 
   bindings:
     # Spike B (docs/spikes/B-binding-round-trip.md): the CLI, the Python

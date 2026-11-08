@@ -1,0 +1,20 @@
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,3 @@
+ # Project
+ 
+-Old intro.
++New intro.
+Binary files a/data/blob.bin and b/data/blob.bin differ
+Only in right: new
+Only in right: new/feature.txt
+Only in left: old.txt
+--- a/src/app.py
++++ b/src/app.py
+@@ -1,5 +1,5 @@
+ def main():
+-    print('hello')
++    print('hello, world')
+ 
+ if __name__ == '__main__':
+     main()

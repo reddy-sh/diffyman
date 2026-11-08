@@ -25,7 +25,7 @@ doctest = false
 extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-diffyman.workspace = true
+diffyman = { workspace = true, features = ["fs"] }
 pyo3.workspace = true
 
 [lints]

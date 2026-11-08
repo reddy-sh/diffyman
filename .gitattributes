@@ -4,3 +4,8 @@
 # Golden corpus files are compared byte for byte (line terminators, BOMs and
 # missing final newlines are test inputs), so git must never convert them.
 tests/corpus/** -text
+
+# Renderer snapshots and CLI golden outputs are exact output bytes (CRLF lines,
+# BOMs, control characters), compared byte for byte by their tests.
+crates/diffyman-render/tests/snapshots/** -text
+crates/diffyman-cli/tests/golden/** -text

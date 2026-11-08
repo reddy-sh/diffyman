@@ -1,6 +1,6 @@
 //! Diff Document types for diffyman, plus their canonical JSON form and JSON Schema.
 //!
-//! The normative definition is `docs/spec/diff-document.md` (schema `0.2.0`).
+//! The normative definition is `docs/spec/diff-document.md` (schema `0.3.0`).
 //! This crate holds no diff logic:
 //!
 //! - [`document`] and [`options`]: serde types for the document and its options.
@@ -35,15 +35,26 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 const HEX: &[u8; 16] = b"0123456789abcdef";
 
 /// Computes the document `id`: `"sha256:"` + hex SHA-256 of the JCS bytes of the
-/// document without its `id` and `provenance` keys (spec §5).
+/// document without its `id` and `provenance` keys (spec §5). The bytes are
+/// hashed as they are produced, never held in memory.
 pub fn compute_id(doc: &DiffDocument) -> Result<String, JcsError> {
-    let canonical = jcs::to_canonical_string_without(doc, &["id", "provenance"])?;
-    Ok(format!("sha256:{}", sha256_hex(canonical.as_bytes())))
+    let hex = jcs::canonical_sha256_hex(doc, &["id", "provenance"])?;
+    Ok(format!("sha256:{hex}"))
 }
 
 /// The canonical (JCS) JSON text of the whole document.
 pub fn to_canonical_json(doc: &DiffDocument) -> Result<String, JcsError> {
     jcs::to_canonical_string(doc)
+}
+
+/// Writes the canonical (JCS) JSON text of the whole document to `writer`
+/// as it is produced: the same bytes as [`to_canonical_json`], without
+/// holding them. Pass a buffered writer.
+pub fn write_canonical_json<W: std::io::Write>(
+    doc: &DiffDocument,
+    writer: W,
+) -> Result<(), JcsError> {
+    jcs::to_canonical_writer(doc, writer)
 }
 
 /// The canonical JSON text of the document without `provenance`: the form two
@@ -104,6 +115,8 @@ mod tests {
                 change_count: 0,
                 hunk_count: 0,
                 similarity: Similarity::ONE,
+                bytes: None,
+                tree: None,
             }),
             hunks: vec![],
             moves: vec![],
@@ -156,6 +169,27 @@ mod tests {
         let mut c = sample();
         c.left.name = Some("other.txt".to_owned());
         assert_ne!(compute_id(&a).unwrap(), compute_id(&c).unwrap());
+    }
+
+    /// The streamed id and writer give the bytes of the reference path:
+    /// SHA-256 of the canonical string, and the canonical string itself.
+    #[test]
+    fn streamed_id_and_writer_match_the_reference_path() {
+        let mut doc = sample();
+        doc.warnings
+            .push(Warning::new(WarningCode::NoNewlineAtEof, Some(Side::Left)));
+        let text = jcs::to_canonical_string_without(&doc, &["id", "provenance"]).unwrap();
+        assert_eq!(
+            compute_id(&doc).unwrap(),
+            format!("sha256:{}", sha256_hex(text.as_bytes()))
+        );
+        doc.id = compute_id(&doc).unwrap();
+        let mut bytes = Vec::new();
+        write_canonical_json(&doc, &mut bytes).unwrap();
+        assert_eq!(
+            String::from_utf8(bytes).unwrap(),
+            to_canonical_json(&doc).unwrap()
+        );
     }
 
     #[test]
@@ -283,6 +317,7 @@ mod tests {
         assert!(serde_json::to_value(WarningCode::Unknown).is_err());
         assert!(serde_json::to_value(Algorithm::Unknown).is_err());
         assert!(serde_json::to_value(PositionEncoding::Unknown).is_err());
+        assert!(serde_json::to_value(Adapter::Unknown).is_err());
         let mut doc = sample();
         doc.options.granularity = Granularity::Unknown;
         assert!(to_canonical_json(&doc).is_err());
@@ -333,6 +368,46 @@ mod tests {
         assert!(text.contains(r#""similarity":0.875,"#), "{text}");
         let back: Move = serde_json::from_str(&text).unwrap();
         assert_eq!(back, edited);
+    }
+
+    #[test]
+    fn byte_range_and_byte_stats_shape_per_spec() {
+        let range = ByteRange {
+            left_offset: 10,
+            left_length: 0,
+            right_offset: 12,
+            right_length: 3,
+            op: OpKind::Insert,
+        };
+        assert_eq!(
+            jcs::to_canonical_string(&range).unwrap(),
+            r#"{"leftLength":0,"leftOffset":10,"op":"insert","rightLength":3,"rightOffset":12}"#
+        );
+        let stats = ByteStats {
+            left: 10,
+            right: 13,
+            added: 3,
+            removed: 0,
+            unchanged: 10,
+        };
+        assert_eq!(
+            jcs::to_canonical_string(&stats).unwrap(),
+            r#"{"added":3,"left":10,"removed":0,"right":13,"unchanged":10}"#
+        );
+        let mut doc = sample();
+        doc.kind = Kind::Binary;
+        doc.bytes.push(range);
+        doc.stats.as_mut().unwrap().bytes = Some(stats);
+        let text = to_canonical_json(&doc).unwrap();
+        assert!(text.contains(r#""kind":"binary""#), "{text}");
+        let back: DiffDocument = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, doc);
+        // A text document writes `stats.bytes: null`.
+        assert!(
+            to_canonical_json(&sample())
+                .unwrap()
+                .contains(r#""bytes":null"#)
+        );
     }
 
     #[test]
@@ -414,11 +489,111 @@ mod tests {
         assert_eq!(
             text,
             concat!(
-                r#"{"algorithm":"histogram","context":3,"detectMoves":false,"granularity":"line","#,
+                r#"{"adapter":"auto","algorithm":"histogram","context":3,"detectMoves":false,"granularity":"line","#,
                 r#""ignore":{"blankLines":false,"case":false,"regex":[],"whitespace":"none"},"#,
-                r#""positionEncoding":"utf-8"}"#
+                r#""positionEncoding":"utf-8","#,
+                r#""tree":{"childBudget":16777216,"detectMoves":true,"exclude":[],"followSymlinks":false,"#,
+                r#""ignoreFiles":false,"maxDepth":3}}"#
             )
         );
+    }
+
+    #[test]
+    fn tree_shape_per_spec() {
+        let mut child = sample();
+        child.id = compute_id(&child).unwrap();
+        let entry = TreeEntry {
+            path: "a/b.txt".to_owned(),
+            from_path: None,
+            status: EntryStatus::Modified,
+            left: Some(EntrySide {
+                entry_type: EntryType::File,
+                size: Some(3),
+                sha256: Some("ab".to_owned()),
+                target: None,
+            }),
+            right: None,
+            child_document: Some(Box::new(ChildDocument::from(child.clone()))),
+            child_ref: None,
+        };
+        let text = jcs::to_canonical_string(&entry).unwrap();
+        assert!(
+            text.starts_with(r#"{"childDocument":{"#),
+            "keys sorted, child first: {text}"
+        );
+        assert!(
+            text.ends_with(concat!(
+                r#""childRef":null,"fromPath":null,"#,
+                r#""left":{"sha256":"ab","size":3,"target":null,"type":"file"},"#,
+                r#""path":"a/b.txt","right":null,"status":"modified"}"#
+            )),
+            "{text}"
+        );
+        // The child is the document without `provenance`, and its id is the
+        // document's id.
+        assert!(!text.contains("provenance"), "{text}");
+        let child_text = jcs::to_canonical_string(&ChildDocument::from(child.clone())).unwrap();
+        assert_eq!(
+            child_text,
+            jcs::to_canonical_string_without(&child, &["provenance"]).unwrap()
+        );
+        // Round trip, with an empty provenance on the way back.
+        let back: TreeEntry = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, entry);
+        let doc = DiffDocument::from(*back.child_document.unwrap());
+        assert_eq!(doc.provenance, Provenance::default());
+        assert_eq!(doc.id, child.id);
+
+        let stats = TreeStats {
+            entries_left: 3,
+            entries_right: 2,
+            added: 0,
+            removed: 1,
+            modified: 1,
+            moved: 0,
+            type_changed: 0,
+            unchanged: 1,
+        };
+        assert_eq!(
+            jcs::to_canonical_string(&stats).unwrap(),
+            concat!(
+                r#"{"added":0,"entriesLeft":3,"entriesRight":2,"modified":1,"moved":0,"#,
+                r#""removed":1,"typeChanged":0,"unchanged":1}"#
+            )
+        );
+        for (status, text) in [
+            (EntryStatus::Added, "added"),
+            (EntryStatus::Removed, "removed"),
+            (EntryStatus::Modified, "modified"),
+            (EntryStatus::Unchanged, "unchanged"),
+            (EntryStatus::Moved, "moved"),
+            (EntryStatus::TypeChange, "typeChange"),
+        ] {
+            assert_eq!(serde_json::to_value(status).unwrap(), text);
+        }
+        for (t, text) in [
+            (EntryType::File, "file"),
+            (EntryType::Directory, "directory"),
+            (EntryType::Symlink, "symlink"),
+            (EntryType::Hardlink, "hardlink"),
+            (EntryType::Other, "other"),
+        ] {
+            assert_eq!(serde_json::to_value(t).unwrap(), text);
+        }
+        assert!(serde_json::to_value(EntryStatus::Unknown).is_err());
+        assert!(serde_json::to_value(EntryType::Unknown).is_err());
+        let unknown: EntrySide = serde_json::from_str(r#"{"type": "socketpair"}"#).unwrap();
+        assert_eq!(unknown.entry_type, EntryType::Unknown);
+
+        let mut doc = sample();
+        doc.kind = Kind::Tree;
+        doc.tree = Some(Tree {
+            entries: vec![entry],
+        });
+        doc.stats.as_mut().unwrap().tree = Some(stats);
+        let text = to_canonical_json(&doc).unwrap();
+        let back: DiffDocument = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, doc);
     }
 
     #[test]
@@ -441,6 +616,23 @@ mod tests {
         );
         let text = doc.to_string();
         assert!(text.contains("positionEncoding"));
+        // 0.3.0 additions.
+        assert!(
+            text.contains("\"binary-fallback\""),
+            "warning code `binary-fallback`"
+        );
+        assert!(text.contains("leftOffset"), "byte ranges");
+        assert!(text.contains("\"adapter\""), "adapter option");
+        assert!(text.contains("childDocument"), "tree entries");
+        assert!(text.contains("\"typeChange\""), "entry status");
+        assert!(text.contains("\"invalid-archive\""), "tree warning codes");
+        assert_eq!(
+            doc["$defs"]["TreeEntry"]["required"]
+                .as_array()
+                .unwrap()
+                .len(),
+            7
+        );
         // 0.2.0 additions.
         assert!(text.contains("\"ignored\""), "op kind `ignored`");
         assert!(
@@ -458,5 +650,8 @@ mod tests {
             "options never accept null"
         );
         assert_eq!(opts["properties"]["context"]["maximum"], 2_147_483_647);
+        let tree = &opts["$defs"]["TreeOptionsInput"];
+        assert_eq!(tree["additionalProperties"], false, "{tree}");
+        assert_eq!(tree["properties"]["maxDepth"]["maximum"], 16);
     }
 }

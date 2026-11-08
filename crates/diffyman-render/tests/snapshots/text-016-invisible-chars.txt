@@ -1,0 +1,4 @@
+left.txt -> right.txt: different, 2 changes in 1 hunk, +3 -3 lines, 40% similar
+  left:     5 lines, 111 bytes, LF
+  right:    5 lines, 115 bytes, LF
+  lines:    3 added, 3 removed, 2 unchanged
