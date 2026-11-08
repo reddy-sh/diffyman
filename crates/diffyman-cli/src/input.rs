@@ -59,9 +59,10 @@ fn map_file(path: &Path) -> Result<Option<memmap2::Mmap>, String> {
     // inputs are expected to stay unchanged for the duration of one diff
     // (`--no-mmap` reads them instead).
     let map = unsafe { memmap2::Mmap::map(&file) }.ok();
+    // Every byte is read at least once, front to back: ask for read-ahead.
+    // Only a hint; a refusal changes nothing. memmap2 offers advice on Unix only.
+    #[cfg(unix)]
     if let Some(map) = &map {
-        // Every byte is read at least once, front to back: ask for read-ahead.
-        // Only a hint; a refusal changes nothing.
         let _ = map.advise(memmap2::Advice::WillNeed);
     }
     Ok(map)
