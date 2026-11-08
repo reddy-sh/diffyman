@@ -1,0 +1,43 @@
+#!/bin/sh
+set -eu
+
+LOG_DIR=/var/log/backup
+TARGET=/mnt/archive
+
+check_target() {
+  if [ ! -d "$TARGET" ]; then
+    echo "archive target $TARGET is not mounted" >&2
+    exit 1
+  fi
+  free_kb=$(df -k "$TARGET" | awk 'NR == 2 { print $4 }')
+  if [ "$free_kb" -lt 1048576 ]; then
+    echo "less than 1 GB free on $TARGET" >&2
+    exit 1
+  fi
+}
+
+copy_home() {
+  for dir in /home/*; do
+    name=$(basename "$dir")
+    tar -czf "$TARGET/home-$name.tar.gz" -C /home "$name"
+    log "archived home directory $name"
+  done
+}
+
+copy_etc() {
+  tar -czf "$TARGET/etc.tar.gz" -C / etc
+  log "archived /etc"
+}
+
+log() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG_DIR/run.log"
+}
+rotate_logs() {
+  find "$LOG_DIR" -name 'run.log.*' -mtime +30 -delete
+  mv "$LOG_DIR/run.log" "$LOG_DIR/run.log.$(date +%Y%m%d)"
+}
+
+check_target
+copy_home
+copy_etc
+rotate_logs

@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 11,
+        "count": 3
+      },
+      "right": {
+        "start": 7,
+        "count": 3
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "The allergens paragraph moved up above the end-of-shift paragraph, and every one of its three lines was edited on the way: two typos fixed on the first two lines and one word changed on the last."
+}

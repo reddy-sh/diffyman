@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 4,
+        "count": 2
+      },
+      "right": {
+        "start": 11,
+        "count": 2
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Right-to-left text. Two Hebrew lines about returning books moved from the Hebrew opening-hours block to the end of the file, after the Arabic block. Line numbers are logical (storage) order."
+}

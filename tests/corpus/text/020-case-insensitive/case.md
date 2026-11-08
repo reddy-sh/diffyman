@@ -1,0 +1,3 @@
+# 020-case-insensitive
+
+Runs `ignore.case: true`, which applies Unicode simple case folding (CaseFolding.txt statuses C and S only). These pairs fold to the same key and must compare equal: ASCII case, Greek capital and final sigma, U+212A KELVIN SIGN versus `k`, and U+1E9E CAPITAL SHARP S versus `ß`. These must still differ: `Fuß` versus `FUSS` (ß to ss is a full folding, status F), `İstanbul` versus `istanbul` (U+0130 has only F and T foldings), and a real text change on the last line. A correct result has one hunk with equal L3-5, `replace` L6-7, equal L8 and `replace` L9 (three lines of context before the first change), `linesUnchanged: 6`.

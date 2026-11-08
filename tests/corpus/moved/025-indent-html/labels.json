@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 5,
+        "count": 2
+      },
+      "right": {
+        "start": 9,
+        "count": 2
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Two navigation links moved from the main menu into the nested Docs submenu, gaining four spaces of indentation."
+}

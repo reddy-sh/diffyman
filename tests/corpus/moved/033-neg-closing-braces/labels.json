@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "Only closing-brace lines changed position: the `}` that ends the if block and the `});` that ends the event listener each moved down past two or one line. Both are trivial lines (at most two alphanumeric characters), so nothing is a move."
+}

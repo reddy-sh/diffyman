@@ -1,0 +1,17 @@
+"""Helpers shared by the reporting jobs."""
+
+import datetime
+import decimal
+import logging
+import os
+import pathlib
+import re
+def week_label(day):
+  monday = day - datetime.timedelta(days=day.weekday())
+  return f"week of {monday:%d %b %Y}"
+
+log = logging.getLogger(__name__)
+
+
+def output_dir():
+  return pathlib.Path(os.environ.get("REPORT_DIR", "/tmp/reports"))

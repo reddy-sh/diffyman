@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "A single log line moved below the code that computes the value it prints. A reader may call it a move, but it is one non-trivial line with fewer than 40 alphanumeric characters, so it is below the single-line minimum."
+}

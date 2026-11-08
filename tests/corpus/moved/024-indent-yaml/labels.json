@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 3,
+        "count": 3
+      },
+      "right": {
+        "start": 12,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Three settings moved from a top-level defaults map into the worker service, two levels deeper. The emptied `defaults:` key is deleted and is not part of the move."
+}

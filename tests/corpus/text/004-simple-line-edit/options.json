@@ -1,0 +1,13 @@
+{
+  "algorithm": "myers",
+  "granularity": "line",
+  "ignore": {
+    "whitespace": "none",
+    "case": false,
+    "blankLines": false,
+    "regex": []
+  },
+  "context": 3,
+  "positionEncoding": "utf-8",
+  "detectMoves": false
+}

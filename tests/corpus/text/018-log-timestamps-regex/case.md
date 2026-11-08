@@ -1,0 +1,3 @@
+# 018-log-timestamps-regex
+
+Two runs of the same job log; every timestamp differs, and so do the pids, one latency value and the batch 3 outcome. `ignore.regex` holds one pattern that masks the leading ISO 8601 timestamp. Non-empty `ignore.regex` is deferred to schema 0.2.0 (spec section 9), so the correct 0.1.0 result is `status: "error"` with one `unsupported-option` error (`side: null`), `hunks: []`, `stats: null`, both file metas filled in, and the regex echoed in `options`. Once masking ships, the expected result becomes `replace` ops for the pid lines (L1-2), the latency line (L4) and the batch 3 line (L7) only.

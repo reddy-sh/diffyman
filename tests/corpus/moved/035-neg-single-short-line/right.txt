@@ -1,0 +1,7 @@
+def warm_cache(cache, keys, log):
+  started = time.monotonic()
+  for key in keys:
+    cache.load(key)
+  elapsed = int((time.monotonic() - started) * 1000)
+  log.debug("cache warmed in %d ms", elapsed)
+  return elapsed

@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 9,
+        "count": 3
+      },
+      "right": {
+        "start": 17,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "week_label() was deleted after the imports and inserted twice near the end of the file. A deleted block pairs with at most one destination; the selection order (left start, then right start) picks the first copy, and the second copy stays a plain insertion."
+}

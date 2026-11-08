@@ -1,0 +1,12 @@
+def read_rows(path):
+  rows = []
+  with open(path, encoding="utf-8") as handle:
+    for raw_line in handle:
+      line = raw_line.strip()
+      if line and not line.startswith("#"):
+        rows.append(line.split(","))
+  return rows
+
+
+def count_rows(path):
+  return len(read_rows(path))

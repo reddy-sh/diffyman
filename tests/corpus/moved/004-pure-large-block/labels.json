@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 5,
+        "count": 32
+      },
+      "right": {
+        "start": 85,
+        "count": 32
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A 32-line route table moved from above the 79 lines of handler functions to below them. The handler bodies repeat line for line (the same res.json and closing-brace lines occur many times), which must not disturb the single large move."
+}

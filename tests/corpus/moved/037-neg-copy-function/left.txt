@@ -1,0 +1,28 @@
+package mathx
+
+func Abs(x int) int {
+  if x < 0 {
+    return -x
+  }
+  return x
+}
+
+func Clamp(x, low, high int) int {
+  if x < low {
+    return low
+  }
+  if x > high {
+    return high
+  }
+  return x
+}
+
+func Sign(x int) int {
+  switch {
+  case x > 0:
+    return 1
+  case x < 0:
+    return -1
+  }
+  return 0
+}

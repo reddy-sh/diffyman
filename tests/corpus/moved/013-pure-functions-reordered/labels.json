@@ -1,0 +1,27 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 3,
+        "count": 5
+      },
+      "right": {
+        "start": 24,
+        "count": 5
+      },
+      "kind": "pure"
+    },
+    {
+      "left": {
+        "start": 13,
+        "count": 7
+      },
+      "right": {
+        "start": 30,
+        "count": 7
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Five functions sorted into alphabetical order. alpha, bravo and charlie keep their relative order and are matched in place by the line diff; delta and echo are the two moved functions, and their destinations are consecutive."
+}

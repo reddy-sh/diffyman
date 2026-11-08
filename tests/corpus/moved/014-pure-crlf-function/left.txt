@@ -1,0 +1,38 @@
+using System;
+using System.Collections.Generic;
+
+namespace Billing
+{
+  public static class Rates
+  {
+    public static decimal Vat(decimal net, string country)
+    {
+      var rate = country switch
+      {
+        "DE" => 0.19m,
+        "FR" => 0.20m,
+        "NL" => 0.21m,
+        _ => throw new ArgumentException($"no VAT rate for {country}"),
+      };
+      return Math.Round(net * rate, 2);
+    }
+
+    public static decimal Discount(decimal net, int quantity)
+    {
+      if (quantity >= 100) return net * 0.10m;
+      if (quantity >= 20) return net * 0.05m;
+      return 0m;
+    }
+
+    public static decimal Shipping(decimal weightKg, bool express)
+    {
+      var basePrice = weightKg <= 2 ? 4.90m : 4.90m + (weightKg - 2) * 1.10m;
+      return express ? basePrice * 2 : basePrice;
+    }
+
+    public static decimal RoundToCash(decimal amount)
+    {
+      return Math.Round(amount * 20, MidpointRounding.AwayFromZero) / 20;
+    }
+  }
+}

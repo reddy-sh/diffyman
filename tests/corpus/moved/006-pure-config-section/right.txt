@@ -1,0 +1,30 @@
+[server]
+host = 0.0.0.0
+port = 8443
+read_timeout = 15s
+write_timeout = 30s
+max_body_size = 8MB
+
+[database]
+url = postgres://app@db.internal:5432/orders
+pool_min = 2
+pool_max = 20
+statement_timeout = 5s
+migrations_dir = ./migrations
+
+[logging]
+level = info
+format = json
+output = stdout
+include_caller = false
+
+[metrics]
+enabled = true
+listen = 0.0.0.0:9100
+namespace = orders
+
+[cache]
+backend = redis
+address = cache.internal:6379
+default_ttl = 10m
+key_prefix = orders:

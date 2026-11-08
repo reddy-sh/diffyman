@@ -1,0 +1,14 @@
+function render(list) {
+  if (list.length > 0) {
+    drawHeader();
+  drawRows(list);
+  drawFooter();
+  }
+}
+
+function bind(button) {
+  button.addEventListener("click", () => {
+    toggle(button);
+  button.focus();
+  });
+}

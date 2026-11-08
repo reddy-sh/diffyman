@@ -1,10 +1,11 @@
 # Rust
-/target/
+target/
 **/*.rs.bk
 
 # Node / WASM
 node_modules/
-/bindings/wasm/pkg/
+# wasm-pack output (pkg/, pkg-web/, pkg-node/, ...) is never committed.
+/bindings/wasm/pkg*/
 dist/
 
 # Python
@@ -12,6 +13,11 @@ __pycache__/
 *.py[cod]
 .venv/
 *.egg-info/
+.pytest_cache/
+.ruff_cache/
+# Native extension copied in by `maturin develop`
+/bindings/python/python/diffyman/*.so
+/bindings/python/python/diffyman/*.pyd
 
 # Java
 /bindings/java/target/
@@ -19,7 +25,8 @@ __pycache__/
 
 # Local secrets and config
 .env
-.env.local
+.env.*
+!.env.example
 *.local.json
 
 # Editors and OS

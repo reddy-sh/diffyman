@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 8,
+        "count": 2
+      },
+      "right": {
+        "start": 3,
+        "count": 2
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "CRLF line endings on both sides. Two checklist steps moved from near the end of the list to right after the first step; their numbers were not updated, which keeps the move pure."
+}

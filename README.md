@@ -4,7 +4,7 @@
 
 diffyman is an open-source, headless diff engine. One Rust core compares two files or folders and always returns the same versioned JSON result, the **Diff Document**. You get that result from a command-line tool, from language bindings (Python, Java, JavaScript/WASM and more), and from a local REST API.
 
-> **Status:** early development. The architecture is planned; code is landing in the open from here. Nothing is ready to install yet.
+> **Status:** early development — foundations are in place (spec v0, engine skeleton, CLI, Python and WASM bindings). Nothing is ready to install yet. See [docs/STATUS.md](docs/STATUS.md).
 
 ## Why
 

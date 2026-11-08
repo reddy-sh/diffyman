@@ -1,0 +1,38 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 3,
+        "count": 3
+      },
+      "right": {
+        "start": 39,
+        "count": 3
+      },
+      "kind": "pure"
+    },
+    {
+      "left": {
+        "start": 19,
+        "count": 3
+      },
+      "right": {
+        "start": 7,
+        "count": 3
+      },
+      "kind": "pure"
+    },
+    {
+      "left": {
+        "start": 31,
+        "count": 3
+      },
+      "right": {
+        "start": 35,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A glossary was put back into alphabetical order: Justified text moved from first to last, Baseline moved up to second, and Italic moved down to ninth. Every other entry stays in place. The Italic and Justified text destinations are consecutive."
+}

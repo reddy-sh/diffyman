@@ -1,0 +1,21 @@
+from transport import Request, send_raw
+
+
+def build_request(url, raw_headers, body):
+  request = Request(url)
+  request.headers = clean_headers(raw_headers)
+  request.body = body
+  return request
+
+
+def send(request, timeout=10):
+  response = send_raw(request, timeout=timeout)
+  response.raise_for_status()
+  return response
+
+
+def clean_headers(raw_headers):
+  headers = dict(raw_headers)
+  headers.pop("Connection", None)
+  headers.pop("keep-alive", None)
+  return headers

@@ -1,0 +1,39 @@
+import json
+import os
+import sys
+
+def parse_config(path):
+  with open(path, encoding="utf-8") as handle:
+    raw = json.load(handle)
+  if "version" not in raw:
+    raise ValueError("config file has no version field")
+  raw.setdefault("workers", os.cpu_count())
+  raw.setdefault("log_level", "info")
+  return raw
+
+def load_jobs(directory):
+  jobs = []
+  for name in sorted(os.listdir(directory)):
+    if not name.endswith(".job"):
+      continue
+    full = os.path.join(directory, name)
+    with open(full, encoding="utf-8") as handle:
+      jobs.append(handle.read().strip())
+  print(f"loaded {len(jobs)} jobs from {directory}")
+  return jobs
+
+def main(argv):
+  if len(argv) < 3:
+    print("usage: runner CONFIG JOBDIR", file=sys.stderr)
+    return 2
+  config = parse_config(argv[1])
+  jobs = load_jobs(argv[2])
+  for index, job in enumerate(jobs, start=1):
+    if index > config["workers"] * 4:
+      print("queue limit reached, stopping early")
+      break
+    print(f"[{index}] {job}")
+  return 0
+
+if __name__ == "__main__":
+  sys.exit(main(sys.argv))

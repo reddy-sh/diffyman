@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 6,
+        "count": 2
+      },
+      "right": {
+        "start": 9,
+        "count": 2
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Two lines moved from the top of sync() into the body of the if statement further down, gaining two spaces of indentation. Every line of the block has the same indentation delta, so the move is pure under allowIndentationChange."
+}

@@ -1,0 +1,13 @@
+{
+  "algorithm": "histogram",
+  "granularity": "line",
+  "ignore": {
+    "whitespace": "change",
+    "case": false,
+    "blankLines": false,
+    "regex": []
+  },
+  "context": 3,
+  "positionEncoding": "utf-8",
+  "detectMoves": false
+}

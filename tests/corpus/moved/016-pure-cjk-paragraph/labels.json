@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 4,
+        "count": 3
+      },
+      "right": {
+        "start": 10,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Chinese text. The three-line installation paragraph moved from second place to the end. Han ideographs count as alphanumeric for the move size rules."
+}

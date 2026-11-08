@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 8,
+        "count": 1
+      },
+      "right": {
+        "start": 3,
+        "count": 1
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A one-line summary sentence moved from the end of the route description to the start. It is a single line, but long enough (over 40 alphanumeric characters) to count as a move."
+}

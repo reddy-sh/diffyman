@@ -1,0 +1,3 @@
+# 007-whitespace-change
+
+Runs `ignore.whitespace: "change"` (git `diff -b`). Lines 2-5 differ only in whitespace runs, trailing whitespace, tab versus spaces in the indent, and form feed / vertical tab versus space, so they compare equal. Three lines must still differ: L8 gains a space where there was none (`foobar` -> `foo bar`), L10 swaps U+00A0 NO-BREAK SPACE for a plain space (U+00A0 is not whitespace under spec 7.2), and L12 gains leading whitespace where there was none. A correct result has one hunk with three single-line `replace` ops at L8, L10 and L12, `linesUnchanged: 10` and `status: "different"`.

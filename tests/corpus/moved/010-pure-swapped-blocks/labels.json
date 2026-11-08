@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 14,
+        "count": 4
+      },
+      "right": {
+        "start": 3,
+        "count": 4
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Two adjacent sections swapped places. The larger Accounts section is matched in place by the line diff, so only the shorter First week section is reported as moved; a reader may see a swap, but one side of a swap is always an equal op."
+}

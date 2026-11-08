@@ -1,0 +1,118 @@
+"use strict";
+
+const db = require("./db");
+
+const routes = [
+  { method: "get", path: "/api/v1/users", handler: "listUsers", auth: true },
+  { method: "post", path: "/api/v1/users", handler: "createUser", auth: true },
+  { method: "get", path: "/api/v1/users/:id", handler: "getUser", auth: true },
+  { method: "patch", path: "/api/v1/users/:id", handler: "updateUser", auth: true },
+  { method: "delete", path: "/api/v1/users/:id", handler: "deleteUser", auth: true },
+  { method: "get", path: "/api/v1/teams", handler: "listTeams", auth: true },
+  { method: "post", path: "/api/v1/teams", handler: "createTeam", auth: true },
+  { method: "get", path: "/api/v1/teams/:id/members", handler: "listMembers", auth: true },
+  { method: "post", path: "/api/v1/teams/:id/members", handler: "addMember", auth: true },
+  { method: "delete", path: "/api/v1/teams/:id/members/:uid", handler: "removeMember", auth: true },
+  { method: "get", path: "/api/v1/projects", handler: "listProjects", auth: true },
+  { method: "post", path: "/api/v1/projects", handler: "createProject", auth: true },
+  { method: "get", path: "/api/v1/projects/:id", handler: "getProject", auth: true },
+  { method: "put", path: "/api/v1/projects/:id", handler: "replaceProject", auth: true },
+  { method: "delete", path: "/api/v1/projects/:id", handler: "archiveProject", auth: true },
+  { method: "get", path: "/api/v1/projects/:id/tasks", handler: "listTasks", auth: true },
+  { method: "post", path: "/api/v1/projects/:id/tasks", handler: "createTask", auth: true },
+  { method: "patch", path: "/api/v1/tasks/:id", handler: "updateTask", auth: true },
+  { method: "post", path: "/api/v1/tasks/:id/comments", handler: "addComment", auth: true },
+  { method: "get", path: "/api/v1/tasks/:id/comments", handler: "listComments", auth: true },
+  { method: "get", path: "/api/v1/search", handler: "searchAll", auth: true },
+  { method: "get", path: "/api/v1/reports/weekly", handler: "weeklyReport", auth: true },
+  { method: "get", path: "/api/v1/reports/monthly", handler: "monthlyReport", auth: true },
+  { method: "post", path: "/api/v1/exports", handler: "startExport", auth: true },
+  { method: "get", path: "/api/v1/exports/:id", handler: "exportStatus", auth: true },
+  { method: "post", path: "/api/v1/login", handler: "login", auth: false },
+  { method: "post", path: "/api/v1/logout", handler: "logout", auth: true },
+  { method: "post", path: "/api/v1/password/reset", handler: "resetPassword", auth: false },
+  { method: "get", path: "/healthz", handler: "health", auth: false },
+  { method: "get", path: "/version", handler: "version", auth: false },
+];
+
+function listUsers(req, res) {
+  const rows = db.select("users", req.query);
+  res.json({ ok: true, count: rows.length, rows });
+}
+
+function createUser(req, res) {
+  const row = db.insert("users", req.body);
+  res.status(201).json({ ok: true, row });
+}
+
+function listTeams(req, res) {
+  const rows = db.select("teams", req.query);
+  res.json({ ok: true, count: rows.length, rows });
+}
+
+function createTeam(req, res) {
+  const row = db.insert("teams", req.body);
+  res.status(201).json({ ok: true, row });
+}
+
+function listMembers(req, res) {
+  const rows = db.select("members", req.query);
+  res.json({ ok: true, count: rows.length, rows });
+}
+
+function addMember(req, res) {
+  const row = db.insert("members", req.body);
+  res.status(201).json({ ok: true, row });
+}
+
+function listProjects(req, res) {
+  const rows = db.select("projects", req.query);
+  res.json({ ok: true, count: rows.length, rows });
+}
+
+function createProject(req, res) {
+  const row = db.insert("projects", req.body);
+  res.status(201).json({ ok: true, row });
+}
+
+function listTasks(req, res) {
+  const rows = db.select("tasks", req.query);
+  res.json({ ok: true, count: rows.length, rows });
+}
+
+function createTask(req, res) {
+  const row = db.insert("tasks", req.body);
+  res.status(201).json({ ok: true, row });
+}
+
+function listComments(req, res) {
+  const rows = db.select("comments", req.query);
+  res.json({ ok: true, count: rows.length, rows });
+}
+
+function addComment(req, res) {
+  const row = db.insert("comments", req.body);
+  res.status(201).json({ ok: true, row });
+}
+
+function searchAll(req, res) {
+  const rows = db.select("search_index", req.query);
+  res.json({ ok: true, count: rows.length, rows });
+}
+
+function weeklyReport(req, res) {
+  const rows = db.select("report_weekly", req.query);
+  res.json({ ok: true, count: rows.length, rows });
+}
+
+function monthlyReport(req, res) {
+  const rows = db.select("report_monthly", req.query);
+  res.json({ ok: true, count: rows.length, rows });
+}
+
+function startExport(req, res) {
+  const row = db.insert("exports", req.body);
+  res.status(201).json({ ok: true, row });
+}
+
+module.exports = { routes };

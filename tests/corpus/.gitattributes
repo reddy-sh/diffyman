@@ -1,0 +1,4 @@
+# Corpus inputs are compared byte for byte (CRLF, BOM, missing final newline).
+# Never let git convert their line endings.
+left.* -text
+right.* -text

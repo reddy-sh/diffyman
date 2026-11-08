@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 11,
+        "count": 2
+      },
+      "right": {
+        "start": 2,
+        "count": 2
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Two short list items moved from the bottom of the list to the top. Two non-trivial lines is the smallest block a multi-line move can have, and together they have 49 alphanumeric characters, so they must still be detected."
+}

@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 5,
+        "count": 8
+      },
+      "right": {
+        "start": 29,
+        "count": 8
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "parse_config() moved from the top of the module to just above the __main__ guard; the blank separator lines are not part of the label."
+}

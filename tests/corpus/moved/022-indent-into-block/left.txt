@@ -1,0 +1,12 @@
+import time
+
+
+def sync(items, dry_run, uploader):
+  total = len(items)
+  print(f"syncing {total} items to {uploader.name}")
+  started = time.monotonic()
+  for item in items:
+    uploader.upload(item)
+  if not dry_run:
+    uploader.commit()
+  return total

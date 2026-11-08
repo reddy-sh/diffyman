@@ -1,0 +1,14 @@
+Shortbread
+Bake at 160 C for about 25 minutes.
+
+Method:
+  1. Cream the butter and sugar until pale.
+  2. Work in the flour and a pinch of salt.
+  3. Press into a tin and prick with a fork.
+  4. Bake until just golden at the edges.
+  5. Cut into fingers while still warm.
+
+  - butter: 250 g
+  - flour: 360 g
+  - egg: 1
+  - salt: 2 g

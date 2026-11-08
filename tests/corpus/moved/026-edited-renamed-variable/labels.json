@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 7,
+        "count": 7
+      },
+      "right": {
+        "start": 23,
+        "count": 7
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "checksum() moved from below clamp() to the end of the module, and its accumulator variable was renamed from acc to hash on every line that uses it. The unchanged lines in between are single short lines, so no part of the block is a pure move."
+}

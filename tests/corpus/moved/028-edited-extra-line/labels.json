@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 11,
+        "count": 4
+      },
+      "right": {
+        "start": 4,
+        "count": 5
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "The ingredient list moved from below the method to above it, and a sugar line was added in the middle. The two-line runs before and after the new line are each below 20 alphanumeric characters (19 and 10), so the move is only found as an edited block. A stationary heading above the list would join the first run and make it a pure move, which is why the list has none."
+}

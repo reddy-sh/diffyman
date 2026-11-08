@@ -1,0 +1,44 @@
+use std::collections::HashMap;
+use std::fmt::Write;
+
+fn escape_html(input: &str) -> String {
+  let mut escaped = String::with_capacity(input.len());
+  for ch in input.chars() {
+    match ch {
+      '<' => escaped.push_str("&lt;"),
+      '>' => escaped.push_str("&gt;"),
+      '&' => escaped.push_str("&amp;"),
+      _ => escaped.push(ch),
+    }
+  }
+  escaped
+}
+
+pub struct Page {
+  title: String,
+  sections: Vec<String>,
+  meta: HashMap<String, String>,
+}
+
+impl Page {
+  pub fn new(title: &str) -> Self {
+    Page {
+      title: title.to_string(),
+      sections: Vec::new(),
+      meta: HashMap::new(),
+    }
+  }
+
+  pub fn add_section(&mut self, body: &str) {
+    self.sections.push(body.to_string());
+  }
+
+  pub fn render(&self) -> String {
+    let mut out = String::new();
+    writeln!(out, "<h1>{}</h1>", escape_html(&self.title)).unwrap();
+    for section in &self.sections {
+      writeln!(out, "<section>{}</section>", escape_html(section)).unwrap();
+    }
+    out
+  }
+}

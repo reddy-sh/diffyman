@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "A group of separator lines (blank lines, a --- rule and a * * * rule) moved from after 2.4.0 to after 2.3.1. All of them are trivial lines, and a block made only of trivial lines is never a move."
+}

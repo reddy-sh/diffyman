@@ -1,0 +1,11 @@
+func Sync(src, dst Store) error {
+  items, err := src.List()
+  if err != nil {
+    return err
+  }
+  for _, item := range items {
+    dst.Put(item)
+  }
+  log.Printf("synced %d items", len(items))
+  return nil
+}

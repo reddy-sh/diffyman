@@ -1,0 +1,19 @@
+# Onboarding notes
+
+## First week
+Shadow a teammate for the first two days and read the team handbook.
+Pick one small ticket from the starter board by Wednesday.
+Book a thirty minute chat with each person on your team.
+
+## Accounts
+Every new starter gets a laptop, a badge and an email account on day one.
+The service desk creates the accounts the Friday before the start date.
+Ask your manager which shared drives and chat channels you need.
+Two-factor sign-in is required for email and for the expense system.
+Passwords are rotated by the identity team, never by hand.
+If you lose your badge, report it to reception the same day.
+The visitor desk can print a temporary badge valid for one week.
+Laptops are replaced every four years or after a hardware failure.
+Personal devices may join the guest network only.
+
+Questions go to the onboarding channel.

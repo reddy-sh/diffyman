@@ -1,0 +1,28 @@
+-- name: active_customers
+SELECT c.id, c.name, c.email
+FROM customers AS c
+WHERE c.deleted_at IS NULL
+  AND c.last_order_at > now() - interval '90 days'
+ORDER BY c.last_order_at DESC;
+
+-- name: revenue_by_month
+SELECT date_trunc('month', o.created_at) AS month,
+  sum(o.total_cents) / 100.0 AS revenue
+FROM orders AS o
+WHERE o.status = 'paid'
+GROUP BY 1
+ORDER BY 1;
+
+-- name: top_products
+SELECT p.sku, p.title, count(*) AS units
+FROM order_items AS i
+JOIN products AS p ON p.id = i.product_id
+GROUP BY p.sku, p.title
+ORDER BY units DESC
+LIMIT 20;
+
+-- name: stale_carts
+SELECT k.id, k.customer_id, k.updated_at
+FROM carts AS k
+WHERE k.checked_out = false
+  AND k.updated_at < now() - interval '14 days';

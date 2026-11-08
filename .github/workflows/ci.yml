@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Show toolchain
+        run: rustup show
+
+      - name: Cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --workspace
+
+      - name: Conformance corpus
+        run: cargo run --locked -p diffyman-conformance
+
+      - name: Build the engine for wasm32
+        if: runner.os == 'Linux'
+        run: cargo build --locked -p diffyman --target wasm32-unknown-unknown
+
+  bindings:
+    # Spike B (docs/spikes/B-binding-round-trip.md): the CLI, the Python
+    # binding and the WASM binding return byte-identical Diff Documents.
+    name: bindings (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      VIRTUAL_ENV: ${{ github.workspace }}/bindings/python/.venv
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Install wasm-pack
+        run: cargo install --locked wasm-pack --version 0.15.1
+
+      - name: Build the CLI
+        run: cargo build --locked --release -p diffyman-cli
+
+      - name: Build the Python binding (maturin develop)
+        run: |
+          uv venv --python 3.12 "$VIRTUAL_ENV"
+          uv pip install --python "$VIRTUAL_ENV/bin/python" maturin==1.16.0 pytest==9.2.0
+          "$VIRTUAL_ENV/bin/maturin" develop --uv --release --locked -m bindings/python/Cargo.toml
+
+      - name: Python binding tests
+        run: '"$VIRTUAL_ENV/bin/python" -m pytest -q bindings/python/tests'
+
+      - name: Build the WASM packages (Node.js and web)
+        run: |
+          wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node -- --locked
+          wasm-pack build bindings/wasm --release --target web --out-dir pkg-web -- --locked
+
+      - name: Cross-binding conformance (CLI, Python, WASM)
+        run: uv run --no-project --python 3.12 python tests/conformance/run_bindings.py --cli target/release/diffyman
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny --version 0.20.2
+
+      - name: Licenses, advisories, bans and sources
+        run: cargo deny check

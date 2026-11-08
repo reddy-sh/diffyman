@@ -1,0 +1,3 @@
+# 019-histogram-pathological
+
+321 lines made of one header and 80 copies of the same four-line block, so `{`, `}`, the blank line and `  x = x + 1;` each occur 80 times; no line except the header is unique, and the occurrence counts are above the chain limit of 64 that histogram implementations commonly use before falling back. The right side inserts a new block before block 6, changes the bodies of blocks 21 and 71, and deletes block 41. Many alignments are equally short; the expected output is whatever `text.histogram@1` produces, so this case pins the library's tie-breaking and fallback. A correct result must be a valid tiling with `context: 0` (every change op its own hunk, no equal ops in hunks) and `linesLeft: 321`, `linesRight: 321`.

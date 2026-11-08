@@ -1,0 +1,41 @@
+# Typesetting glossary
+
+Anchor:
+  A fixed point in a document that a link can jump to.
+  Anchors are usually headings or explicitly named elements.
+
+Baseline:
+  The invisible line that most letters sit on.
+  Descenders such as g and y drop below the baseline.
+
+Caption:
+  Short text that describes a figure, table or photo.
+  Captions sit directly above or below the item they describe.
+
+Drop cap:
+  A large first letter that spans several lines of a paragraph.
+  Drop caps are common in books and long magazine features.
+
+Em dash:
+  A dash about as wide as the letter M, used to set off a phrase.
+  Some style guides put thin spaces on either side of it.
+
+Footnote:
+  A note at the bottom of a page, linked by a superscript number.
+  Endnotes collect the same notes at the end of a chapter instead.
+
+Gutter:
+  The inner margin where two facing pages meet at the binding.
+  A wide gutter keeps text from disappearing into the spine.
+
+Hanging indent:
+  A paragraph whose first line starts further left than the rest.
+  Bibliographies and reference lists often use hanging indents.
+
+Italic:
+  A slanted style of a typeface used for emphasis and titles.
+  True italics are drawn separately rather than simply slanted.
+
+Justified text:
+  Text aligned to both the left and the right margin.
+  Justification needs good hyphenation to avoid wide word gaps.

@@ -1,0 +1,8 @@
+alder
+birch
+cedar
+dogwood
+elm
+fir
+ginkgo
+hawthorn

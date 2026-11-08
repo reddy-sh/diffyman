@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "The error check after List() is removed and an identical-looking check is added inside the loop. The repeated `if err != nil {` / `return err` / `}` lines have only 17 alphanumeric characters, so even with the indentation change allowed they are below the move minimum; this guards against reporting boilerplate as moved code."
+}

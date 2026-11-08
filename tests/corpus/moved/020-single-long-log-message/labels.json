@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 11,
+        "count": 1
+      },
+      "right": {
+        "start": 18,
+        "count": 1
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A single long log.warning() line moved from the end of drain() to the end of requeue(). The indentation is the same in both places."
+}

@@ -1,0 +1,11 @@
+def report(orders):
+  count = 0
+  total = 0
+  lines = []
+  for order in orders:
+    lines.append(f"{order.id}: {order.amount:.2f}")
+  for order in orders:
+    count += 1
+    total += order.amount
+  lines.append(f"{count} orders, {total:.2f} in total")
+  return lines

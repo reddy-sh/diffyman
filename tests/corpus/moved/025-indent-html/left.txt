@@ -1,0 +1,15 @@
+<nav>
+  <ul class="main">
+    <li><a href="/">Home</a></li>
+    <li><a href="/pricing">Pricing</a></li>
+    <li><a href="/docs/install">Install guide</a></li>
+    <li><a href="/docs/api">API reference</a></li>
+    <li><a href="/blog">Blog</a></li>
+    <li>
+      <span>Docs</span>
+      <ul class="sub">
+        <li><a href="/docs/faq">FAQ</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>

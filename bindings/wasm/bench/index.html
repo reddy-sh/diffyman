@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>diffyman WASM bench</title>
+<style>
+  body { font: 18px/1.4 system-ui, sans-serif; margin: 24px; background: #fff; color: #111; }
+  pre { font: 20px/1.35 ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>diffyman WASM bench</h1>
+<p>Loads <code>../pkg-web</code>, diffs <code>/data/{size}mb-left.txt</code> against
+<code>/data/{size}mb-right.txt</code> once cold and then <code>runs</code> more times, and
+writes the timings below. Query parameters: <code>size</code> (default 1), <code>runs</code>
+(default 5), <code>pkg</code> (where the <code>.wasm</code> comes from, default
+<code>../pkg-web</code>; the JavaScript glue always comes from <code>../pkg-web</code>, so
+the module must be built from the same source). Serve it with <code>serve.py</code>.</p>
+<pre id="result">running...</pre>
+<script type="module">
+// Everything runs synchronously (sync XHR + initSync), so the result is in the DOM
+// before the load event. That lets `chrome --headless --dump-dom` and
+// `firefox --headless --screenshot` capture it without any waiting.
+import { initSync, diff, engineVersion } from "../pkg-web/diffyman_wasm.js";
+
+const params = new URLSearchParams(location.search);
+const size = params.get("size") ?? "1";
+const runs = Number(params.get("runs") ?? "5");
+const pkg = params.get("pkg") ?? "../pkg-web";
+const out = document.getElementById("result");
+
+function getBytes(url) {
+  const xhr = new XMLHttpRequest();
+  xhr.open("GET", url, false);
+  xhr.overrideMimeType("text/plain; charset=x-user-defined");
+  xhr.send();
+  if (xhr.status !== 200) throw new Error(`${url}: HTTP ${xhr.status}`);
+  const text = xhr.responseText;
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff;
+  return bytes;
+}
+
+try {
+  const wasmBytes = getBytes(`${pkg}/diffyman_wasm_bg.wasm`);
+  const left = getBytes(`/data/${size}mb-left.txt`);
+  const right = getBytes(`/data/${size}mb-right.txt`);
+
+  let t = performance.now();
+  initSync({ module: wasmBytes });
+  const initMs = performance.now() - t;
+
+  const call = () => diff(left, right, "", `${size}mb-left.txt`, `${size}mb-right.txt`);
+  t = performance.now();
+  let doc = call();
+  const coldMs = performance.now() - t;
+  const times = [];
+  for (let i = 0; i < runs; i++) {
+    t = performance.now();
+    doc = call();
+    times.push(performance.now() - t);
+  }
+  const sorted = [...times].sort((a, b) => a - b);
+  const parsed = JSON.parse(doc);
+  const result = {
+    ok: true,
+    userAgent: navigator.userAgent,
+    engineVersion: engineVersion(),
+    sizeMB: Number(size),
+    wasmBytes: wasmBytes.length,
+    initSyncMs: +initMs.toFixed(2),
+    coldMs: +coldMs.toFixed(2),
+    timesMs: times.map((x) => +x.toFixed(2)),
+    medianMs: +sorted[Math.floor(sorted.length / 2)].toFixed(2),
+    status: parsed.status,
+    hunks: parsed.hunks.length,
+    documentBytes: doc.length,
+    timerResolutionNote: "performance.now() may be coarsened (for example to 0.1 ms or 1 ms) without cross-origin isolation",
+  };
+  out.textContent = JSON.stringify(result, null, 2);
+  document.title = `done ${result.medianMs} ms`;
+} catch (err) {
+  out.textContent = JSON.stringify({ ok: false, error: String(err?.stack ?? err) }, null, 2);
+  document.title = "failed";
+}
+</script>
+</body>
+</html>

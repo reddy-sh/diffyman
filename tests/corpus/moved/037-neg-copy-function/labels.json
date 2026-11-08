@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "Clamp() was copied to the end of the file while the original stays where it was. A copy whose source still exists unchanged is not a move: the original lines are equal, so nothing on the left is deleted."
+}

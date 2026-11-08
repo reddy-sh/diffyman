@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 33,
+        "count": 12
+      },
+      "right": {
+        "start": 4,
+        "count": 12
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "escape_html() moved from the end of the file to just below the use lines, above the struct and impl that call it."
+}

@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 19,
+        "count": 3
+      },
+      "right": {
+        "start": 7,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "The welcome paragraph moved from the end of the page to second position, right after the history paragraph."
+}

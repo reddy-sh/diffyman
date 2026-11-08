@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 5,
+        "count": 3
+      },
+      "right": {
+        "start": 13,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "The body of the parsing loop moved out of read_rows() into a new parse_rows() function at the end of the file, losing two spaces of indentation. The new loop header and the return lines around it are not part of the move: the header changed, and the return line has a different indentation delta."
+}

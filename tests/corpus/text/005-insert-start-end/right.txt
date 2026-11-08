@@ -1,0 +1,11 @@
+# Trees on the east path
+
+alder
+birch
+cedar
+dogwood
+elm
+fir
+ginkgo
+hawthorn
+juniper

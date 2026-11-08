@@ -1,0 +1,19 @@
+# Release notes
+
+## 2.4.0
+- faster startup on large projects
+- new dark theme for the settings window
+
+## 2.3.2
+- fixed a crash when the config file was empty
+
+## 2.3.1
+- fixed the window position on multi-monitor setups
+- the status bar shows the current branch again
+
+---
+
+* * *
+
+## 2.3.0
+- added keyboard shortcuts for every menu item

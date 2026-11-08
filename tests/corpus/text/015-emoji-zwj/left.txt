@@ -1,0 +1,6 @@
+status: 👩‍💻 coding
+family: 👨‍👩‍👧‍👦
+thumbs: 👍🏻
+flag: 🇯🇵
+plain: ok ✅
+heart: ❤️

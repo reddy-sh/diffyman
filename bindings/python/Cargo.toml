@@ -1,0 +1,32 @@
+[package]
+name = "diffyman-python"
+description = "Python binding for the diffyman diff engine (PyO3, abi3)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+# maturin installs this library as `diffyman._native`.
+name = "_native"
+crate-type = ["cdylib"]
+# The extension module only links inside a Python process; its tests are the
+# pytest suite in tests/, run against `maturin develop`.
+test = false
+doctest = false
+
+[features]
+# Enabled by maturin (pyproject.toml). Leaving it off for plain `cargo build`
+# keeps workspace builds linkable.
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+diffyman.workspace = true
+pyo3.workspace = true
+
+[lints]
+workspace = true

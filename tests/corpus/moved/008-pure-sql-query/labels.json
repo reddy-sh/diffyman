@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 1,
+        "count": 6
+      },
+      "right": {
+        "start": 17,
+        "count": 6
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "The active_customers query moved from first to third place in a file of named queries."
+}

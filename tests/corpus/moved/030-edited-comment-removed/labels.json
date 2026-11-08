@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 6,
+        "count": 4
+      },
+      "right": {
+        "start": 18,
+        "count": 3
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "Header clean-up lines moved out of build_request() into a new clean_headers() helper at the end of the file. On the way the comment line was dropped and one header name changed case. The new def and return lines are plain insertions."
+}

@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 15,
+        "count": 9
+      },
+      "right": {
+        "start": 40,
+        "count": 9
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Get() moved below Len(). The label includes the function's inner and final closing braces, which are trivial lines inside and at the edge of the block, and excludes the blank separator."
+}

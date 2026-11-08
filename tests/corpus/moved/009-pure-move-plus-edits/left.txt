@@ -1,0 +1,23 @@
+class Invoice:
+  def __init__(self, number, customer):
+    self.number = number
+    self.customer = customer
+    self.lines = []
+
+  def total(self):
+    return sum(quantity * price for _, quantity, price in self.lines)
+
+  def add_line(self, description, quantity, unit_price):
+    if quantity <= 0:
+      raise ValueError("quantity must be positive")
+    self.lines.append((description, quantity, unit_price))
+
+  def render(self):
+    rows = [f"Invoice {self.number} for {self.customer}"]
+    for description, quantity, price in self.lines:
+      rows.append(f"{description:30} {quantity:>4} x {price:>8.2f}")
+    rows.append(f"{'Total':30} {self.total():>17.2f}")
+    return "\n".join(rows)
+
+  def tax(self, rate):
+    return round(self.total() * rate, 2)

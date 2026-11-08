@@ -1,0 +1,40 @@
+# Local stack for diffyman-server. The engine, CLI and bindings never need it.
+# Every port is bound to 127.0.0.1 only. Ports are project conventions:
+#   5433 Postgres · 9000/9001 RustFS · 4317/4318 OTLP · 3001 Grafana · 6380 Valkey · 8080 API
+# Start with: scripts/local-up.sh
+name: diffyman
+
+services:
+  postgres:
+    image: postgres:18.6-trixie
+    ports: ["127.0.0.1:5433:5432"]
+    environment:
+      POSTGRES_USER: diffyman
+      POSTGRES_DB: diffyman
+      POSTGRES_PASSWORD: ${DIFFYMAN_PG_PASSWORD:?set in .env.local}
+    volumes: ["pgdata:/var/lib/postgresql"] # PG18 image: mount the parent dir, not .../data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U diffyman -d diffyman"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  rustfs: # S3-compatible server for integration tests only
+    profiles: ["s3"]
+    image: rustfs/rustfs:1.0.4
+    command: /data
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    environment:
+      RUSTFS_ACCESS_KEY: ${DIFFYMAN_S3_TEST_KEY:?set in .env.local}
+      RUSTFS_SECRET_KEY: ${DIFFYMAN_S3_TEST_SECRET:?set in .env.local}
+      RUSTFS_CONSOLE_ENABLE: "true"
+    volumes: ["rustfsdata:/data"]
+
+  lgtm: # traces, logs and metrics UI for local development only
+    profiles: ["obs"]
+    image: grafana/otel-lgtm:0.40.0
+    ports: ["127.0.0.1:4317:4317", "127.0.0.1:4318:4318", "127.0.0.1:3001:3000"]
+
+volumes:
+  pgdata: {}
+  rustfsdata: {}

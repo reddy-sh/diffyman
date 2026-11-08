@@ -1,0 +1,31 @@
+"use strict";
+
+function clamp(value, low, high) {
+  return Math.min(Math.max(value, low), high);
+}
+
+function chunk(list, size) {
+  const out = [];
+  for (let i = 0; i < list.length; i += size) {
+    out.push(list.slice(i, i + size));
+  }
+  return out;
+}
+
+function uniqueBy(list, key) {
+  const seen = new Map();
+  for (const item of list) {
+    if (!seen.has(item[key])) seen.set(item[key], item);
+  }
+  return [...seen.values()];
+}
+
+function checksum(data) {
+  let hash = 0;
+  for (const byte of data) {
+    hash = (hash * 31 + byte) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+module.exports = { checksum, chunk, clamp, uniqueBy };

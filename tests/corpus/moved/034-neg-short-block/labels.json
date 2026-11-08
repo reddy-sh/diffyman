@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "A reader would call this a move: two counter initialisations moved down to just before the loop that uses them. Together they have only 12 alphanumeric characters, below the 20 needed, so the spec says no move is reported."
+}

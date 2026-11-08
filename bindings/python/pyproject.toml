@@ -1,0 +1,34 @@
+[build-system]
+requires = ["maturin==1.16.0"]
+build-backend = "maturin"
+
+[project]
+name = "diffyman"
+description = "Headless diff engine: compare two inputs and get one canonical JSON Diff Document"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT OR Apache-2.0"
+authors = [{ name = "Sankara Reddy Telukutla", email = "sankara@reddy.sh" }]
+keywords = ["diff", "text", "json", "compare"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Rust",
+    "Topic :: Text Processing",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://reddy.sh"
+Repository = "https://github.com/reddy-sh/diffyman"
+
+[project.optional-dependencies]
+test = ["pytest==9.2.0"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "diffyman._native"
+features = ["extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

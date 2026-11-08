@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 9,
+        "count": 1
+      },
+      "right": {
+        "start": 3,
+        "count": 1
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "One long from-import line (85 alphanumeric characters) moved from below the plain imports to above them. A single non-trivial line qualifies because it has at least 40 alphanumeric characters."
+}

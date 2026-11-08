@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 8,
+        "count": 11
+      },
+      "right": {
+        "start": 26,
+        "count": 11
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "CRLF line endings on both sides. The Vat() method moved from first to last place inside the class. Line numbers follow the LF/CRLF line rule; the CR is never part of the compared content."
+}

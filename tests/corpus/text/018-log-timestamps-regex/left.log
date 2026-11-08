@@ -1,0 +1,10 @@
+2026-03-14T08:00:01.120Z INFO  worker-1 started, pid 4120
+2026-03-14T08:00:01.348Z INFO  worker-2 started, pid 4121
+2026-03-14T08:00:02.007Z INFO  queue connected: jobs-main
+2026-03-14T08:00:05.511Z WARN  slow response from inventory (812 ms)
+2026-03-14T08:00:09.903Z INFO  batch 1 done: 250 items
+2026-03-14T08:00:14.260Z INFO  batch 2 done: 250 items
+2026-03-14T08:00:18.775Z INFO  batch 3 done: 250 items
+2026-03-14T08:00:19.002Z INFO  shutdown requested
+2026-03-14T08:00:19.450Z INFO  worker-1 stopped
+2026-03-14T08:00:19.481Z INFO  worker-2 stopped

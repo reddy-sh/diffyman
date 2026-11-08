@@ -1,0 +1,27 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 7,
+        "count": 3
+      },
+      "right": {
+        "start": 32,
+        "count": 3
+      },
+      "kind": "pure"
+    },
+    {
+      "left": {
+        "start": 23,
+        "count": 4
+      },
+      "right": {
+        "start": 35,
+        "count": 4
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Two helper functions, log() and rotate_logs(), moved from separate places to back-to-back positions just above the main sequence (the blank line between them was dropped). They are two moves, not one, because they are not contiguous on the left. The second destination directly follows the first, so renderers give them different zebra stripes."
+}

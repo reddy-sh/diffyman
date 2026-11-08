@@ -1,0 +1,25 @@
+[package]
+name = "line-diff-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "Spike A: compare the similar and imara-diff line diff crates on large and pathological inputs"
+
+# Standalone project: not part of the root workspace.
+[workspace]
+
+[dependencies]
+similar = "=3.2.1"
+imara-diff = "=0.2.0"
+# gitoxide's maintained copy of imara-diff (fixes quadratic common-line pruning).
+gix-imara-diff = "=0.3.3"
+memmap2 = "=0.9.12"
+memchr = "=2.8.3"
+hashbrown = "=0.17.1"
+serde_json = "=1.0.154"
+
+[profile.release]
+debug = false
+lto = "thin"
+codegen-units = 1

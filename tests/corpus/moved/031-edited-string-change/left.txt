@@ -1,0 +1,22 @@
+import time
+
+from errors import ClientError, ServerError
+
+MAX_BACKOFF = 60
+
+
+def fetch(session, url, host, log):
+  backoff = 1
+  while True:
+    response = session.get(url)
+    if response.status == 429:
+      log.info("rate limited, backing off")
+      time.sleep(backoff)
+      backoff = min(backoff * 2, 60)
+      continue
+    if response.status >= 500:
+      log.error("server error %s from %s", response.status, host)
+      raise ServerError(response.status)
+    if response.ok:
+      return response.json()
+    raise ClientError(response.status)

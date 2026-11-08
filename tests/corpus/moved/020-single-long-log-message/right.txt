@@ -1,0 +1,18 @@
+def drain(queue, handler, batch_size=50):
+  processed = 0
+  while True:
+    batch = queue.take(batch_size)
+    if not batch:
+      break
+    for message in batch:
+      handler(message)
+      processed += 1
+    queue.ack(batch)
+  return processed
+
+
+def requeue(queue, messages):
+  for message in messages:
+    queue.put(message, delay_seconds=30)
+  log.info("requeued %d messages", len(messages))
+  log.warning("queue drain stopped early because the handler raised an exception for message %s", message.id)

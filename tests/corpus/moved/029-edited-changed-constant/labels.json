@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 8,
+        "count": 3
+      },
+      "right": {
+        "start": 21,
+        "count": 3
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "retry_delay() moved to the end of the file and its base delay changed from 0.25 to 0.5. Its unchanged first and last lines are single lines under 40 alphanumeric characters, so only the edited block qualifies."
+}

@@ -1,0 +1,13 @@
+# whitespace sample
+alpha beta gamma
+trailing spaces here
+    indented with spaces
+formfeed andvertical tab
+unchanged line one
+unchanged line two
+foobar baz
+unchanged line three
+no break space
+unchanged line four
+flush left
+end

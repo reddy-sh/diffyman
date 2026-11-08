@@ -1,0 +1,15 @@
+"""Helpers shared by the reporting jobs."""
+
+from reporting.formatting import format_currency, format_percentage, format_short_date, format_table
+import datetime
+import decimal
+import logging
+import os
+import pathlib
+import re
+
+log = logging.getLogger(__name__)
+
+
+def output_dir():
+  return pathlib.Path(os.environ.get("REPORT_DIR", "/tmp/reports"))

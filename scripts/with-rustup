@@ -1,0 +1,14 @@
+#!/usr/bin/env zsh
+# Run a command with rustup's toolchain proxies first on PATH, so rust-toolchain.toml
+# is honoured even when another Rust (e.g. Homebrew's `rust`) is earlier on PATH.
+# Usage: scripts/with-rustup cargo test --workspace
+set -euo pipefail
+
+for dir in "${RUSTUP_BIN:-}" /opt/homebrew/opt/rustup/bin /usr/local/opt/rustup/bin "$HOME/.cargo/bin"; do
+  if [[ -n "$dir" && -x "$dir/rustup" ]]; then
+    export PATH="$dir:$HOME/.cargo/bin:$PATH"
+    break
+  fi
+done
+
+exec "$@"

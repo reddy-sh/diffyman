@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "Three lines are reworded in place: they form one replace op, and the edited lines are very similar to the originals. A deletion and an insertion inside the same op are an in-place rewrite, never a move, in pure and edited mode alike."
+}

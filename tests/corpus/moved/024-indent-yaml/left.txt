@@ -1,0 +1,18 @@
+version: 3
+defaults:
+  retries: 3
+  timeout_seconds: 20
+  log_format: json
+services:
+  api:
+    image: registry.example/api:2.4.1
+    replicas: 3
+    ports:
+      - 8080
+  worker:
+    image: registry.example/worker:2.4.1
+    replicas: 2
+    queue: jobs-main
+monitoring:
+  scrape_interval: 30s
+  alert_channel: ops-alerts

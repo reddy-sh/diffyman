@@ -1,0 +1,10 @@
+Release checklist
+- freeze the main branch
+- update the version number
+- regenerate the changelog
+- run the full test suite
+- tag the release commit
+- publish the packages
+- announce the release
+- unfreeze the main branch
+- archive the build logs

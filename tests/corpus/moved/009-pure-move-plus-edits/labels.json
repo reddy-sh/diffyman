@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 7,
+        "count": 2
+      },
+      "right": {
+        "start": 19,
+        "count": 2
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "total() moved from above add_line() to below render(). Unrelated edits elsewhere: the ValueError message in add_line() changed, tax() gained a default rate, and a new total_with_tax() method was added at the end. None of those is a move."
+}

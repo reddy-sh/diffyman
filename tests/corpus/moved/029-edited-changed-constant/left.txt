@@ -1,0 +1,23 @@
+import random
+
+
+def jitter(seconds):
+  return seconds * random.uniform(0.8, 1.2)
+
+
+def retry_delay(attempt):
+  base = 0.25
+  return min(base * 2 ** attempt, 30)
+
+
+def should_retry(status):
+  return status in (408, 429, 500, 502, 503, 504)
+
+
+def parse_retry_after(header):
+  if header is None:
+    return None
+  try:
+    return max(0, int(header))
+  except ValueError:
+    return None

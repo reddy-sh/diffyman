@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 12,
+        "count": 5
+      },
+      "right": {
+        "start": 17,
+        "count": 5
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "The rate-limit branch moved below the server-error and success checks. Its log call changed level and message, and the backoff cap now uses the MAX_BACKOFF constant. Edited and unchanged lines alternate, so no unchanged run is big enough to be a pure move."
+}
