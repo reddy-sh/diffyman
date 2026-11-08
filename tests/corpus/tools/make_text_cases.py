@@ -852,8 +852,8 @@ case(
     "(`leftRange {start: 3, count: 0}`), equal L3/R4. h2: equal L7/R8, a `delete` of "
     "L8, equal L9/R9, and an `insert` appending R10 (`leftRange {start: 10, count: "
     "0}`). Stats show `linesAdded: 2`, `linesRemoved: 1`, `linesUnchanged: 8` and "
-    "`similarity: 0.8421`. Which blank line of an equal pair is reported is the "
-    "histogram choice; no slider heuristic is applied (spec 7.3).",
+    "`similarity: 0.8421`. Which blank line of an equal pair is reported follows the "
+    "slider compaction of spec 7.3.1 (here the lines the histogram diff chose).",
 )
 
 # 027 -------------------------------------------------------------------------
@@ -1139,11 +1139,12 @@ case(
     "added after `cheese`, and two blank lines before `jam` become one. The appended "
     "insert holds a blank line and `kale`, so it stays an `insert` (a change op with any "
     "non-blank line is never split). Context counts equal lines only, and ignored ops "
-    "are kept whole (spec 7.4). Which blank line of a pair is matched is the histogram "
-    "choice. A correct result has two hunks. h1: equal L1, `ignored` L2 (`rightRange "
-    "{start: 2, count: 0}`), equal L3-4, `insert` R4, equal L5, `ignored` R6 "
-    "(`leftRange {start: 6, count: 0}`), equal L6-7 (three equal lines on each side of "
-    "the insert). h2: equal L12-13, `ignored` L14 (`rightRange {start: 15, count: 0}`), "
+    "are kept whole (spec 7.4). Which blank line of a pair is reported follows the "
+    "slider compaction of spec 7.3.1: the blank line added after `cheese` is the lower "
+    "one, R7, as in git. A correct result has two hunks. h1: equal L1, `ignored` L2 "
+    "(`rightRange {start: 2, count: 0}`), equal L3-4, `insert` R4, equal L5-6, "
+    "`ignored` R7 (`leftRange {start: 7, count: 0}`), equal L7 (three equal lines on "
+    "each side of the insert). h2: equal L12-13, `ignored` L14 (`rightRange {start: 15, count: 0}`), "
     "equal L15, `insert` R16-17. The ten equal lines between the two inserts are more "
     "than 2 x 3, so the hunks stay apart. Stats: `changeCount: 2`, `linesAdded: 3`, "
     "`linesRemoved: 0`, `linesUnchanged: 13` and `similarity: 0.8966` = 2 x 13 / "
@@ -1242,6 +1243,41 @@ case(
     "and the skipped count (`14` / `9`).",
 )
 
+# 042 -------------------------------------------------------------------------
+_rule = "-" * 20
+case(
+    "042-pure-insert-repeated-lines",
+    "txt",
+    lf("Release notes", _rule, "Fixed the login timeout.", _rule, "Thanks to all testers."),
+    lf("Release notes", _rule, "Fixed the login timeout.", *([_rule] * 600), _rule, "Thanks to all testers."),
+    opts(),
+    "The right file inserts 600 more copies of a separator line that the left file already "
+    "has twice. Once the common prefix and suffix are trimmed the left side is empty, so the "
+    "diff is a pure insertion: no search runs and the result is exact, though more than 500 "
+    "changed lines have a key that occurs on the other side (spec 10). A correct result has "
+    "no `approximate` warning: one hunk with an `insert` op of 600 lines, `linesAdded: 600`, "
+    "and `linesUnchanged: 5`.",
+)
+
+# 043 -------------------------------------------------------------------------
+case(
+    "043-blank-lines-slider-merge",
+    "txt",
+    lf("", "", "a", "  x", "a", "  x", "a", ""),
+    lf("", "a", "}", "  x", "a", ""),
+    opts(context=3, blank_lines=True),
+    "Runs `ignore.blankLines: true`. The line diff deletes the blank L2 (on its own, an "
+    "`ignored` op) and replaces L4-5 (`  x`, `a`) with `}`. Slider compaction (spec 7.3.1) "
+    "slides that deletion up to L3-4 (`a`, `  x`), where it touches the blank deletion "
+    "and joins it, so the blank line becomes part of a change op with non-blank lines and "
+    "is counted (spec 7.3.1 rule 4). git's `--ignore-blank-lines` shows the same hunk. A "
+    "correct result has one hunk: equal L1/R1, `delete` L2-4, equal L5/R2, `insert` R3 "
+    "(`}`), equal L6-8/R4-6, and no `ignored` op. Stats: `changeCount: 2`, "
+    "`linesAdded: 1`, `linesRemoved: 3`, `linesUnchanged: 5` and `similarity: 0.7143` = "
+    "2 x 5 / (8 + 6). Without compaction it would be `linesRemoved: 2` and similarity "
+    "0.7692.",
+)
+
 
 def write_case(entry: dict) -> None:
     directory = ROOT / entry["slug"]
@@ -1259,8 +1295,8 @@ def write_case(entry: dict) -> None:
 
 def self_check() -> None:
     slugs = [entry["slug"] for entry in CASES]
-    if len(slugs) != 41 or len(set(slugs)) != 41:
-        raise SystemExit(f"expected 41 unique cases, found {len(slugs)}")
+    if len(slugs) != 43 or len(set(slugs)) != 43:
+        raise SystemExit(f"expected 43 unique cases, found {len(slugs)}")
     for number, slug in enumerate(slugs, start=1):
         if not slug.startswith(f"{number:03d}-"):
             raise SystemExit(f"case {slug} is out of order")

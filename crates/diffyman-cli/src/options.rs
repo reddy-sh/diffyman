@@ -71,17 +71,22 @@ pub struct DiffFlags {
     pub follow_symlinks: bool,
 }
 
-/// Reads the options file (if any) as a JSON value. Blank text is `{}`.
+/// Reads the options file (if any) as a JSON value. Blank text is `{}`. The
+/// file is read up to [`input::MAX_OPTIONS_BYTES`], and parsed with the
+/// engine's rules (a key given twice in one object is an error).
 fn file_value(path: Option<&Path>) -> Result<Value, String> {
     let Some(path) = path else {
         return Ok(Value::Object(Map::new()));
     };
-    let text = String::from_utf8(input::read(path)?)
+    let text = String::from_utf8(input::read(path, Some(input::MAX_OPTIONS_BYTES))?)
         .map_err(|_| format!("invalid options: {} is not UTF-8", path.display()))?;
     if text.trim().is_empty() {
         return Ok(Value::Object(Map::new()));
     }
-    serde_json::from_str(&text).map_err(|e| format!("invalid options: {}: {e}", path.display()))
+    diffyman::parse_options_json(&text).map_err(|e| match e {
+        diffyman::Error::InvalidOptions(m) => format!("invalid options: {}: {m}", path.display()),
+        other => other.to_string(),
+    })
 }
 
 /// The object at `key` of `map`, created when missing. `None` when the key

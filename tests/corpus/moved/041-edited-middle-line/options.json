@@ -1,6 +1,6 @@
 {
   "algorithm": "histogram",
-  "granularity": "line",
+  "granularity": "smart",
   "ignore": {
     "whitespace": "none",
     "case": false,

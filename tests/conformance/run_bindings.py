@@ -20,7 +20,12 @@ and checks, per docs/spec/diff-document.md section 3, that
 
 Tree cases with a folder input (`left/` or `right/`) run on the CLI and the
 Python binding only: the WASM binding takes bytes, not paths. Archive cases
-run on all three.
+run on all three when the WASM package has the `archives` feature (the
+default). A package built without it (`--no-default-features`) must refuse
+exactly the cases spec section 19.7 lists (adapter "tree", a non-empty
+tree.exclude, or two inputs that both start like an archive under adapter
+"auto") with an error whose code is "unsupported"; those cases are then
+judged on the CLI and Python only, and any other case must still match.
 
 The moved cases run with "detectMoves": true and carry real moves[]. Unless
 --golden-only is given, the moved inputs also run a second time with
@@ -31,6 +36,12 @@ Run from the repository root after building the CLI, the Python binding and the
 WASM package (see docs/spikes/B-binding-round-trip.md):
 
   uv run --no-project --python 3.12 python tests/conformance/run_bindings.py
+
+and, for the WASM package without archive support:
+
+  wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node-slim -- --no-default-features
+  uv run --no-project --python 3.12 python tests/conformance/run_bindings.py \
+      --wasm-pkg bindings/wasm/pkg-node-slim
 
 The Python binding is loaded from the current interpreter if it can import
 `diffyman`, otherwise from the virtual environment given by --venv (default
@@ -69,6 +80,9 @@ class Case:
     # None for the extra cross-surface-only cases, which have no golden file.
     expected: pathlib.Path | None
 
+    # The WASM package has no archive support and this case needs it.
+    wasm_unsupported: bool = False
+
     @property
     def folder(self) -> bool:
         """A side is a folder: the case cannot run on the WASM binding."""
@@ -76,7 +90,28 @@ class Case:
 
     @property
     def surfaces(self) -> tuple[str, ...]:
-        return ("cli", "python") if self.folder else SURFACES
+        return ("cli", "python") if self.folder or self.wasm_unsupported else SURFACES
+
+    def needs_archives(self) -> bool:
+        """Spec section 19.7: what a build without archive support refuses."""
+        options = json.loads(self.options.read_text(encoding="utf-8"))
+        adapter = options.get("adapter", "auto")
+        if adapter == "tree" or options.get("tree", {}).get("exclude"):
+            return True
+        return (
+            adapter == "auto"
+            and starts_like_archive(self.left.read_bytes())
+            and starts_like_archive(self.right.read_bytes())
+        )
+
+
+def starts_like_archive(data: bytes) -> bool:
+    """`diffyman::starts_like_archive`: zip, tar, gzip or zstd signatures."""
+    return (
+        data.startswith((b"PK\x03\x04", b"PK\x05\x06", b"\x1f\x8b", b"\x28\xb5\x2f\xfd"))
+        or (len(data) >= 512 and data[257:262] == b"ustar")
+        or (len(data) >= 4 and data[0] & 0xF0 == 0x50 and data[1:4] == b"\x2a\x4d\x18")
+    )
 
 
 @dataclass
@@ -84,6 +119,8 @@ class Output:
     raw: str | None = None
     error: str | None = None
     exit_code: int | None = None
+    # The binding's error code, such as "unsupported" (WASM only).
+    code: str | None = None
 
 
 @dataclass
@@ -244,13 +281,30 @@ def run_python(venv: pathlib.Path, cases: list[Case]) -> tuple[list[Output], str
 # --- (c) WASM --------------------------------------------------------------
 
 
-def run_wasm(node: str, pkg: pathlib.Path, cases: list[Case]) -> list[Output]:
+WASM_SCRIPT = REPO / "tests" / "conformance" / "wasm_diff.mjs"
+
+
+def check_wasm_pkg(pkg: pathlib.Path) -> None:
     if not (pkg / "diffyman_wasm.js").is_file():
         raise SystemExit(
             f"no WASM package at {pkg}; build it with "
             "`wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node`"
         )
-    script = REPO / "tests" / "conformance" / "wasm_diff.mjs"
+
+
+def wasm_features(node: str, pkg: pathlib.Path) -> list[str]:
+    check_wasm_pkg(pkg)
+    proc = subprocess.run(
+        [node, str(WASM_SCRIPT), "--pkg", str(pkg), "--features"], capture_output=True, check=False
+    )
+    if proc.returncode != 0:
+        raise SystemExit(f"wasm_diff.mjs --features failed:\n{proc.stderr.decode(errors='replace')}")
+    return json.loads(proc.stdout.decode("utf-8"))
+
+
+def run_wasm(node: str, pkg: pathlib.Path, cases: list[Case]) -> list[Output]:
+    check_wasm_pkg(pkg)
+    script = WASM_SCRIPT
     runnable = [c for c in cases if not c.folder]
     proc = subprocess.run(
         [node, str(script), "--pkg", str(pkg), "--batch"],
@@ -268,7 +322,10 @@ def batch_outputs(stdout: bytes, count: int) -> list[Output]:
     results = json.loads(stdout.decode("utf-8"))
     if len(results) != count:
         raise SystemExit(f"batch returned {len(results)} results for {count} cases")
-    return [Output(raw=r["json"]) if r["ok"] else Output(error=r["error"]) for r in results]
+    return [
+        Output(raw=r["json"]) if r["ok"] else Output(error=r["error"], code=r.get("code"))
+        for r in results
+    ]
 
 
 # --- Comparison ------------------------------------------------------------
@@ -288,6 +345,15 @@ def judge(case: Case, outputs: dict[str, Output]) -> Verdict:
             expected = conformance_bytes(json.loads(case.expected.read_text(encoding="utf-8")))
         except FileNotFoundError:
             verdict.problems.append("expected.json is missing")
+
+    if case.wasm_unsupported:
+        out = outputs["wasm"]
+        if out.raw is None and out.code == "unsupported":
+            verdict.cells["wasm"] = "unsupp"
+        else:
+            got = "a document" if out.raw is not None else f"{out.code}: {out.error}"
+            verdict.cells["wasm"] = "bad-unsp"
+            verdict.problems.append(f"wasm: expected an `unsupported` error (no archive support), got {got}")
 
     stripped: dict[str, bytes] = {}
     for surface in case.surfaces:
@@ -350,16 +416,23 @@ def main() -> int:
     if not golden:
         raise SystemExit(f"no cases under {args.corpus}")
     cli = find_cli(args.cli)
+    features = wasm_features(args.node, args.wasm_pkg.resolve())
     with tempfile.TemporaryDirectory(prefix="diffyman-bindings-") as tmp:
         extra = [] if args.golden_only else line_only_variants(golden, pathlib.Path(tmp))
         cases = golden + extra
+        if "archives" not in features:
+            for case in cases:
+                case.wasm_unsupported = not case.folder and case.needs_archives()
         cli_out = run_cli(cli, cases)
         py_out, interpreter = run_python(args.venv.resolve(), cases)
         wasm_out = run_wasm(args.node, args.wasm_pkg.resolve(), cases)
 
+    refused = sum(c.wasm_unsupported for c in cases)
     print(f"cli:    {cli}")
     print(f"python: {interpreter}")
-    print(f"wasm:   {args.wasm_pkg.resolve()} (node {node_version(args.node)})")
+    print(f"wasm:   {args.wasm_pkg.resolve()} (node {node_version(args.node)}, features {features})")
+    if refused:
+        print(f"        no archive support: {refused} cases must give an `unsupported` error")
     print()
     width = max(len(c.name) for c in cases)
     header = (
@@ -387,7 +460,8 @@ def main() -> int:
     print()
     print(
         f"{len(golden)} corpus cases: {len(golden) - failed['golden']} passed, {failed['golden']} failed "
-        "(cli, python and, except for folder inputs, wasm byte-identical to expected.json, provenance removed)"
+        "(cli, python and, except for folder inputs and cases the WASM build refuses, wasm "
+        "byte-identical to expected.json, provenance removed)"
     )
     if extra:
         print(

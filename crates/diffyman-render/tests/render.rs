@@ -171,11 +171,299 @@ fn binary_documents_render_like_git() {
         render::unified(&d, r, r, &UnifiedOptions::default()),
         Err(RenderError::InputMismatch("left"))
     );
-    // HTML has no hex view yet.
-    assert!(matches!(
-        render::html(&d, l, r, &HtmlOptions::default()),
-        Err(RenderError::UnsupportedKind(_))
-    ));
+    // HTML lists the range with a hex dump of both sides.
+    let page = html(&d, l, r);
+    assert_safe(&page);
+    assert!(
+        page.contains("1 changed range: 3 bytes added, 2 removed, 2 unchanged; 44.44% similar.")
+    );
+    assert!(page.contains("00 01 <del>02 03</del>"), "{page}");
+    assert!(page.contains("00 01 <ins>ff 03 04</ins>"), "{page}");
+    assert!(page.contains("|..<del>..</del>"), "{page}");
+    assert!(page.contains("application/octet-stream"));
+    assert_eq!(
+        render::html(&d, r, r, &HtmlOptions::default()),
+        Err(RenderError::InputMismatch("left"))
+    );
+    let page = html(&same, l, l);
+    assert!(page.contains("byte for byte the same") && page.contains("No changes to show."));
+}
+
+#[test]
+fn hex_dumps_are_bounded_and_ranges_checked() {
+    let left: Vec<u8> = (0..8192u32).map(|i| (i * 7 % 251) as u8).collect();
+    let mut right = left.clone();
+    for at in (0..8192).step_by(512) {
+        right[at] ^= 0xff;
+        right[at + 1] = b'<';
+    }
+    let d = doc_named(&left, "a.bin", &right, "b.bin", "{}");
+    assert_eq!(d.bytes.len(), 16);
+    let page = render::html(
+        &d,
+        &left,
+        &right,
+        &HtmlOptions {
+            max_hex_bytes: 200,
+            ..HtmlOptions::default()
+        },
+    )
+    .unwrap();
+    assert_safe(&page);
+    // 16 bytes per row and side: six rows fit 200 bytes, and the rest of the
+    // ranges are listed without a dump.
+    assert_eq!(page.matches("<span class=\"ho\">").count(), 12);
+    assert!(page.contains("Hex dumps cut short."));
+    assert!(page.contains("&lt;</ins>"), "escaped in the text column");
+    let page = render::html(
+        &d,
+        &left,
+        &right,
+        &HtmlOptions {
+            // 4 KiB past the header reserve: a few ranges with their dumps.
+            max_bytes: 100 * 1024,
+            ..HtmlOptions::default()
+        },
+    )
+    .unwrap();
+    assert_safe(&page);
+    assert!(page.contains("<strong>Truncated.</strong>"));
+    assert!(page.contains(" of 16 byte ranges are listed"));
+    assert!(page.len() < 100 * 1024);
+    // Ranges outside the input, or with the wrong shape, are rejected.
+    let mut broken = d.clone();
+    broken.bytes[3].right_length = u64::MAX;
+    let mut wrong = d.clone();
+    wrong.bytes[0].op = OpKind::Insert;
+    for b in [&broken, &wrong] {
+        assert!(matches!(
+            render::html(b, &left, &right, &HtmlOptions::default()),
+            Err(RenderError::InvalidDocument(_))
+        ));
+    }
+}
+
+/// The document of a corpus case, from its files or folders.
+fn corpus_doc(case: &Path) -> (DiffDocument, Vec<u8>, Vec<u8>) {
+    let options =
+        diffyman::parse_options(&fs::read_to_string(case.join("options.json")).unwrap()).unwrap();
+    let pick = |stem: &str| {
+        let dir = case.join(stem);
+        if dir.is_dir() {
+            return dir;
+        }
+        fs::read_dir(case)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(&format!("{stem}."))
+            })
+            .unwrap()
+    };
+    let (l, r) = (pick("left"), pick("right"));
+    if l.is_dir() || r.is_dir() {
+        let d = diffyman::diff_paths(&l, &r, &options, &diffyman::Settings::default()).unwrap();
+        return (d, Vec::new(), Vec::new());
+    }
+    let (lb, rb) = (fs::read(&l).unwrap(), fs::read(&r).unwrap());
+    let name = |p: &Path| p.file_name().unwrap().to_string_lossy().into_owned();
+    let (ln, rn) = (name(&l), name(&r));
+    let d =
+        diffyman::diff_document(Input::named(&lb, &ln), Input::named(&rb, &rn), &options).unwrap();
+    (d, lb, rb)
+}
+
+/// Contents of top-level entries of a corpus case whose sides are folders.
+fn folder_contents(case: &Path) -> impl FnMut(&[&str]) -> Option<(Vec<u8>, Vec<u8>)> + '_ {
+    move |path: &[&str]| {
+        let [entry] = path else {
+            return None;
+        };
+        Some((
+            fs::read(case.join("left").join(entry)).ok()?,
+            fs::read(case.join("right").join(entry)).ok()?,
+        ))
+    }
+}
+
+#[test]
+fn html_renders_every_corpus_case_safely() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus");
+    let mut rendered = 0;
+    for group in ["text", "moved", "binary", "tree"] {
+        let mut cases: Vec<PathBuf> = fs::read_dir(root.join(group))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.join("options.json").exists())
+            .collect();
+        cases.sort();
+        for case in cases {
+            let (d, l, r) = corpus_doc(&case);
+            let mut contents = folder_contents(&case);
+            let page =
+                render::html_with_contents(&d, &l, &r, &mut contents, &HtmlOptions::default())
+                    .unwrap_or_else(|e| panic!("{}: {e}", case.display()));
+            assert_safe(&page);
+            assert!(page.ends_with("</html>\n"), "{}", case.display());
+            rendered += 1;
+        }
+    }
+    assert!(rendered >= 130, "{rendered}");
+}
+
+#[test]
+fn tree_html_lists_entries_and_children() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/tree");
+    // Two zips: no entry content, so the text child is listed by position.
+    let (d, ..) = corpus_doc(&root.join("011-zip-changes"));
+    let page = html(&d, &[], &[]);
+    assert_safe(&page);
+    assert!(page.contains("6 changed entries: 2 added, 1 removed, 2 modified, 1 moved"));
+    assert!(page.contains("old/name.txt <span aria-hidden=\"true\">→</span><span class=\"sr\">moved to</span> new/name.txt"));
+    assert!(page.contains("symbolic link <span aria-hidden=\"true\">→</span><span class=\"sr\">to</span> <code>src/app.js</code>"));
+    assert!(page.contains("<summary>Text: different, 1 change in 1 hunk"));
+    assert!(
+        page.contains("<li><code>@@ -1,2 +1,3 @@</code> 1 line removed, 2 added</li>"),
+        "{page}"
+    );
+    assert!(page.contains("Positions only."));
+    assert!(page.contains("<summary>3 unchanged entries</summary>"));
+
+    // Two folders with their contents: real lines and a hex dump.
+    let case = root.join("002-folder-changes");
+    let (d, ..) = corpus_doc(&case);
+    let mut contents = folder_contents(&case);
+    let page =
+        render::html_with_contents(&d, &[], &[], &mut contents, &HtmlOptions::default()).unwrap();
+    assert_safe(&page);
+    assert!(page.contains("<table class=\"diff emb\">"));
+    assert!(page.contains("<code class=\"hex\">"));
+    assert!(page.contains("id=\"c1-u-h1\"") && page.contains("id=\"c2-u-h1\""));
+    assert!(!page.contains("Positions only."));
+
+    // Contents that do not match are not shown.
+    let mut wrong = |_: &[&str]| Some((b"x\n".to_vec(), b"y\n".to_vec()));
+    let page =
+        render::html_with_contents(&d, &[], &[], &mut wrong, &HtmlOptions::default()).unwrap();
+    assert_safe(&page);
+    assert!(page.contains("Content mismatch."));
+    assert!(!page.contains("<table class=\"diff emb\">"));
+
+    // The content budget and the depth cap.
+    let mut asked = 0;
+    let mut counting = |path: &[&str]| {
+        asked += 1;
+        folder_contents(&case)(path)
+    };
+    let page = render::html_with_contents(
+        &d,
+        &[],
+        &[],
+        &mut counting,
+        &HtmlOptions {
+            max_content_bytes: 10,
+            ..HtmlOptions::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(asked, 0);
+    assert!(page.contains("Content limit."));
+    let (nested, ..) = corpus_doc(&root.join("018-nested-zip"));
+    let deep = render::html(&nested, &[], &[], &HtmlOptions::default()).unwrap();
+    assert!(
+        deep.contains("<summary>Archive: different") && deep.contains("<summary>Text: different")
+    );
+    let shallow = render::html(
+        &nested,
+        &[],
+        &[],
+        &HtmlOptions {
+            max_depth: 1,
+            ..HtmlOptions::default()
+        },
+    )
+    .unwrap();
+    assert_safe(&shallow);
+    assert!(shallow.contains("deeper than this report's depth limit"));
+    assert!(shallow.contains("Nesting."));
+
+    // Warnings that matter for trees are flagged.
+    let (d, ..) = corpus_doc(&root.join("014-zip-traversal-names"));
+    let page = html(&d, &[], &[]);
+    assert!(page.contains("<strong>Unsafe paths (left).</strong>"));
+    assert_eq!(
+        page.matches("<span class=\"badge bad\">unsafe path</span>")
+            .count(),
+        // The legend, the notice and one per unsafe entry.
+        2 + d
+            .tree
+            .as_ref()
+            .unwrap()
+            .entries
+            .iter()
+            .filter(|e| e.path.starts_with('/') || e.path.contains("..") || e.path.contains(':'))
+            .count()
+    );
+    let (d, ..) = corpus_doc(&root.join("017-zip-encrypted"));
+    let page = html(&d, &[], &[]);
+    assert!(page.contains("<strong>Partial.</strong>"));
+    assert!(page.contains("<strong>Encrypted entries (left).</strong>"));
+    assert!(page.contains("<span class=\"badge\">content not read</span>"));
+}
+
+#[test]
+fn tree_html_escapes_hostile_paths_and_is_capped() {
+    let case =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/tree/011-zip-changes");
+    let (mut d, ..) = corpus_doc(&case);
+    let hostile = "<img src=x onerror=alert(1)>\u{202e}gpj.exe\"'&";
+    let tree = d.tree.as_mut().unwrap();
+    for (i, e) in tree.entries.iter_mut().enumerate() {
+        e.path = format!("{hostile}/{i}");
+        if e.from_path.is_some() {
+            e.from_path = Some(format!("../{hostile}"));
+        }
+        for side in [e.left.as_mut(), e.right.as_mut()].into_iter().flatten() {
+            if side.target.is_some() {
+                side.target = Some(format!("</code><script>{hostile}"));
+            }
+            if let Some(sha) = &mut side.sha256 {
+                sha.insert_str(0, "\"><b>\u{2066}");
+            }
+        }
+    }
+    let page = html(&d, &[], &[]);
+    assert_safe(&page);
+    assert!(!page.contains("<img") && !page.contains("<b>") && !page.contains("<script"));
+    assert!(!page.contains('\u{202e}') && !page.contains('\u{2066}'));
+    assert!(page.contains("Bidirectional control characters."));
+    assert!(page.contains("<span class=\"badge bad\">unsafe path</span>"));
+
+    // Many entries: the size cap holds, and the page says so.
+    let entry = d.tree.as_ref().unwrap().entries[0].clone();
+    d.tree.as_mut().unwrap().entries = (0..20_000)
+        .map(|i| diffyman::model::TreeEntry {
+            path: format!("dir/file-{i:05}.txt"),
+            ..entry.clone()
+        })
+        .collect();
+    let max = 300_000;
+    let page = render::html(
+        &d,
+        &[],
+        &[],
+        &HtmlOptions {
+            max_bytes: max,
+            ..HtmlOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(page.len() < max + 4096, "{}", page.len());
+    assert!(page.contains("Truncated"));
+    assert_safe(&page);
 }
 
 #[test]
@@ -209,6 +497,142 @@ fn inputs_must_match_the_document() {
         render::html(&d, b"a\n", b"bb\n", &HtmlOptions::default()),
         Err(RenderError::InputMismatch("right"))
     );
+}
+
+fn named<'a>(bytes: &'a [u8], name: Option<&'a str>) -> Input<'a> {
+    match name {
+        Some(n) => Input::named(bytes, n),
+        None => Input::new(bytes),
+    }
+}
+
+/// For every corpus case on files, rendering from the engine's decoded
+/// inputs (`*_computed`) gives exactly the output of the checked path, with
+/// and without the engine's text, and in every unified style.
+#[test]
+fn computed_inputs_render_like_checked_inputs() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus");
+    let mut compared = 0;
+    for group in ["text", "moved", "binary", "tree"] {
+        let mut cases: Vec<PathBuf> = fs::read_dir(root.join(group))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.join("options.json").exists())
+            .collect();
+        cases.sort();
+        for case in cases {
+            let (d, l, r) = corpus_doc(&case);
+            if d.kind == diffyman::model::Kind::Tree && l.is_empty() {
+                continue; // folders: no input bytes
+            }
+            let options = d.options.clone();
+            let settings = diffyman::Settings::default();
+            let (ln, rn) = (d.left.name.clone(), d.right.name.clone());
+            let (with_text, text) = diffyman::diff_document_with_text(
+                named(&l, ln.as_deref()),
+                named(&r, rn.as_deref()),
+                &options,
+                &settings,
+            )
+            .unwrap();
+            assert_eq!(with_text.id, d.id, "{}", case.display());
+            if d.kind == diffyman::model::Kind::Text {
+                assert_eq!(
+                    text.is_some(),
+                    d.left.encoding.is_some() && d.right.encoding.is_some(),
+                    "{}",
+                    case.display()
+                );
+            } else {
+                assert!(text.is_none(), "{}", case.display());
+            }
+            for computed in [
+                render::Computed {
+                    left: &l,
+                    right: &r,
+                    text: text.as_ref(),
+                },
+                render::Computed {
+                    left: &l,
+                    right: &r,
+                    text: None,
+                },
+            ] {
+                for (color, escape) in [(false, false), (true, true)] {
+                    let o = UnifiedOptions {
+                        color,
+                        escape_controls: escape,
+                        ..UnifiedOptions::default()
+                    };
+                    assert_eq!(
+                        render::unified_computed(&d, &computed, &o),
+                        render::unified(&d, &l, &r, &o),
+                        "{}",
+                        case.display()
+                    );
+                }
+                let o = HtmlOptions::default();
+                assert_eq!(
+                    render::html_computed(&d, &computed, &o),
+                    render::html(&d, &l, &r, &o),
+                    "{}",
+                    case.display()
+                );
+            }
+            compared += 1;
+        }
+    }
+    assert!(compared >= 110, "{compared}");
+}
+
+/// The computed path still checks what is cheap: sizes, line counts, and
+/// that the engine's text belongs to the document.
+#[test]
+fn computed_inputs_are_checked_cheaply() {
+    let (l, r) = (b"a\nb\n".as_slice(), b"a\nc\n".as_slice());
+    let (d, text) = diffyman::diff_document_with_text(
+        Input::new(l),
+        Input::new(r),
+        &Options::default(),
+        &diffyman::Settings::default(),
+    )
+    .unwrap();
+    let text = text.unwrap();
+    let wrong_size = render::Computed {
+        left: b"a\nb\nc\n",
+        right: r,
+        text: Some(&text),
+    };
+    assert_eq!(
+        render::unified_computed(&d, &wrong_size, &UnifiedOptions::default()),
+        Err(RenderError::InputMismatch("left"))
+    );
+    // Same size, other text: not hashed, so this renders from the given
+    // text; a text that does not fit the document is refused.
+    let other = render::TextInputs {
+        left: render::IndexedText::new("a\nb\n\n"),
+        right: text.right.clone(),
+    };
+    let misfit = render::Computed {
+        left: l,
+        right: r,
+        text: Some(&other),
+    };
+    assert!(matches!(
+        render::unified_computed(&d, &misfit, &UnifiedOptions::default()),
+        Err(RenderError::InvalidDocument(_))
+    ));
+    let mut broken = d.clone();
+    broken.hunks[0].ops[0].left_range = Range { start: 9, count: 1 };
+    let ok = render::Computed {
+        left: l,
+        right: r,
+        text: Some(&text),
+    };
+    assert!(matches!(
+        render::html_computed(&broken, &ok, &HtmlOptions::default()),
+        Err(RenderError::InvalidDocument(_))
+    ));
 }
 
 #[test]
@@ -485,6 +909,24 @@ fn html_marks_moves_spans_and_line_endings() {
     assert!(page.contains("Moved blocks"));
     assert!(page.contains("moved to right"));
     assert!(page.contains("⇄<span class=\"sr\"> moved away</span>"));
+
+    // An edited move: its lines show the move's own spans (`moves[].inline`).
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/corpus/moved/026-edited-renamed-variable");
+    let (l, r) = (
+        fs::read(root.join("left.txt")).unwrap(),
+        fs::read(root.join("right.txt")).unwrap(),
+    );
+    let d = doc(&l, &r, r#"{"detectMoves": true, "granularity": "word"}"#);
+    let m = &d.moves[0];
+    assert!(!m.inline.is_empty());
+    let page = html(&d, &l, &r);
+    assert_safe(&page);
+    let mut without = d.clone();
+    without.moves[0].inline.clear();
+    let plain_page = html(&without, &l, &r);
+    assert!(page.matches("<del>").count() > plain_page.matches("<del>").count());
+    assert!(page.matches("<ins>").count() > plain_page.matches("<ins>").count());
 
     let d = doc(
         b"one two three\n",

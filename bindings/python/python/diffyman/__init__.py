@@ -1,6 +1,6 @@
 """diffyman: compare two inputs and get one canonical JSON Diff Document.
 
-The result follows ``docs/spec/diff-document.md`` (schema ``0.3.0``). The JSON
+The result follows ``docs/spec/diff-document.md`` (schema ``0.4.0``). The JSON
 returned by :func:`diff` is byte-identical to ``diffyman diff --json`` and to
 every other binding once the top-level ``provenance`` key is removed.
 
@@ -19,6 +19,11 @@ Inputs may be:
   ``left_name``/``right_name`` is given. Two paths of which one is a folder
   are compared as folders and archives (a tree document).
 
+Paths are read with the engine's bounded reader, like the CLI: a regular
+file whole, a pipe or device up to :data:`MAX_STREAM_BYTES` (4 GiB).
+``max_input_size`` sets one byte limit for every path input; an input over
+the limit raises :class:`OSError` (``limit-exceeded: ...``).
+
 Options may be a mapping (serialized to JSON), a JSON string, or ``None`` for
 the defaults. Invalid options raise :class:`DiffymanError` (a ``ValueError``)
 and produce no document.
@@ -31,12 +36,14 @@ import os
 from collections.abc import Mapping
 from typing import Any, Union
 
-from ._native import ENGINE_VERSION, SCHEMA_VERSION, DiffymanError
+from ._native import ENGINE_VERSION, MAX_STREAM_BYTES, SCHEMA_VERSION, DiffymanError
 from ._native import diff as _native_diff
 from ._native import diff_paths as _native_diff_paths
+from ._native import read_path as _native_read_path
 
 __all__ = [
     "ENGINE_VERSION",
+    "MAX_STREAM_BYTES",
     "SCHEMA_VERSION",
     "DiffymanError",
     "Options",
@@ -55,7 +62,19 @@ Options = Union[Mapping[str, Any], str, None]
 """An options object (diff-document.md section 9), as a mapping or JSON text."""
 
 
-def _load(source: Source, name: str | None) -> tuple[bytes, str | None]:
+def _check_limit(max_input_size: int | None) -> int | None:
+    if max_input_size is None:
+        return None
+    if isinstance(max_input_size, bool) or not isinstance(max_input_size, int):
+        raise TypeError(
+            f"max_input_size must be an int or None, not {type(max_input_size).__name__}"
+        )
+    if max_input_size < 0:
+        raise ValueError("max_input_size must not be negative")
+    return max_input_size
+
+
+def _load(source: Source, name: str | None, limit: int | None) -> tuple[bytes, str | None]:
     if isinstance(source, bytes):
         return source, name
     if isinstance(source, (bytearray, memoryview)):
@@ -64,8 +83,7 @@ def _load(source: Source, name: str | None) -> tuple[bytes, str | None]:
         return source.encode("utf-8"), name
     if isinstance(source, os.PathLike):
         path = os.fsdecode(os.fspath(source))
-        with open(path, "rb") as handle:
-            data = handle.read()
+        data = _native_read_path(path, limit)
         return data, name if name is not None else os.path.basename(path)
     raise TypeError(
         "diffyman inputs must be bytes, bytearray, memoryview, str or os.PathLike, "
@@ -100,6 +118,7 @@ def diff(
     *,
     left_name: str | None = None,
     right_name: str | None = None,
+    max_input_size: int | None = None,
 ) -> str:
     """Diff two inputs and return the canonical (RFC 8785) Diff Document as text.
 
@@ -110,15 +129,21 @@ def diff(
     tree document (folders and archives, diff-document.md section 19); the
     names are then the folders' own names and ``left_name``/``right_name``
     must not be given.
+
+    ``max_input_size`` is a byte limit for every path input (and the archive
+    side of a folder diff), like the CLI's ``--max-input-size``. ``None`` keeps
+    the default: regular files whole, pipes and devices up to
+    :data:`MAX_STREAM_BYTES`.
     """
+    limit = _check_limit(max_input_size)
     if _is_folder_pair(left, right):
         if left_name is not None or right_name is not None:
             raise TypeError("left_name and right_name cannot be used with folders")
         return _native_diff_paths(
-            os.fspath(left), os.fspath(right), _options_json(options)  # type: ignore[arg-type]
+            os.fspath(left), os.fspath(right), _options_json(options), limit  # type: ignore[arg-type]
         )
-    left_bytes, left_name = _load(left, left_name)
-    right_bytes, right_name = _load(right, right_name)
+    left_bytes, left_name = _load(left, left_name, limit)
+    right_bytes, right_name = _load(right, right_name, limit)
     return _native_diff(left_bytes, right_bytes, _options_json(options), left_name, right_name)
 
 
@@ -129,9 +154,17 @@ def diff_document(
     *,
     left_name: str | None = None,
     right_name: str | None = None,
+    max_input_size: int | None = None,
 ) -> dict[str, Any]:
     """Like :func:`diff`, but return the parsed document as a ``dict``."""
     result: dict[str, Any] = json.loads(
-        diff(left, right, options, left_name=left_name, right_name=right_name)
+        diff(
+            left,
+            right,
+            options,
+            left_name=left_name,
+            right_name=right_name,
+            max_input_size=max_input_size,
+        )
     )
     return result

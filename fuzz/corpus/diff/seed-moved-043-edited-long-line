@@ -1,0 +1,50 @@
+ {
+  "algorithm": "histogram",
+  "granularity": "smart",
+  "ignore": {
+    "whitespace": "none",
+    "case": false,
+    "blankLines": false,
+    "regex": []
+  },
+  "context": 3,
+  "positionEncoding": "utf-8",
+  "detectMoves": true,
+  "adapter": "auto",
+  "tree": {
+    "followSymlinks": false,
+    "ignoreFiles": false,
+    "exclude": [],
+    "detectMoves": true,
+    "maxDepth": 3,
+    "childBudget": 16777216
+  }
+}
+é# Help centre: orders
+
+## Placing an order
+Add items to your basket, open the basket and choose a delivery slot. You can pay by card, by bank transfer or with store credit, and you can combine store credit with either of the other two. The order is confirmed as soon as the payment goes through, and the confirmation email lists every item, the delivery slot and the address we will deliver to.
+
+## Returns and refunds
+You can return any unused item within thirty days of delivery. Pack it in its original box if you still have it, print the prepaid label from the order page, and drop the parcel at any post office. Once the warehouse has checked the item, we send the refund to your original payment method; most banks show it within five working days, but some card issuers take up to two weeks to recieve and post it.
+Store credit never expires.
+
+## Delivery times
+Orders placed before noon on a working day leave the warehouse the same afternoon. Standard delivery takes two to four working days; express delivery arrives the next working day if you order before noon. Large items such as furniture are delivered by a partner courier, who calls you the day before to agree on a two-hour window.
+
+## Contact
+Write to us at any time from the order page.
+# Help centre: orders
+
+## Placing an order
+Add items to your basket, open the basket and choose a delivery slot. You can pay by card, by bank transfer or with store credit, and you can combine store credit with either of the other two. The order is confirmed as soon as the payment goes through, and the confirmation email lists every item, the delivery slot and the address we will deliver to.
+
+## Delivery times
+Orders placed before noon on a working day leave the warehouse the same afternoon. Standard delivery takes two to four working days; express delivery arrives the next working day if you order before noon. Large items such as furniture are delivered by a partner courier, who calls you the day before to agree on a two-hour window.
+
+## Contact
+Write to us at any time from the order page.
+
+## Returns and refunds
+You can return any unused item within thirty days of delivery. Pack it in its original box if you still have it, print the prepaid label from the order page, and drop the parcel at any post office. Once the warehouse has checked the item, we send the refund to your original payment method; most banks show it within five working days, but some card issuers take up to two weeks to receive and post it.
+Store credit never expires.

@@ -12,5 +12,13 @@
   "context": 3,
   "positionEncoding": "utf-8",
   "detectMoves": false,
-  "adapter": "auto"
+  "adapter": "auto",
+  "tree": {
+    "followSymlinks": false,
+    "ignoreFiles": false,
+    "exclude": [],
+    "detectMoves": true,
+    "maxDepth": 3,
+    "childBudget": 16777216
+  }
 }

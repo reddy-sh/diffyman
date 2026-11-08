@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="generator" content="diffyman">
+<title>Diff: left.bin → right.bin</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1f2328;--mute:#59636e;--bd:#d1d9e0;--hh:#eef3f8;--gap:#f6f8fa;--a-bg:#e1efff;--a-hi:#a8cdf5;--a-fg:#0b4f8a;--d-bg:#ffead9;--d-hi:#f4bd8f;--d-fg:#8f3f00;--mv:#7b3aa6;--mv-bg:#f4eafb;--i-bg:#f0f1f3;--inv-bg:#fff1a8;--inv-fg:#5a4500;--link:#0b5cad}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--mute:#9198a1;--bd:#3d444d;--hh:#161d27;--gap:#151b23;--a-bg:#0c2d4d;--a-hi:#1d5d99;--a-fg:#a8cdf5;--d-bg:#3a230f;--d-hi:#7c4517;--d-fg:#f4bd8f;--mv:#d2a8ef;--mv-bg:#2a1c36;--i-bg:#1b1f24;--inv-bg:#5a4500;--inv-fg:#fff1a8;--link:#79b8ff}}
+*{box-sizing:border-box}
+body{margin:0;padding:1rem 1.25rem 2rem;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--link)}
+h1{font-size:1.35rem;margin:0 0 .25rem;overflow-wrap:anywhere}
+h2{font-size:1.05rem;margin:1rem 0 .4rem}
+code,.diff{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.files{margin:0;color:var(--mute);overflow-wrap:anywhere}
+.notice{border:1px solid var(--bd);border-left:4px solid var(--mv);padding:.4rem .75rem;background:var(--gap)}
+.legend{display:flex;flex-wrap:wrap;gap:.25rem 1.25rem;list-style:none;padding:0;margin:.5rem 0;font-size:.9rem}
+.key{display:inline-block;min-width:1.7em;text-align:center;font-weight:700;border:1px solid var(--bd);border-radius:3px}
+.key.d{background:var(--d-bg);color:var(--d-fg)}.key.a{background:var(--a-bg);color:var(--a-fg)}.key.mv{background:var(--mv-bg);color:var(--mv)}.key.i{background:var(--i-bg);color:var(--mute)}
+details{margin:.5rem 0}summary{cursor:pointer}
+table.meta{border-collapse:collapse;font-size:.85rem;margin:.5rem 0}
+.meta th,.meta td{border:1px solid var(--bd);padding:.15rem .5rem;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+.warnings{padding-left:1.25rem}.sev-error strong{color:var(--d-fg)}
+.empty{font-size:1.05rem;padding:1rem;border:1px solid var(--bd);background:var(--gap)}
+.vt{position:absolute;opacity:0;width:1px;height:1px}
+.vt+label{display:inline-block;padding:.2rem .8rem;border:1px solid var(--bd);border-radius:4px;margin:0 .3rem .6rem 0;cursor:pointer}
+.vt:checked+label{background:var(--hh);border-color:var(--fg);font-weight:600}
+.vt:focus-visible+label{outline:2px solid var(--link);outline-offset:2px}
+#view-split:checked~.inline,#view-inline:checked~.split{display:none}
+table.diff{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;line-height:1.45;border:1px solid var(--bd)}
+.cm{width:1.6em}
+.diff thead th{background:var(--hh);text-align:left;font-weight:600;padding:.25rem .5rem;border-bottom:1px solid var(--bd);overflow-wrap:anywhere}
+.diff td{padding:0 .4rem;vertical-align:top}
+.diff .n{color:var(--mute);text-align:right;-webkit-user-select:none;user-select:none}
+.diff .m{padding:0;text-align:center;font-weight:700;-webkit-user-select:none;user-select:none}
+.diff .c{white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext;tab-size:4}
+.diff .hh th{background:var(--hh);color:var(--mute);text-align:left;font-weight:400;padding:.2rem .5rem;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd)}
+.diff .gap td{background:var(--gap);color:var(--mute);text-align:center;font-style:italic;padding:.1rem}
+.diff .cut td{background:var(--inv-bg);color:var(--inv-fg);text-align:center;padding:.4rem}
+.d{background:var(--d-bg)}.m.d{color:var(--d-fg)}
+.a{background:var(--a-bg)}.m.a{color:var(--a-fg)}
+.i{background:var(--i-bg);color:var(--mute)}
+.x{background:var(--gap)}
+.mv{background:var(--mv-bg)}.m.mv{color:var(--mv)}.c.mv{box-shadow:inset 3px 0 0 var(--mv)}
+del{background:var(--d-hi);color:inherit;text-decoration:line-through 1px}
+ins{background:var(--a-hi);color:inherit;text-decoration:underline 2px;text-underline-offset:2px}
+.inv{display:inline-block;font:600 .7em/1.2 system-ui,sans-serif;padding:0 .2em;margin:0 .05em;border:1px solid var(--inv-fg);border-radius:3px;background:var(--inv-bg);color:var(--inv-fg);vertical-align:.1em;text-decoration:none;unicode-bidi:isolate}
+.tab{border-bottom:1px dotted var(--mute)}
+.tw{outline:1px dashed var(--mute);outline-offset:-1px}
+.eol{margin-left:.35em;font:.75em system-ui,sans-serif;color:var(--mute);-webkit-user-select:none;user-select:none}
+.cl{font:italic .8em system-ui,sans-serif;color:var(--mute)}
+.mvl{float:right;margin-left:.5em;padding:0 .35em;font:.75em/1.6 system-ui,sans-serif;border:1px solid var(--mv);border-radius:3px;color:var(--mv);text-decoration:none;-webkit-user-select:none;user-select:none}
+.mvl:focus-visible,.mvl:hover{text-decoration:underline}
+footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhere}
+@media print{.vt,.vt+label{display:none}.view{display:block!important}}
+table.ranges,table.entries{width:100%;border-collapse:collapse;font-size:13px;line-height:1.45;border:1px solid var(--bd);margin:.25rem 0 .75rem}
+.ranges th,.entries th{background:var(--hh);text-align:left;font-weight:600;padding:.25rem .5rem;border-bottom:1px solid var(--bd)}
+.ranges td,.entries td{padding:.2rem .5rem;vertical-align:top;border-top:1px solid var(--bd);overflow-wrap:anywhere}
+.ranges .n{color:var(--mute);text-align:right;width:3em}
+.ranges .op,.entries .st{white-space:nowrap}
+.loc{display:block;font-size:.85rem;color:var(--mute)}
+code.hex{display:block;white-space:pre;overflow-x:auto;font-size:12px;line-height:1.4;margin-top:.2rem}
+.ho{color:var(--mute)}
+.key.r{background:var(--mv-bg);color:var(--mv)}
+tr.cut td{background:var(--inv-bg);color:var(--inv-fg);text-align:center;padding:.4rem}
+</style>
+</head>
+<body>
+<header>
+<h1>Diff: left.bin → right.bin</h1>
+<p class="files">left.bin <span aria-hidden="true">→</span><span class="sr">compared with</span> right.bin</p>
+<p class="status st-different"><strong>Different.</strong> 30 changed ranges: 240 bytes added, 240 removed, 130832 unchanged; 99.82% similar.</p>
+<ul class="legend" aria-label="Legend"><li><span class="key d">−</span> deleted bytes</li><li><span class="key a">+</span> inserted bytes</li><li><span class="key r">±</span> replaced bytes</li><li><del>4f</del> <ins>50</ins> changed bytes in a hex dump</li><li><code>.</code> a byte outside printable ASCII in the text column</li></ul>
+<details>
+<summary>Files and options</summary>
+<table class="meta">
+<thead><tr><td></td><th scope="col">Left</th><th scope="col">Right</th></tr></thead>
+<tbody>
+<tr><th scope="row">Name</th><td>left.bin</td><td>right.bin</td></tr>
+<tr><th scope="row">Media type</th><td><code>application/octet-stream</code></td><td><code>application/octet-stream</code></td></tr>
+<tr><th scope="row">Size</th><td>131072 bytes</td><td>131072 bytes</td></tr>
+<tr><th scope="row">Encoding</th><td>binary</td><td>binary</td></tr>
+<tr><th scope="row">SHA-256</th><td><code>8b5b57796a5eecf4557018a8bf43157e17a42b71fc39ce2b7ac386b10a861d05</code></td><td><code>10168f577500f2332f05b7a1b54b61647f4604012fc98a9b8371e657a1a05521</code></td></tr>
+</tbody>
+</table>
+<p>Options: adapter auto.</p>
+</details>
+</header>
+<main>
+<h2>Changed byte ranges</h2>
+<table class="ranges">
+<thead><tr><th scope="col">#</th><th scope="col">Change</th><th scope="col">Left</th><th scope="col">Right</th></tr></thead>
+<tbody>
+<tr><td class="n">1</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x1084 (4228)</span><code class="hex"><span class="ho">00001080</span>  d5 47 58 ec <del>b5 c6 a6 91  4c 02 88 01</del> 25 2b c3 4b  |.GX.<del>....L...</del>%+.K|</code></td><td><span class="loc">8 bytes at offset 0x1084 (4228)</span><code class="hex"><span class="ho">00001080</span>  d5 47 58 ec <ins>10 63 03 34  e9 a7 2d a4</ins> 25 2b c3 4b  |.GX.<ins>.c.4..-.</ins>%+.K|</code></td></tr>
+<tr><td class="n">2</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x2108 (8456)</span><code class="hex"><span class="ho">00002100</span>  f8 cf 5c 1c e0 b0 5b 8f  <del>d6 8b ad d5 dc aa 33 a8</del>  |..\...[.<del>......3.</del>|</code></td><td><span class="loc">8 bytes at offset 0x2108 (8456)</span><code class="hex"><span class="ho">00002100</span>  f8 cf 5c 1c e0 b0 5b 8f  <ins>73 2e 08 70 79 0f 96 0d</ins>  |..\...[.<ins>s..py...</ins>|</code></td></tr>
+<tr><td class="n">3</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x318c (12684)</span><code class="hex"><span class="ho">00003180</span>  d7 c1 f2 97 6d 7b 46 ab  37 7f c9 cc <del>42 a6 a4 6a</del>  |....m{F.7...<del>B..j</del>|
+<span class="ho">00003190</span>  <del>4f d1 99 53</del> 97 0b 58 37  49 ed bb 0c 89 1c c9 b9  |<del>O..S</del>..X7I.......|</code></td><td><span class="loc">8 bytes at offset 0x318c (12684)</span><code class="hex"><span class="ho">00003180</span>  d7 c1 f2 97 6d 7b 46 ab  37 7f c9 cc <ins>e7 03 01 cf</ins>  |....m{F.7...<ins>....</ins>|
+<span class="ho">00003190</span>  <ins>ea 74 3c f6</ins> 97 0b 58 37  49 ed bb 0c 89 1c c9 b9  |<ins>.t&lt;.</ins>..X7I.......|</code></td></tr>
+<tr><td class="n">4</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x4210 (16912)</span><code class="hex"><span class="ho">00004210</span>  <del>ed 58 cd bd ef 61 cd 91</del>  42 f7 bf ce 4b 94 76 e9  |<del>.X...a..</del>B...K.v.|</code></td><td><span class="loc">8 bytes at offset 0x4210 (16912)</span><code class="hex"><span class="ho">00004210</span>  <ins>48 fd 68 18 4a c4 68 34</ins>  42 f7 bf ce 4b 94 76 e9  |<ins>H.h.J.h4</ins>B...K.v.|</code></td></tr>
+<tr><td class="n">5</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x5294 (21140)</span><code class="hex"><span class="ho">00005290</span>  ba 35 7d 77 <del>9a 38 26 44  6a 45 87 b6</del> 98 9d 47 0c  |.5}w<del>.8&amp;DjE..</del>..G.|</code></td><td><span class="loc">8 bytes at offset 0x5294 (21140)</span><code class="hex"><span class="ho">00005290</span>  ba 35 7d 77 <ins>3f 9d 83 e1  cf e0 22 13</ins> 98 9d 47 0c  |.5}w<ins>?.....&quot;.</ins>..G.|</code></td></tr>
+<tr><td class="n">6</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x6318 (25368)</span><code class="hex"><span class="ho">00006310</span>  7e ac 50 12 25 a4 cc ec  <del>67 d8 79 9f 24 7c 97 11</del>  |~.P.%...<del>g.y.$|..</del>|</code></td><td><span class="loc">8 bytes at offset 0x6318 (25368)</span><code class="hex"><span class="ho">00006310</span>  7e ac 50 12 25 a4 cc ec  <ins>c2 7d dc 3a 81 d9 32 b4</ins>  |~.P.%...<ins>.}.:..2.</ins>|</code></td></tr>
+<tr><td class="n">7</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x739c (29596)</span><code class="hex"><span class="ho">00007390</span>  51 fe aa 13 0e 26 b8 88  ee 81 e7 07 <del>d8 ed bf a0</del>  |Q....&amp;......<del>....</del>|
+<span class="ho">000073a0</span>  <del>2d 64 01 46</del> 0d 78 15 48  15 b1 ca 3c fb e9 97 f6  |<del>-d.F</del>.x.H...&lt;....|</code></td><td><span class="loc">8 bytes at offset 0x739c (29596)</span><code class="hex"><span class="ho">00007390</span>  51 fe aa 13 0e 26 b8 88  ee 81 e7 07 <ins>7d 48 1a 05</ins>  |Q....&amp;......<ins>}H..</ins>|
+<span class="ho">000073a0</span>  <ins>88 c1 a4 e3</ins> 0d 78 15 48  15 b1 ca 3c fb e9 97 f6  |<ins>....</ins>.x.H...&lt;....|</code></td></tr>
+<tr><td class="n">8</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x8420 (33824)</span><code class="hex"><span class="ho">00008420</span>  <del>49 8d 4f c3 52 20 2f 45</del>  49 9f 44 bb 16 3a 81 0a  |<del>I.O.R /E</del>I.D..:..|</code></td><td><span class="loc">8 bytes at offset 0x8420 (33824)</span><code class="hex"><span class="ho">00008420</span>  <ins>ec 28 ea 66 f7 85 8a e0</ins>  49 9f 44 bb 16 3a 81 0a  |<ins>.(.f....</ins>I.D..:..|</code></td></tr>
+<tr><td class="n">9</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x94a4 (38052)</span><code class="hex"><span class="ho">000094a0</span>  59 e5 a7 a2 <del>22 7c d2 41  4f 29 a4 1b</del> 77 ad da a0  |Y...<del>&quot;|.AO)..</del>w...|</code></td><td><span class="loc">8 bytes at offset 0x94a4 (38052)</span><code class="hex"><span class="ho">000094a0</span>  59 e5 a7 a2 <ins>87 d9 77 e4  ea 8c 01 be</ins> 77 ad da a0  |Y...<ins>..w.....</ins>w...|</code></td></tr>
+<tr><td class="n">10</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0xa528 (42280)</span><code class="hex"><span class="ho">0000a520</span>  68 a2 5a 88 de ce f8 f3  <del>72 9a d1 ea 9b f9 c0 65</del>  |h.Z.....<del>r......e</del>|</code></td><td><span class="loc">8 bytes at offset 0xa528 (42280)</span><code class="hex"><span class="ho">0000a520</span>  68 a2 5a 88 de ce f8 f3  <ins>d7 3f 74 4f 3e 5c 65 c0</ins>  |h.Z.....<ins>.?tO&gt;\e.</ins>|</code></td></tr>
+<tr><td class="n">11</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0xb5ac (46508)</span><code class="hex"><span class="ho">0000b5a0</span>  4f 84 03 4a c0 f5 24 bd  e3 c5 da 34 <del>60 22 8e 18</del>  |O..J..$....4<del>`&quot;..</del>|
+<span class="ho">0000b5b0</span>  <del>cd 31 29 a9</del> bb 7a 38 14  fc 49 14 14 e1 45 34 87  |<del>.1).</del>.z8..I...E4.|</code></td><td><span class="loc">8 bytes at offset 0xb5ac (46508)</span><code class="hex"><span class="ho">0000b5a0</span>  4f 84 03 4a c0 f5 24 bd  e3 c5 da 34 <ins>c5 87 2b bd</ins>  |O..J..$....4<ins>..+.</ins>|
+<span class="ho">0000b5b0</span>  <ins>68 94 8c 0c</ins> bb 7a 38 14  fc 49 14 14 e1 45 34 87  |<ins>h...</ins>.z8..I...E4.|</code></td></tr>
+<tr><td class="n">12</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0xc630 (50736)</span><code class="hex"><span class="ho">0000c630</span>  <del>a6 f2 1e 86 e7 b6 8b 73</del>  a5 ec e3 f5 60 24 49 95  |<del>.......s</del>....`$I.|</code></td><td><span class="loc">8 bytes at offset 0xc630 (50736)</span><code class="hex"><span class="ho">0000c630</span>  <ins>03 57 bb 23 42 13 2e d6</ins>  a5 ec e3 f5 60 24 49 95  |<ins>.W.#B...</ins>....`$I.|</code></td></tr>
+<tr><td class="n">13</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0xd6b4 (54964)</span><code class="hex"><span class="ho">0000d6b0</span>  f9 a0 91 cb <del>63 16 a8 d9  1d 3b 64 4a</del> 5e 6a 36 57  |....<del>c....;dJ</del>^j6W|</code></td><td><span class="loc">8 bytes at offset 0xd6b4 (54964)</span><code class="hex"><span class="ho">0000d6b0</span>  f9 a0 91 cb <ins>c6 b3 0d 7c  b8 9e c1 ef</ins> 5e 6a 36 57  |....<ins>...|....</ins>^j6W|</code></td></tr>
+<tr><td class="n">14</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0xe738 (59192)</span><code class="hex"><span class="ho">0000e730</span>  50 0a 6e 08 5d 69 d0 02  <del>17 ae 1f 72 3f bb 23 14</del>  |P.n.]i..<del>...r?.#.</del>|</code></td><td><span class="loc">8 bytes at offset 0xe738 (59192)</span><code class="hex"><span class="ho">0000e730</span>  50 0a 6e 08 5d 69 d0 02  <ins>b2 0b ba d7 9a 1e 86 b1</ins>  |P.n.]i..<ins>........</ins>|</code></td></tr>
+<tr><td class="n">15</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0xf7bc (63420)</span><code class="hex"><span class="ho">0000f7b0</span>  03 b7 32 23 53 25 d9 77  a4 0e 64 23 <del>56 a0 80 a4</del>  |..2#S%.w..d#<del>V...</del>|
+<span class="ho">0000f7c0</span>  <del>1f a3 c1 92</del> c4 7d a1 46  ba b8 de 9d 8c 67 de 7b  |<del>....</del>.}.F.....g.{|</code></td><td><span class="loc">8 bytes at offset 0xf7bc (63420)</span><code class="hex"><span class="ho">0000f7b0</span>  03 b7 32 23 53 25 d9 77  a4 0e 64 23 <ins>f3 05 25 01</ins>  |..2#S%.w..d#<ins>..%.</ins>|
+<span class="ho">0000f7c0</span>  <ins>ba 06 64 37</ins> c4 7d a1 46  ba b8 de 9d 8c 67 de 7b  |<ins>..d7</ins>.}.F.....g.{|</code></td></tr>
+<tr><td class="n">16</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x10840 (67648)</span><code class="hex"><span class="ho">00010840</span>  <del>7e 25 53 81 f2 66 bd 50</del>  6a 3c 13 32 34 f6 be 2c  |<del>~%S..f.P</del>j&lt;.24..,|</code></td><td><span class="loc">8 bytes at offset 0x10840 (67648)</span><code class="hex"><span class="ho">00010840</span>  <ins>db 80 f6 24 57 c3 18 f5</ins>  6a 3c 13 32 34 f6 be 2c  |<ins>...$W...</ins>j&lt;.24..,|</code></td></tr>
+<tr><td class="n">17</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x118c4 (71876)</span><code class="hex"><span class="ho">000118c0</span>  fe 84 11 de <del>e3 46 c7 83  99 3d 9e 04</del> a1 24 81 b4  |....<del>.F...=..</del>.$..|</code></td><td><span class="loc">8 bytes at offset 0x118c4 (71876)</span><code class="hex"><span class="ho">000118c0</span>  fe 84 11 de <ins>46 e3 62 26  3c 98 3b a1</ins> a1 24 81 b4  |....<ins>F.b&amp;&lt;.;.</ins>.$..|</code></td></tr>
+<tr><td class="n">18</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x12948 (76104)</span><code class="hex"><span class="ho">00012940</span>  37 5a b9 4d 7b fc 1d 73  <del>b3 55 cf df 24 ad a4 f6</del>  |7Z.M{..s<del>.U..$...</del>|</code></td><td><span class="loc">8 bytes at offset 0x12948 (76104)</span><code class="hex"><span class="ho">00012940</span>  37 5a b9 4d 7b fc 1d 73  <ins>16 f0 6a 7a 81 08 01 53</ins>  |7Z.M{..s<ins>..jz...S</ins>|</code></td></tr>
+<tr><td class="n">19</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x139cc (80332)</span><code class="hex"><span class="ho">000139c0</span>  0c 1b eb a1 9d b9 8d 7a  37 63 23 ec <del>76 6d a9 56</del>  |.......z7c#.<del>vm.V</del>|
+<span class="ho">000139d0</span>  <del>da 27 3e 0f</del> b9 da 07 84  7d 2b 6d 9d 7e 27 00 90  |<del>.&#39;&gt;.</del>....}+m.~&#39;..|</code></td><td><span class="loc">8 bytes at offset 0x139cc (80332)</span><code class="hex"><span class="ho">000139c0</span>  0c 1b eb a1 9d b9 8d 7a  37 63 23 ec <ins>d3 c8 0c f3</ins>  |.......z7c#.<ins>....</ins>|
+<span class="ho">000139d0</span>  <ins>7f 82 9b aa</ins> b9 da 07 84  7d 2b 6d 9d 7e 27 00 90  |<ins>....</ins>....}+m.~&#39;..|</code></td></tr>
+<tr><td class="n">20</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x14a50 (84560)</span><code class="hex"><span class="ho">00014a50</span>  <del>45 6e 36 d9 35 29 61 ad</del>  a5 c8 d2 7c 0d 15 78 ef  |<del>En6.5)a.</del>...|..x.|</code></td><td><span class="loc">8 bytes at offset 0x14a50 (84560)</span><code class="hex"><span class="ho">00014a50</span>  <ins>e0 cb 93 7c 90 8c c4 08</ins>  a5 c8 d2 7c 0d 15 78 ef  |<ins>...|....</ins>...|..x.|</code></td></tr>
+<tr><td class="n">21</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x15ad4 (88788)</span><code class="hex"><span class="ho">00015ad0</span>  e3 f0 03 fe <del>92 80 a8 e2  f3 0e 01 ec</del> 6c 5f 71 a0  |....<del>........</del>l_q.|</code></td><td><span class="loc">8 bytes at offset 0x15ad4 (88788)</span><code class="hex"><span class="ho">00015ad0</span>  e3 f0 03 fe <ins>37 25 0d 47  56 ab a4 49</ins> 6c 5f 71 a0  |....<ins>7%.GV..I</ins>l_q.|</code></td></tr>
+<tr><td class="n">22</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x16b58 (93016)</span><code class="hex"><span class="ho">00016b50</span>  0e f9 5d 74 d0 20 4c 10  <del>f1 fd 32 a8 dc 7e 69 34</del>  |..]t. L.<del>..2..~i4</del>|</code></td><td><span class="loc">8 bytes at offset 0x16b58 (93016)</span><code class="hex"><span class="ho">00016b50</span>  0e f9 5d 74 d0 20 4c 10  <ins>54 58 97 0d 79 db cc 91</ins>  |..]t. L.<ins>TX..y...</ins>|</code></td></tr>
+<tr><td class="n">23</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x17bdc (97244)</span><code class="hex"><span class="ho">00017bd0</span>  46 0c c2 0f da a2 f3 98  18 16 e8 71 <del>a6 8a 4a 13</del>  |F..........q<del>..J.</del>|
+<span class="ho">00017be0</span>  <del>11 34 1c 07</del> 82 d8 dc d9  62 7b 64 04 89 3d 79 79  |<del>.4..</del>....b{d..=yy|</code></td><td><span class="loc">8 bytes at offset 0x17bdc (97244)</span><code class="hex"><span class="ho">00017bd0</span>  46 0c c2 0f da a2 f3 98  18 16 e8 71 <ins>03 2f ef b6</ins>  |F..........q<ins>./..</ins>|
+<span class="ho">00017be0</span>  <ins>b4 91 b9 a2</ins> 82 d8 dc d9  62 7b 64 04 89 3d 79 79  |<ins>....</ins>....b{d..=yy|</code></td></tr>
+<tr><td class="n">24</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x18c60 (101472)</span><code class="hex"><span class="ho">00018c60</span>  <del>e8 fc bf 8d 33 54 e8 4d</del>  5e 78 ab b5 eb 63 d1 94  |<del>....3T.M</del>^x...c..|</code></td><td><span class="loc">8 bytes at offset 0x18c60 (101472)</span><code class="hex"><span class="ho">00018c60</span>  <ins>4d 59 1a 28 96 f1 4d e8</ins>  5e 78 ab b5 eb 63 d1 94  |<ins>MY.(..M.</ins>^x...c..|</code></td></tr>
+<tr><td class="n">25</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x19ce4 (105700)</span><code class="hex"><span class="ho">00019ce0</span>  0d eb 6b f7 <del>e0 c6 08 04  c1 d8 ca 27</del> c6 7c a5 5c  |..k.<del>.......&#39;</del>.|.\|</code></td><td><span class="loc">8 bytes at offset 0x19ce4 (105700)</span><code class="hex"><span class="ho">00019ce0</span>  0d eb 6b f7 <ins>45 63 ad a1  64 7d 6f 82</ins> c6 7c a5 5c  |..k.<ins>Ec..d}o.</ins>.|.\|</code></td></tr>
+<tr><td class="n">26</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x1ad68 (109928)</span><code class="hex"><span class="ho">0001ad60</span>  c6 ba 3e f9 5e 29 6d fb  <del>88 4f e7 86 5a 24 b1 85</del>  |..&gt;.^)m.<del>.O..Z$..</del>|</code></td><td><span class="loc">8 bytes at offset 0x1ad68 (109928)</span><code class="hex"><span class="ho">0001ad60</span>  c6 ba 3e f9 5e 29 6d fb  <ins>2d ea 42 23 ff 81 14 20</ins>  |..&gt;.^)m.<ins>-.B#... </ins>|</code></td></tr>
+<tr><td class="n">27</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x1bdec (114156)</span><code class="hex"><span class="ho">0001bde0</span>  12 f7 39 81 30 82 0e 7f  ee 82 18 28 <del>58 08 94 26</del>  |..9.0......(<del>X..&amp;</del>|
+<span class="ho">0001bdf0</span>  <del>12 25 4f 23</del> 34 25 e9 bc  a0 1e 43 db f8 a2 ad 63  |<del>.%O#</del>4%....C....c|</code></td><td><span class="loc">8 bytes at offset 0x1bdec (114156)</span><code class="hex"><span class="ho">0001bde0</span>  12 f7 39 81 30 82 0e 7f  ee 82 18 28 <ins>fd ad 31 83</ins>  |..9.0......(<ins>..1.</ins>|
+<span class="ho">0001bdf0</span>  <ins>b7 80 ea 86</ins> 34 25 e9 bc  a0 1e 43 db f8 a2 ad 63  |<ins>....</ins>4%....C....c|</code></td></tr>
+<tr><td class="n">28</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x1ce70 (118384)</span><code class="hex"><span class="ho">0001ce70</span>  <del>b4 36 e7 82 bd 38 b0 2f</del>  6b 47 39 c0 4b 00 c7 5d  |<del>.6...8./</del>kG9.K..]|</code></td><td><span class="loc">8 bytes at offset 0x1ce70 (118384)</span><code class="hex"><span class="ho">0001ce70</span>  <ins>11 93 42 27 18 9d 15 8a</ins>  6b 47 39 c0 4b 00 c7 5d  |<ins>..B&#39;....</ins>kG9.K..]|</code></td></tr>
+<tr><td class="n">29</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x1def4 (122612)</span><code class="hex"><span class="ho">0001def0</span>  25 7b 24 69 <del>4a b9 41 b0  96 0c da 17</del> f1 ce f3 86  |%{$i<del>J.A.....</del>....|</code></td><td><span class="loc">8 bytes at offset 0x1def4 (122612)</span><code class="hex"><span class="ho">0001def0</span>  25 7b 24 69 <ins>ef 1c e4 15  33 a9 7f b2</ins> f1 ce f3 86  |%{$i<ins>....3...</ins>....|</code></td></tr>
+<tr><td class="n">30</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">8 bytes at offset 0x1ef78 (126840)</span><code class="hex"><span class="ho">0001ef70</span>  83 eb 00 02 96 e8 4c 00  <del>66 f3 ec 54 c2 17 2d 21</del>  |......L.<del>f..T..-!</del>|</code></td><td><span class="loc">8 bytes at offset 0x1ef78 (126840)</span><code class="hex"><span class="ho">0001ef70</span>  83 eb 00 02 96 e8 4c 00  <ins>c3 56 49 f1 67 b2 88 84</ins>  |......L.<ins>.VI.g...</ins>|</code></td></tr>
+</tbody>
+</table>
+</main>
+<footer>
+<p>Diff Document <code>sha256:85b0f743cc26e7fae8301dc4c8d0c6b29b614893df0ad1531cce594747dc0835</code>, schema 0.4.0.</p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,48 @@
+Ÿ{
+  "algorithm": "histogram",
+  "granularity": "line",
+  "ignore": {
+    "whitespace": "none",
+    "case": false,
+    "blankLines": false,
+    "regex": []
+  },
+  "context": 3,
+  "positionEncoding": "utf-8",
+  "detectMoves": true,
+  "adapter": "auto",
+  "tree": {
+    "followSymlinks": false,
+    "ignoreFiles": false,
+    "exclude": [],
+    "detectMoves": true,
+    "maxDepth": 3,
+    "childBudget": 16777216
+  }
+}
+[import os
+
+def read_settings(path):
+  with open(path) as handle:
+    return handle.read().splitlines()
+
+def write_settings(path, lines):
+  with open(path, "w") as handle:
+    handle.writelines(line + os.linesep for line in lines)
+
+def settings_path(home):
+  folder = os.path.join(home, ".config", "tool")
+  return os.path.join(folder, "settings")
+import os
+
+def settings_path(home):
+  folder = os.path.join(home, ".config", "tool")
+  return os.path.join(folder, "settings")
+
+def read_settings(path):
+  with open(path) as handle:
+    return handle.read().splitlines()
+
+def write_settings(path, lines):
+  with open(path, "w") as handle:
+    handle.writelines(line + os.linesep for line in lines)

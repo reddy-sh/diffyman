@@ -1,0 +1,3 @@
+# 043-blank-lines-slider-merge
+
+Runs `ignore.blankLines: true`. The line diff deletes the blank L2 (on its own, an `ignored` op) and replaces L4-5 (`  x`, `a`) with `}`. Slider compaction (spec 7.3.1) slides that deletion up to L3-4 (`a`, `  x`), where it touches the blank deletion and joins it, so the blank line becomes part of a change op with non-blank lines and is counted (spec 7.3.1 rule 4). git's `--ignore-blank-lines` shows the same hunk. A correct result has one hunk: equal L1/R1, `delete` L2-4, equal L5/R2, `insert` R3 (`}`), equal L6-8/R4-6, and no `ignored` op. Stats: `changeCount: 2`, `linesAdded: 1`, `linesRemoved: 3`, `linesUnchanged: 5` and `similarity: 0.7143` = 2 x 5 / (8 + 6). Without compaction it would be `linesRemoved: 2` and similarity 0.7692.

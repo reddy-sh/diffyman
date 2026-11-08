@@ -1065,7 +1065,10 @@ fn compact_detection_matches_whole_files() {
         let right = lines(&(right.join("\n") + "\n"));
         let ops = diff_ops(&left, &right);
         for builder in [plain(), keys(WhitespaceMode::All, true, &[r"\d+"])] {
-            let whole = super::detect(&left, &right, &ops, &builder);
+            let (mut whole, in_place) = super::detect(&left, &right, &ops, &builder);
+            drop_reindented_swaps(&mut whole.moves, &ops, &in_place, &|i| left[i], &|j| {
+                right[j]
+            });
             let compact = detect_moves(&left, &right, &ops, &builder);
             assert_eq!(compact, whole, "round {round}");
             found += whole.moves.len();
@@ -1077,4 +1080,91 @@ fn compact_detection_matches_whole_files() {
         }
     }
     assert!(found > 100 && edited > 10, "{found} moves, {edited} edited");
+}
+
+/// Moves spec §4.5, re-indented swaps: under `ignore.whitespace` `change` the
+/// error check is equal although it moved into the loop with a new indent,
+/// so the loop header, which kept its indentation, looks moved across it.
+#[test]
+fn reindented_swap_is_not_a_move() {
+    let left = lines(
+        "func Sync(src, dst Store) error {\n  items, err := src.List()\n  if err != nil {\n    return err\n  }\n  for _, item := range items {\n    dst.Put(item)\n  }\n  return nil\n}\n",
+    );
+    let right = lines(
+        "func Sync(src, dst Store) error {\n  items := src.ListCached()\n  for _, item := range items {\n    err := dst.Put(item)\n    if err != nil {\n      return err\n    }\n  }\n  return nil\n}\n",
+    );
+    let change = keys(WhitespaceMode::Change, false, &[]);
+    let ops = diff_ops_keyed(&left, &right, &change);
+    // The check (left 2..5) is one equal op with the check on the right.
+    assert!(
+        ops.iter()
+            .any(|o| o.kind == OpKind::Equal
+                && (o.left_start, o.left_len, o.right_start) == (2, 3, 4))
+    );
+    let (whole, _) = super::detect(&left, &right, &ops, &change);
+    assert_eq!(whole.moves.len(), 1, "the swap is found before the rule");
+    assert!(detect_moves(&left, &right, &ops, &change).moves.is_empty());
+}
+
+/// The rule leaves real moves alone: a block that crosses lines which kept
+/// their indentation, a crossed block that is large enough to be a move of
+/// its own, and a moved block that changed its own indentation. In each case
+/// the crossed block has more lines, so the line diff keeps it in place.
+#[test]
+fn reindented_swap_rule_keeps_real_moves() {
+    let change = keys(WhitespaceMode::Change, false, &[]);
+    let moved =
+        "def a():\n    total = compute_total(order.items)\n    store.save(order.id, total)\n";
+    let moved_deeper =
+        "  def a():\n      total = compute_total(order.items)\n      store.save(order.id, total)\n";
+    let small = |indent: &str| -> String {
+        ["x = 1", "y = 2", "z = 3", "w = 4"]
+            .iter()
+            .map(|l| format!("{indent}{l}\n"))
+            .collect::<Vec<_>>()
+            .concat()
+    };
+    let large = |indent: &str| -> String {
+        [
+            "first = load(one)",
+            "second = load(two)",
+            "third = load(three)",
+            "fourth = load(four)",
+        ]
+        .iter()
+        .map(|l| format!("{indent}{l}\n"))
+        .collect::<Vec<_>>()
+        .concat()
+    };
+    let cases = [
+        // The crossed lines keep their indentation.
+        (
+            format!("{moved}{}", small("  ")),
+            format!("{}{moved}", small("  ")),
+        ),
+        // The crossed lines change their indentation but meet the minimum size.
+        (
+            format!("{moved}{}", large("  ")),
+            format!("{}{moved}", large("    ")),
+        ),
+        // The moved block changes its own indentation too.
+        (
+            format!("{moved}{}", small("  ")),
+            format!("{}{moved_deeper}", small("    ")),
+        ),
+    ];
+    for (k, (l, r)) in cases.iter().enumerate() {
+        let (left, right) = (lines(l), lines(r));
+        let ops = diff_ops_keyed(&left, &right, &change);
+        assert!(
+            ops.iter()
+                .any(|o| o.kind == OpKind::Equal && o.left_len == 4),
+            "case {k}: {ops:?}"
+        );
+        assert_eq!(
+            detect_moves(&left, &right, &ops, &change).moves.len(),
+            1,
+            "case {k}"
+        );
+    }
 }

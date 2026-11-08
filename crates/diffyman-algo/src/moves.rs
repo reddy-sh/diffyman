@@ -53,6 +53,12 @@
 //!    loses lines is rebuilt from its seed over the current segments, with
 //!    the sweeps cached per segment pair. So a selection costs work only
 //!    where it changed something.
+//! 4. **Re-indented swaps** (spec §4.5). A move that crosses exactly one run
+//!    of in-place lines, all of which changed their indentation while the
+//!    move kept its own, and that run is below the minimum size, is dropped:
+//!    the crossed lines are what went into a new scope. Each run is read at
+//!    most once, and only until a line keeps its indentation or the run
+//!    reaches the minimum size.
 //!
 //! Work limits, all deterministic:
 //!
@@ -215,14 +221,200 @@ pub fn detect_moves_by<'t>(
     };
     let lc = content(&compact.left, &left);
     let rc = content(&compact.right, &right);
-    let mut found = detect(&lc, &rc, &compact.ops, keys);
+    let (mut found, in_place) = detect(&lc, &rc, &compact.ops, keys);
+    drop((lc, rc));
     for m in &mut found.moves {
         // A move never holds a gap line, and consecutive compact lines
         // without a gap between them are consecutive lines of the file.
         m.left_start = compact.left[m.left_start];
         m.right_start = compact.right[m.right_start];
     }
+    if !found.moves.is_empty() {
+        // In-place runs never hold a gap line either (they lie inside a
+        // `replace` op).
+        let in_place: Vec<Anchor> = in_place
+            .into_iter()
+            .map(|a| Anchor {
+                left_start: compact.left[a.left_start],
+                right_start: compact.right[a.right_start],
+                len: a.len,
+            })
+            .collect();
+        drop_reindented_swaps(&mut found.moves, ops, &in_place, &left, &right);
+    }
     found
+}
+
+/// Removes the moves that are re-indented swaps (spec §4.5). `ops` is the
+/// full op list and `in_place` the in-place runs of its `replace` ops, both
+/// in file lines.
+fn drop_reindented_swaps<'t>(
+    moves: &mut Vec<DetectedMove>,
+    ops: &[LineOp],
+    in_place: &[Anchor],
+    left: &impl Fn(usize) -> &'t str,
+    right: &impl Fn(usize) -> &'t str,
+) {
+    let anchors = anchor_runs(ops, in_place);
+    let mut swaps = Swaps {
+        left,
+        right,
+        anchors: &anchors,
+        state: vec![None; anchors.len()],
+    };
+    moves.retain(|m| !swaps.is_reindented_swap(m));
+}
+
+/// A run of in-place line pairs: `len` lines from `left_start` on the left
+/// match the lines from `right_start` on the right one to one. These are the
+/// lines of `equal` ops and the lines a `replace` op pairs by move key
+/// (spec §4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Anchor {
+    left_start: usize,
+    right_start: usize,
+    len: usize,
+}
+
+/// The `equal` ops of `ops` and the `in_place` runs, as one list in file
+/// order.
+fn anchor_runs(ops: &[LineOp], in_place: &[Anchor]) -> Vec<Anchor> {
+    let mut out: Vec<Anchor> = ops
+        .iter()
+        .filter(|o| o.kind == OpKind::Equal && o.left_len > 0)
+        .map(|o| Anchor {
+            left_start: o.left_start,
+            right_start: o.right_start,
+            len: o.left_len,
+        })
+        .chain(in_place.iter().copied())
+        .collect();
+    out.sort_unstable_by_key(|a| a.left_start);
+    // Runs that touch on both sides (an `equal` op and the in-place lines at
+    // the start of the next `replace` op) are one run.
+    let mut merged: Vec<Anchor> = Vec::with_capacity(out.len());
+    for a in out {
+        if let Some(last) = merged.last_mut()
+            && last.left_start + last.len == a.left_start
+            && last.right_start + last.len == a.right_start
+        {
+            last.len += a.len;
+            continue;
+        }
+        merged.push(a);
+    }
+    merged
+}
+
+/// What the re-indented swap rule (spec §4.5, re-indented swaps) needs to
+/// know about one anchor run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnchorState {
+    /// A non-blank line kept its indentation, or the run's left lines meet
+    /// the minimum size of spec §4.2: the rule does not apply.
+    Kept,
+    /// Every non-blank line changed its indentation, and the run is below
+    /// the minimum size.
+    Reindented,
+    /// Blank lines only.
+    Blank,
+}
+
+struct Swaps<'a, L, R> {
+    left: &'a L,
+    right: &'a R,
+    anchors: &'a [Anchor],
+    state: Vec<Option<AnchorState>>,
+}
+
+/// The whitespace before the first other character.
+fn leading_whitespace(content: &str) -> &str {
+    let rest = content.trim_start_matches(key::is_whitespace);
+    &content[..content.len() - rest.len()]
+}
+
+impl<'t, L: Fn(usize) -> &'t str, R: Fn(usize) -> &'t str> Swaps<'_, L, R> {
+    /// True when `m` crosses exactly one anchor run, that run changed its
+    /// indentation and is below the minimum size, and `m` itself kept its
+    /// indentation.
+    fn is_reindented_swap(&mut self, m: &DetectedMove) -> bool {
+        let Some(k) = self.single_crossed(m) else {
+            return false;
+        };
+        let l = (m.left_start..m.left_start + m.left_len)
+            .map(|i| (self.left)(i))
+            .find(|c| !key::is_blank(c));
+        let r = (m.right_start..m.right_start + m.right_len)
+            .map(|j| (self.right)(j))
+            .find(|c| !key::is_blank(c));
+        let (Some(l), Some(r)) = (l, r) else {
+            return false;
+        };
+        if leading_whitespace(l) != leading_whitespace(r) {
+            return false;
+        }
+        self.state_of(k) == AnchorState::Reindented
+    }
+
+    /// The index of the one anchor run whose lines lie between the move's
+    /// two ranges (after its left range on the left and before its right
+    /// range on the right, or the other way round), if exactly one does.
+    fn single_crossed(&self, m: &DetectedMove) -> Option<usize> {
+        let a = self.anchors;
+        let left_end = m.left_start + m.left_len;
+        let right_end = m.right_start + m.right_len;
+        // Runs after the left range and before the right range.
+        let after_left = a.partition_point(|x| x.left_start < left_end);
+        let before_right = a.partition_point(|x| x.right_start < m.right_start);
+        // Runs before the left range and after the right range.
+        let before_left = a.partition_point(|x| x.left_start < m.left_start);
+        let after_right = a.partition_point(|x| x.right_start < right_end);
+        if before_right == after_left + 1 {
+            Some(after_left)
+        } else if before_left == after_right + 1 {
+            Some(after_right)
+        } else {
+            None
+        }
+    }
+
+    fn state_of(&mut self, k: usize) -> AnchorState {
+        if let Some(s) = self.state[k] {
+            return s;
+        }
+        let run = self.anchors[k];
+        let (mut alnum, mut nontrivial, mut single) = (0usize, 0usize, 0usize);
+        let mut state = AnchorState::Blank;
+        for d in 0..run.len {
+            let (l, r) = (
+                (self.left)(run.left_start + d),
+                (self.right)(run.right_start + d),
+            );
+            if key::is_blank(l) && key::is_blank(r) {
+                continue;
+            }
+            if leading_whitespace(l) == leading_whitespace(r) {
+                state = AnchorState::Kept;
+                break;
+            }
+            state = AnchorState::Reindented;
+            let a = l.chars().filter(|c| c.is_alphanumeric()).count();
+            alnum += a;
+            if a > TRIVIAL_LINE_MAX_ALNUM {
+                nontrivial += 1;
+                single = a;
+            }
+            let qualifies = alnum >= MOVE_MIN_ALNUM
+                && (nontrivial >= MOVE_MIN_NONTRIVIAL_LINES
+                    || (nontrivial == 1 && single >= MOVE_SINGLE_LINE_MIN_ALNUM));
+            if qualifies {
+                state = AnchorState::Kept;
+                break;
+            }
+        }
+        self.state[k] = Some(state);
+        state
+    }
 }
 
 /// Marks a compact line that stands for a run of lines outside change ops.
@@ -286,12 +478,18 @@ impl Compact {
 }
 
 /// Detection over line contents and ops that tile them.
-fn detect(left: &[&str], right: &[&str], ops: &[LineOp], keys: &KeyBuilder) -> Moves {
+/// Also returns the in-place runs of `replace` ops (spec §4.1).
+fn detect(
+    left: &[&str],
+    right: &[&str],
+    ops: &[LineOp],
+    keys: &KeyBuilder,
+) -> (Moves, Vec<Anchor>) {
     let mut interner = Keys::new(keys);
     let mut l = Side::build(left, ops, true, &mut interner);
     let mut r = Side::build(right, ops, false, &mut interner);
     let texts = interner.texts;
-    split_replace_ops(&mut l, &mut r, ops, texts.len());
+    let in_place = split_replace_ops(&mut l, &mut r, ops, texts.len());
     let check_delta = matches!(
         keys.whitespace(),
         WhitespaceMode::None | WhitespaceMode::Trailing
@@ -302,10 +500,11 @@ fn detect(left: &[&str], right: &[&str], ops: &[LineOp], keys: &KeyBuilder) -> M
     join_pure(&mut l, &mut r, &texts, &mut scan, &mut moves);
     let limited = edited_pass(&mut l, &mut r, &texts, check_delta, &mut scan, &mut moves);
     moves.sort_by_key(|m| (m.left_start, m.right_start));
-    Moves {
+    let found = Moves {
         moves,
         skipped_limit: limited || scan.exhausted,
-    }
+    };
+    (found, in_place)
 }
 
 // ---------------------------------------------------------------------------
@@ -349,9 +548,16 @@ impl Keys<'_> {
 /// by that alignment are in place and leave detection (`NO_OP`), and each run
 /// of unpaired lines between them becomes a sub-op of its own. `insert` and
 /// `delete` ops are one sub-op each. Sub-op ids are dense, in op order.
-fn split_replace_ops(ls: &mut Side<'_>, rs: &mut Side<'_>, ops: &[LineOp], num_keys: usize) {
+/// Returns the runs of in-place lines.
+fn split_replace_ops(
+    ls: &mut Side<'_>,
+    rs: &mut Side<'_>,
+    ops: &[LineOp],
+    num_keys: usize,
+) -> Vec<Anchor> {
     let num_tokens = u32::try_from(num_keys).unwrap_or(u32::MAX);
     let mut next = 0u32;
+    let mut in_place = Vec::new();
     for op in ops.iter().filter(|o| o.kind.is_change()) {
         let l0 = op.left_start.min(ls.len());
         let l1 = (op.left_start + op.left_len).min(ls.len());
@@ -373,6 +579,11 @@ fn split_replace_ops(ls: &mut Side<'_>, rs: &mut Side<'_>, ops: &[LineOp], num_k
             let (a0, a1) = (l0 + sub.left_start, l0 + sub.left_start + sub.left_len);
             let (b0, b1) = (r0 + sub.right_start, r0 + sub.right_start + sub.right_len);
             let id = if sub.kind == OpKind::Equal {
+                in_place.push(Anchor {
+                    left_start: a0,
+                    right_start: b0,
+                    len: a1 - a0,
+                });
                 NO_OP
             } else {
                 next += 1;
@@ -382,6 +593,7 @@ fn split_replace_ops(ls: &mut Side<'_>, rs: &mut Side<'_>, ops: &[LineOp], num_k
             rs.op[b0..b1].fill(id);
         }
     }
+    in_place
 }
 
 /// Per-line data of one side. Only changed lines get a key and an op.

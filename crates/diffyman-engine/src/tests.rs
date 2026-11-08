@@ -39,7 +39,7 @@ fn worked_example_matches_spec() {
     );
     let value = serde_json::to_value(&d).unwrap();
     let expected = json!({
-        "schemaVersion": "0.3.0",
+        "schemaVersion": "0.4.0",
         "kind": "text",
         "status": "different",
         "positionEncoding": "utf-8",
@@ -97,7 +97,7 @@ fn worked_example_matches_spec() {
     assert_eq!(value["left"]["mediaType"], "text/plain");
     assert_eq!(
         d.id,
-        "sha256:3f3cc30959bd88671f71e392eb77fe668a9eef4400e34400af62a76dd22ac80b"
+        "sha256:f221a785d0e51a6a0ab0887619d144522fd921910db3b2460b4865712f8de99e"
     );
 }
 
@@ -746,6 +746,22 @@ fn large_rearrangement_is_approximate() {
     let edited = left.replacen("l7\n", "x\n", 1);
     let d = doc(left.as_bytes(), edited.as_bytes(), "{}");
     assert!(codes(&d).is_empty());
+    // A pure insertion of 600 lines that all occur on the other side runs no
+    // search, so it is exact; so is the deletion back.
+    let grown = [
+        lines[..10].concat(),
+        "l7\n".repeat(600),
+        lines[10..].concat(),
+    ]
+    .concat();
+    for alg in ["histogram", "myers", "patience"] {
+        let options = format!(r#"{{"algorithm": "{alg}"}}"#);
+        for (l, r) in [(&left, &grown), (&grown, &left)] {
+            let d = doc(l.as_bytes(), r.as_bytes(), &options);
+            assert_eq!(d.status, Status::Different, "{alg}");
+            assert!(codes(&d).is_empty(), "{alg}: {:?}", codes(&d));
+        }
+    }
 }
 
 #[test]
@@ -788,7 +804,8 @@ fn moves_reference_ops_and_leave_hunks_unchanged() {
             "to": { "side": "right", "range": { "start": 7, "count": 2 } },
             "similarity": 1,
             "fromOps": [{ "hunk": "h1", "op": 1 }],
-            "toOps": [{ "hunk": "h2", "op": 1 }]
+            "toOps": [{ "hunk": "h2", "op": 1 }],
+            "inline": []
         }])
     );
     assert_eq!(with.hunks[0].ops[1].op, OpKind::Replace);
@@ -846,6 +863,114 @@ fn moved_lines_get_no_inline_spans() {
             .iter()
             .any(|s| s.0 == Side::Left && (s.1 == 2 || s.1 == 3))
     );
+    // A pure move carries no spans of its own.
+    assert_eq!(with.moves[0].kind, MoveKind::Pure);
+    assert!(with.moves[0].inline.is_empty());
+}
+
+const EDITED_LEFT: &str = "fn intro() {}\n\nfn checksum(data) {\n  let acc = 0;\n  for byte in data {\n    acc = acc * 31 + byte;\n  }\n  return acc;\n}\n\nfn middle() {}\nfn more() {}\nfn other() {}\n";
+const EDITED_RIGHT: &str = "fn intro() {}\n\nfn middle() {}\nfn more() {}\nfn other() {}\n\nfn checksum(data) {\n    let hash = 0;\n    for byte in data {\n      hash = hash * 31 + byte;\n    }\n    return hash;\n}\n";
+
+/// The text of each move span, as (side, line, text).
+fn move_span_texts(d: &DiffDocument, left: &str, right: &str) -> Vec<(Side, u64, String)> {
+    d.moves
+        .iter()
+        .flat_map(|m| &m.inline)
+        .map(|s| {
+            let text = if s.side == Side::Left { left } else { right };
+            let line = text
+                .lines()
+                .nth(usize::try_from(s.line).unwrap() - 1)
+                .unwrap();
+            let range = usize::try_from(s.start).unwrap()..usize::try_from(s.end).unwrap();
+            (s.side, s.line, line[range].to_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn edited_moves_carry_inline_spans() {
+    let d = doc(
+        EDITED_LEFT.as_bytes(),
+        EDITED_RIGHT.as_bytes(),
+        r#"{"detectMoves": true, "granularity": "smart"}"#,
+    );
+    assert_eq!(d.moves.len(), 1, "{:?}", d.moves);
+    let m = &d.moves[0];
+    assert_eq!(m.kind, MoveKind::Edited);
+    // Absolute line numbers, left spans first; the new indentation of the
+    // moved lines gets no span.
+    let texts = move_span_texts(&d, EDITED_LEFT, EDITED_RIGHT);
+    let acc = |line| (Side::Left, line, "acc".to_owned());
+    let hash = |line| (Side::Right, line, "hash".to_owned());
+    assert_eq!(
+        texts,
+        [
+            acc(4),
+            acc(6),
+            acc(6),
+            acc(8),
+            hash(8),
+            hash(10),
+            hash(10),
+            hash(12)
+        ]
+    );
+    assert!(m.inline.iter().all(|s| match s.side {
+        Side::Left => s.op == OpKind::Delete,
+        _ => s.op == OpKind::Insert,
+    }));
+    // The ops keep no spans for moved lines, and nothing else changed.
+    assert!(
+        d.hunks
+            .iter()
+            .flat_map(|h| &h.ops)
+            .all(|o| o.inline.is_empty())
+    );
+    assert!(codes(&d).is_empty());
+
+    // Granularity `line`: the same move, no spans.
+    let plain = doc(
+        EDITED_LEFT.as_bytes(),
+        EDITED_RIGHT.as_bytes(),
+        r#"{"detectMoves": true}"#,
+    );
+    assert_eq!(plain.moves.len(), 1);
+    assert_eq!(plain.moves[0].from, m.from);
+    assert!(plain.moves[0].inline.is_empty());
+
+    // ASCII text: UTF-16 offsets equal UTF-8 ones, and `word` gives the
+    // spans of `smart` here (every changed word is shorter than 4).
+    let utf16 = doc(
+        EDITED_LEFT.as_bytes(),
+        EDITED_RIGHT.as_bytes(),
+        r#"{"detectMoves": true, "granularity": "word", "positionEncoding": "utf-16"}"#,
+    );
+    assert_eq!(utf16.moves[0].inline, m.inline);
+}
+
+#[test]
+fn edited_moves_over_the_refine_limit_get_no_spans() {
+    let block: Vec<String> = (0..=refine::REFINE_MAX_LINES)
+        .map(|i| format!("let value_number_{i} = compute_the_thing({i});"))
+        .collect();
+    let mut edited = block.clone();
+    edited[50] = "let value_number_50 = compute_other_thing(50);".to_owned();
+    // More stable lines than moved ones, so the line diff keeps them in place.
+    let stable: Vec<String> = (0..150).map(|i| format!("stable line {i}")).collect();
+    let stable = stable.join("\n");
+    let left = format!("head\n{}\n{stable}\n", block.join("\n"));
+    let right = format!("head\n{stable}\n{}\n", edited.join("\n"));
+    let d = doc(
+        left.as_bytes(),
+        right.as_bytes(),
+        r#"{"detectMoves": true, "granularity": "smart"}"#,
+    );
+    assert_eq!(d.moves.len(), 1, "{:?}", d.moves);
+    assert_eq!(d.moves[0].kind, MoveKind::Edited);
+    assert!(d.moves[0].from.range.count > refine::REFINE_MAX_LINES as u64);
+    assert!(d.moves[0].inline.is_empty());
+    assert_eq!(codes(&d), [("refine-skipped-limit", None)]);
 }
 
 #[test]
@@ -1296,7 +1421,7 @@ fn child_contents_count_against_the_content_budget() {
             content_budget,
             ..diffyman_adapter_tree::Limits::default()
         };
-        let mut ctx = tree::Context::with_limits(&options, limits);
+        let mut ctx = tree::context_with_limits(&options, limits);
         tree::archive_document(Input::new(&left), Input::new(&right), &options, &mut ctx)
     };
     // The listing reads 100 bytes per side, the child 100 more.
@@ -1367,4 +1492,77 @@ fn folders_compare_as_trees() {
         (Kind::Text, Status::Identical)
     );
     assert_eq!(file_doc.left.name.as_deref(), Some("plain.txt"));
+}
+
+/// The file paired with a folder is listed as an archive, which is at most
+/// 4 GiB (spec §19.1, §19.6): a larger one is refused by its size before
+/// anything is read, whatever read limit the caller gives.
+#[cfg(all(feature = "fs", unix))]
+#[test]
+fn a_file_paired_with_a_folder_is_refused_over_the_archive_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("folder");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::write(folder.join("a.txt"), "a\n").unwrap();
+    // A sparse file: no data is written, and none may be read.
+    let big = dir.path().join("big.zip");
+    std::fs::File::create(&big)
+        .unwrap()
+        .set_len((1 << 32) + 1)
+        .unwrap();
+    let options = Options::default();
+    let settings = Settings::default();
+    for (left, right) in [(&folder, &big), (&big, &folder)] {
+        for limit in [None, Some(u64::MAX)] {
+            let started = std::time::Instant::now();
+            let result = diff_paths_with_limit(left, right, &options, &settings, limit);
+            let Err(Error::Io(message)) = result else {
+                panic!("not refused: {result:?}");
+            };
+            assert!(message.starts_with("limit-exceeded: "), "{message}");
+            assert!(
+                message.ends_with(" is larger than 4294967296 bytes"),
+                "{message}"
+            );
+            assert!(started.elapsed().as_secs() < 5, "read before refusing");
+        }
+        // A smaller limit still applies.
+        let small = diff_paths_with_limit(left, right, &options, &settings, Some(10));
+        let Err(Error::Io(message)) = small else {
+            panic!("not refused: {small:?}");
+        };
+        assert!(message.ends_with(" is larger than 10 bytes"), "{message}");
+    }
+}
+
+/// Every input the tree adapter reads as an archive starts like one (spec
+/// §19.7), so a build without archive support refuses every pair a full
+/// build compares as a tree. The check needs no decompression, so it also
+/// matches gzip data that holds no tar.
+#[test]
+fn archives_start_like_archives() {
+    let corpus = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus");
+    let mut archives = 0;
+    for group in ["binary", "tree", "text"] {
+        for case in std::fs::read_dir(corpus.join(group)).unwrap() {
+            for file in std::fs::read_dir(case.unwrap().path()).unwrap() {
+                let path = file.unwrap().path();
+                if !path.is_file() {
+                    continue;
+                }
+                let bytes = std::fs::read(&path).unwrap();
+                if tree::archive_format(&bytes).is_some() {
+                    archives += 1;
+                    assert!(starts_like_archive(&bytes), "{}", path.display());
+                }
+            }
+        }
+    }
+    assert!(archives > 20, "{archives}");
+    assert!(starts_like_archive(&[0x1f, 0x8b, 8, 0]));
+    assert!(tree::archive_format(&[0x1f, 0x8b, 8, 0]).is_none());
+    assert!(!starts_like_archive(b"PK"));
+    assert!(!starts_like_archive(b"plain text\n"));
+    assert_eq!(FEATURES, ["archives", "fs"]);
+    assert_eq!(Error::Unsupported(String::new()).code(), "unsupported");
 }

@@ -16,16 +16,20 @@ name = "diffyman"
 
 [features]
 default = ["fs"]
-# Folders on disk (`diff_paths`). Off for wasm32-unknown-unknown builds,
-# which compare archives from bytes only.
-fs = ["diffyman-adapter-tree/fs"]
+# Archives (zip, tar, tar.gz, tar.zst) compared as trees (spec §19). Without
+# it, the pairs that need it are `Error::Unsupported` (spec §19.7).
+archives = ["dep:diffyman-adapter-tree"]
+# Folders on disk (`diff_paths`); implies `archives`. Off for
+# wasm32-unknown-unknown builds, which compare archives from bytes only.
+fs = ["archives", "diffyman-adapter-tree/fs"]
 
 [dependencies]
 diffyman-model.workspace = true
 diffyman-algo.workspace = true
 diffyman-detect.workspace = true
 diffyman-adapter-binary.workspace = true
-diffyman-adapter-tree.workspace = true
+diffyman-adapter-tree = { workspace = true, optional = true }
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 

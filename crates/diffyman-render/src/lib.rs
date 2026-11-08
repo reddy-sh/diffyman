@@ -6,8 +6,18 @@
 //! document was computed from: their size and SHA-256 are checked against the
 //! file meta, and a mismatch is [`RenderError::InputMismatch`].
 //!
+//! A caller that has just computed the document itself (the CLI) can pass
+//! the inputs as [`Computed`], with the decoded inputs the engine returned
+//! (`diffyman::diff_document_with_text`), to [`unified_computed`] and
+//! [`html_computed`]: the same output, without a second SHA-256 of the
+//! inputs and a second line table. Sizes, line counts and the document's
+//! structure are still checked.
+//!
 //! - [`unified`]: a unified diff that `git apply` and `patch` accept.
-//! - [`html()`]: one self-contained, accessible HTML report.
+//! - [`html()`]: one self-contained, accessible HTML report: line views for
+//!   text, changed byte ranges with hex dumps for binary, and an entries table
+//!   with each modified entry's changes inline for folders and archives
+//!   ([`html_with_contents`] adds the entries' content).
 //! - [`summary`]: a one-line verdict plus stats, for terminals and logs.
 //!
 //! ```
@@ -35,16 +45,20 @@
 //! [`unified`] is a plain flag; [`ColorChoice::resolve`] applies the
 //! `NO_COLOR` convention for callers that write to a terminal.
 
+mod hex;
 mod html;
 mod layout;
 mod source;
 mod summary;
 mod text;
+mod tree;
 mod unified;
 
-pub use html::{HtmlOptions, HtmlView, html};
+pub use diffyman_model::lines::{IndexedText, TextInputs};
+pub use html::{EntryContents, HtmlOptions, HtmlView, html, html_computed, html_with_contents};
+pub use source::Computed;
 pub use summary::{SummaryOptions, summary, summary_line};
-pub use unified::{ColorChoice, UnifiedOptions, unified};
+pub use unified::{ColorChoice, UnifiedOptions, unified, unified_computed};
 
 /// Quotes a path or name the way git does when it holds characters that
 /// would break a line or a terminal (quotes, backslashes, tabs, control,
@@ -58,8 +72,8 @@ pub fn quote_path(name: &str) -> std::borrow::Cow<'_, str> {
 /// Why a document could not be rendered.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RenderError {
-    /// The renderer does not handle this document kind (HTML supports `text` only;
-    /// the unified and summary renderers also handle `binary`).
+    /// The renderer does not handle this document kind (the unified renderer
+    /// takes `text` and `binary`, HTML also `tree`).
     #[error("documents of kind {0} cannot be rendered")]
     UnsupportedKind(String),
     /// The input bytes for this side are not the ones the document describes

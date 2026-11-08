@@ -26,6 +26,20 @@ const CASES: &[(&str, &str)] = &[
     ("text/037-blank-lines-near-changes", "uhs"),
     ("moved/001-pure-function-down", "uhs"),
     ("moved/026-edited-renamed-variable", "hs"),
+    ("binary/001-png-one-byte", "uhs"),
+    ("binary/002-inserted-bytes", "hs"),
+    ("binary/004-identical", "h"),
+    ("binary/005-text-vs-binary", "hs"),
+    ("binary/008-empty-vs-binary", "h"),
+    ("binary/017-dense-overwrites", "h"),
+    ("tree/001-identical-folders", "h"),
+    ("tree/002-folder-changes", "hs"),
+    ("tree/011-zip-changes", "hs"),
+    ("tree/014-zip-traversal-names", "hs"),
+    ("tree/017-zip-encrypted", "hs"),
+    ("tree/018-nested-zip", "h"),
+    ("tree/020-zip-corrupt", "hs"),
+    ("tree/026-tar-non-utf8-names", "h"),
 ];
 
 fn corpus() -> PathBuf {
@@ -51,22 +65,49 @@ fn input(dir: &Path, stem: &str) -> (Vec<u8>, String) {
     (fs::read(&found[0]).unwrap(), name)
 }
 
-/// Every snapshot as `(file name, expected content)`.
+/// Every snapshot as `(file name, expected content)`. Folder cases are
+/// compared with `diff_paths`, and their HTML shows the entries' content
+/// read from the two folders; archive cases have no entry content.
 fn render_all() -> Vec<(String, String)> {
     let mut out = Vec::new();
     for (case, formats) in CASES {
         let dir = corpus().join(case);
-        let (left, left_name) = input(&dir, "left");
-        let (right, right_name) = input(&dir, "right");
         let options =
             diffyman::parse_options(&fs::read_to_string(dir.join("options.json")).unwrap())
                 .unwrap();
-        let doc = diffyman::diff_document(
-            Input::named(&left, &left_name),
-            Input::named(&right, &right_name),
-            &options,
-        )
-        .unwrap();
+        let folders = dir.join("left").is_dir();
+        let (doc, left, right) = if folders {
+            let doc = diffyman::diff_paths(
+                &dir.join("left"),
+                &dir.join("right"),
+                &options,
+                &diffyman::Settings::default(),
+            )
+            .unwrap();
+            (doc, Vec::new(), Vec::new())
+        } else {
+            let (left, left_name) = input(&dir, "left");
+            let (right, right_name) = input(&dir, "right");
+            let doc = diffyman::diff_document(
+                Input::named(&left, &left_name),
+                Input::named(&right, &right_name),
+                &options,
+            )
+            .unwrap();
+            (doc, left, right)
+        };
+        let mut contents = |path: &[&str]| {
+            let [entry] = path else {
+                return None;
+            };
+            if !folders {
+                return None;
+            }
+            Some((
+                fs::read(dir.join("left").join(entry)).ok()?,
+                fs::read(dir.join("right").join(entry)).ok()?,
+            ))
+        };
         let stem = case.replace('/', "-");
         for format in formats.chars() {
             let (ext, text) = match format {
@@ -77,7 +118,14 @@ fn render_all() -> Vec<(String, String)> {
                 ),
                 'h' => (
                     "html",
-                    render::html(&doc, &left, &right, &render::HtmlOptions::default()).unwrap(),
+                    render::html_with_contents(
+                        &doc,
+                        &left,
+                        &right,
+                        &mut contents,
+                        &render::HtmlOptions::default(),
+                    )
+                    .unwrap(),
                 ),
                 's' => (
                     "txt",

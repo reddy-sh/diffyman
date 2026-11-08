@@ -51,6 +51,8 @@ jobs:
           - target: jcs_roundtrip
           - target: refine
           - target: moves
+          - target: tar
+          - target: zip
     env:
       # Overrides rust-toolchain.toml for every cargo call in this job,
       # including the cache action's.

@@ -1,104 +1,82 @@
 //! The input bytes behind a document: checked against the file meta, decoded
 //! and split into lines exactly as the engine does (spec §7.1, §7.2).
 
+use diffyman_model::lines::{IndexedText, TextInputs};
 use diffyman_model::{DiffDocument, FileMeta, Kind, OpKind, Range, Status};
 
 use crate::RenderError;
 
 /// A line terminator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Term {
-    /// End of input without a terminator.
-    None,
-    /// `\n`.
-    Lf,
-    /// `\r\n`.
-    CrLf,
-    /// A lone `\r`.
-    Cr,
+pub(crate) use diffyman_model::lines::Terminator as Term;
+
+/// The inputs a caller has just computed a document from, in the same
+/// process: the bytes it passed to the engine and, for a text document, the
+/// decoded inputs the engine gave back with it
+/// (`diffyman::diff_document_with_text`).
+///
+/// The `*_computed` renderers trust that these are the document's inputs.
+/// They check the sizes, the line counts and the document's structure (as
+/// for any document), but do not hash, decode or split the inputs again,
+/// which saves a SHA-256 of both inputs and a second line table. Use them
+/// only for a document produced from exactly these inputs; for a document
+/// read from elsewhere, use [`crate::unified`] and [`crate::html()`], which
+/// check the inputs' SHA-256 digests.
+#[derive(Debug, Clone, Copy)]
+pub struct Computed<'a> {
+    /// The left input's bytes.
+    pub left: &'a [u8],
+    /// The right input's bytes.
+    pub right: &'a [u8],
+    /// Both inputs as the engine decoded them, for a text document whose
+    /// inputs decode. Without them the bytes are decoded and split here.
+    pub text: Option<&'a TextInputs<'a>>,
 }
 
-impl Term {
-    /// The terminator's bytes.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Term::None => "",
-            Term::Lf => "\n",
-            Term::CrLf => "\r\n",
-            Term::Cr => "\r",
+/// The inputs a renderer was given.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Given<'a> {
+    /// Bytes from anywhere: checked against the document's sizes and
+    /// SHA-256 digests.
+    Bytes(&'a [u8], &'a [u8]),
+    /// The inputs the document was just computed from: sizes checked only.
+    Computed(Computed<'a>),
+}
+
+impl<'a> Given<'a> {
+    /// The raw bytes of both sides.
+    pub fn bytes(&self) -> (&'a [u8], &'a [u8]) {
+        match *self {
+            Given::Bytes(l, r) => (l, r),
+            Given::Computed(c) => (c.left, c.right),
         }
     }
-}
 
-/// One line: byte offsets of its content in the decoded text, and its terminator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Line {
-    pub start: usize,
-    pub end: usize,
-    pub term: Term,
-}
-
-/// Splits text into lines (spec §7.2): LF, CRLF and a lone CR end a line, and
-/// a terminator at the very end does not start a new line.
-pub(crate) fn split_lines(text: &str) -> Vec<Line> {
-    let bytes = text.as_bytes();
-    let mut lines = Vec::new();
-    let mut start = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\n' => {
-                lines.push(Line {
-                    start,
-                    end: i,
-                    term: Term::Lf,
-                });
-                i += 1;
-                start = i;
-            }
-            b'\r' => {
-                let crlf = bytes.get(i + 1) == Some(&b'\n');
-                lines.push(Line {
-                    start,
-                    end: i,
-                    term: if crlf { Term::CrLf } else { Term::Cr },
-                });
-                i += if crlf { 2 } else { 1 };
-                start = i;
-            }
-            _ => i += 1,
-        }
+    /// True when the SHA-256 digests are checked.
+    fn hashed(&self) -> bool {
+        matches!(self, Given::Bytes(..))
     }
-    if start < bytes.len() {
-        lines.push(Line {
-            start,
-            end: bytes.len(),
-            term: Term::None,
-        });
-    }
-    lines
 }
 
-/// One decoded side.
+/// One decoded side, split into lines like the engine does (spec §7.2: LF,
+/// CRLF and a lone CR end a line, and a terminator at the very end does not
+/// start a new line).
 #[derive(Debug)]
 pub(crate) struct SideText<'a> {
-    /// The text after the BOM.
-    pub text: &'a str,
+    /// The text after the BOM, with its lines.
+    pub lines: IndexedText<'a>,
     /// The raw input started with a UTF-8 BOM.
     pub bom: bool,
-    pub lines: Vec<Line>,
 }
 
-impl SideText<'_> {
+impl<'a> SideText<'a> {
     /// Line `i` (0-based) without its terminator.
-    pub fn content(&self, i: usize) -> &str {
-        let l = self.lines[i];
-        &self.text[l.start..l.end]
+    pub fn content(&self, i: usize) -> &'a str {
+        self.lines.content(i)
     }
 
     /// The terminator of line `i` (0-based).
     pub fn term(&self, i: usize) -> Term {
-        self.lines[i].term
+        self.lines.line(i).terminator
     }
 
     pub fn len(&self) -> usize {
@@ -127,18 +105,23 @@ impl Source<'_> {
 /// whose status is not `error`, also checks that every hunk and op lies inside
 /// the inputs and that the ops tile their hunks (spec §6.4), so the renderers
 /// can index lines without further checks.
-pub(crate) fn load<'a>(
-    doc: &DiffDocument,
-    left: &'a [u8],
-    right: &'a [u8],
-) -> Result<Source<'a>, RenderError> {
+pub(crate) fn load<'a>(doc: &DiffDocument, given: Given<'a>) -> Result<Source<'a>, RenderError> {
     if doc.kind != Kind::Text {
         return Err(RenderError::UnsupportedKind(format!("{:?}", doc.kind)));
     }
-    let source = Source {
-        left: decode(&doc.left, left, "left")?,
-        right: decode(&doc.right, right, "right")?,
+    check_inputs(doc, given)?;
+    let (left, right) = given.bytes();
+    let decoded = match given {
+        Given::Computed(Computed {
+            text: Some(text), ..
+        }) => [
+            prepared(&doc.left, &text.left, left.len())?,
+            prepared(&doc.right, &text.right, right.len())?,
+        ],
+        _ => [decode(&doc.left, left)?, decode(&doc.right, right)?],
     };
+    let [left, right] = decoded;
+    let source = Source { left, right };
     if doc.status != Status::Error {
         let (Some(l), Some(r)) = (&source.left, &source.right) else {
             return Err(invalid(
@@ -150,15 +133,14 @@ pub(crate) fn load<'a>(
     Ok(source)
 }
 
-/// Checks that the inputs are the ones the document describes (size and
-/// SHA-256), without decoding them.
-pub(crate) fn check_inputs(
-    doc: &DiffDocument,
-    left: &[u8],
-    right: &[u8],
-) -> Result<(), RenderError> {
+/// Checks that the inputs are the ones the document describes: their sizes,
+/// and for inputs from anywhere their SHA-256 digests. Nothing is decoded.
+pub(crate) fn check_inputs(doc: &DiffDocument, given: Given<'_>) -> Result<(), RenderError> {
+    let (left, right) = given.bytes();
     for (meta, bytes, side) in [(&doc.left, left, "left"), (&doc.right, right, "right")] {
-        if meta.size != bytes.len() as u64 || meta.sha256 != diffyman_model::sha256_hex(bytes) {
+        if meta.size != bytes.len() as u64
+            || (given.hashed() && meta.sha256 != diffyman_model::sha256_hex(bytes))
+        {
             return Err(RenderError::InputMismatch(side));
         }
     }
@@ -169,14 +151,27 @@ fn invalid(message: &str) -> RenderError {
     RenderError::InvalidDocument(message.to_owned())
 }
 
-fn decode<'a>(
+/// A side the engine decoded: its text must fill the input (after the BOM
+/// the file meta records) and have the recorded line count.
+fn prepared<'a>(
     meta: &FileMeta,
-    bytes: &'a [u8],
-    side: &'static str,
+    text: &IndexedText<'a>,
+    size: usize,
 ) -> Result<Option<SideText<'a>>, RenderError> {
-    if meta.size != bytes.len() as u64 || meta.sha256 != diffyman_model::sha256_hex(bytes) {
-        return Err(RenderError::InputMismatch(side));
+    let bom = meta.bom;
+    if text.text().len() + if bom { 3 } else { 0 } != size {
+        return Err(invalid("the decoded input does not match the document"));
     }
+    if meta.line_count.is_some_and(|n| n != text.len() as u64) {
+        return Err(invalid("lineCount does not match the input"));
+    }
+    Ok(Some(SideText {
+        lines: text.clone(),
+        bom,
+    }))
+}
+
+fn decode<'a>(meta: &FileMeta, bytes: &'a [u8]) -> Result<Option<SideText<'a>>, RenderError> {
     let bom = bytes.starts_with(b"\xEF\xBB\xBF");
     let body = if bom { &bytes[3..] } else { bytes };
     let Ok(text) = std::str::from_utf8(body) else {
@@ -188,11 +183,11 @@ fn decode<'a>(
             Ok(None)
         };
     };
-    let lines = split_lines(text);
+    let lines = IndexedText::new(text);
     if meta.line_count.is_some_and(|n| n != lines.len() as u64) {
         return Err(invalid("lineCount does not match the input"));
     }
-    Ok(Some(SideText { text, bom, lines }))
+    Ok(Some(SideText { lines, bom }))
 }
 
 /// Converts a 1-based range to a 0-based `(start, count)` inside `n` lines.
@@ -253,9 +248,12 @@ mod tests {
     use super::*;
 
     fn shape(text: &str) -> Vec<(&str, Term)> {
-        split_lines(text)
-            .iter()
-            .map(|l| (&text[l.start..l.end], l.term))
+        let side = SideText {
+            lines: IndexedText::new(text),
+            bom: false,
+        };
+        (0..side.len())
+            .map(|i| (side.content(i), side.term(i)))
             .collect()
     }
 

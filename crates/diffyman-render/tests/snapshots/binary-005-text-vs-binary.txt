@@ -1,0 +1,5 @@
+left.txt -> right.png: different, 1 changed range, +1108 -34 bytes, 0% similar
+  left:     text/plain, 34 bytes
+  right:    image/png, 1108 bytes
+  bytes:    1108 added, 34 removed, 0 unchanged
+  warnings: binary-fallback

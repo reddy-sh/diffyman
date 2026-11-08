@@ -352,6 +352,7 @@ dependencies = [
  "diffyman-algo",
  "diffyman-detect",
  "diffyman-model",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",
@@ -383,6 +384,7 @@ dependencies = [
 name = "diffyman-algo"
 version = "0.0.1"
 dependencies = [
+ "diffyman-model",
  "foldhash",
  "gix-imara-diff",
  "hashbrown 0.15.5",
@@ -433,6 +435,7 @@ dependencies = [
 name = "diffyman-model"
 version = "0.0.1"
 dependencies = [
+ "memchr",
  "ryu-js",
  "schemars",
  "serde",

@@ -20,8 +20,10 @@ The script exits non-zero if any check fails. It checks, per case:
    leading whitespace removed, the rest exact) and the same indentation delta
    on every non-blank line. An "edited" label reaches the block similarity
    and the word similarity of section 4.5 and is not secretly pure.
-5. Line-diff consistency: using git's histogram diff (no indent heuristic) as
-   an independent stand-in for text.histogram@1, every labeled left line is
+5. Line-diff consistency: using git's histogram diff (with its default slider
+   compaction and indent heuristic, which text.histogram@1 follows, spec
+   diff-document.md 7.3) as an independent stand-in for text.histogram@1,
+   every labeled left line is
    deleted, every labeled right line is inserted, and the two sides are in
    different change ops (rule 4.1.4). The stand-in diffs the masked lines
    with LF terminators: rule 4.1.4 applies to the sub-ops of a replace op
@@ -263,7 +265,7 @@ def git_change_ops(left: list[str], right: list[str]):
         cmd = [
             "git", "-c", "core.autocrlf=false", "-c", "diff.noprefix=false",
             "diff", "--no-index", "--no-color", "--no-ext-diff", "--text",
-            "--histogram", "--no-indent-heuristic", "-U0",
+            "--histogram", "--indent-heuristic", "-U0",
             str(left_path), str(right_path),
         ]
         proc = subprocess.run(cmd, capture_output=True, cwd=work)
@@ -475,13 +477,19 @@ def check_range(rng, label: str, line_count: int, errors: CaseErrors) -> bool:
 
 def check_case(directory: Path, totals: dict) -> CaseErrors:
     errors = CaseErrors(directory.name)
-    left_path, right_path = directory / "left.txt", directory / "right.txt"
+    # left.<ext> and right.<ext> (spec 5.1).
+    def side_file(stem: str) -> Path:
+        found = sorted(directory.glob(stem + ".*"))
+        return found[0] if len(found) == 1 else directory / (stem + ".txt")
+
+    left_path, right_path = side_file("left"), side_file("right")
     for required in (left_path, right_path, directory / "options.json", directory / "labels.json"):
         if not required.is_file():
             errors.error(f"missing {required.name}")
     if errors.errors:
         return errors
-    check_options(directory / "options.json", errors, detect_moves=True, line_only=True)
+    # Edited cases may pin inline spans with another granularity (spec 5.1).
+    check_options(directory / "options.json", errors, detect_moves=True, line_only=False)
     left = check_files(left_path.read_bytes(), "left", errors)
     right = check_files(right_path.read_bytes(), "right", errors)
     if left is None or right is None:
@@ -492,8 +500,8 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
     except (ValueError, re.error) as exc:
         errors.error(f"options.ignore.regex cannot be used here: {exc}")
         return errors
-    if ignore.get("whitespace", "none") != "none" or ignore.get("case", False):
-        errors.error("moved cases must use ignore.whitespace 'none' and ignore.case false")
+    if ignore.get("case", False):
+        errors.error("moved cases must use ignore.case false")
     # Masked lines (move keys and the stand-in diff) next to the originals
     # (alphanumeric counts and indentation).
     mleft = [mask_line(line, patterns) for line in left]
@@ -513,6 +521,11 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
     if not isinstance(moves, list):
         errors.error("labels.moves must be an array")
         return errors
+    # The stand-in checks below compare lines under ignore.whitespace "none".
+    # A negative case may use another mode (the engine must still find
+    # nothing); the stand-in then checks the same inputs under "none".
+    if ignore.get("whitespace", "none") != "none" and moves:
+        errors.error("moved cases with labels must use ignore.whitespace 'none'")
 
     valid = []
     for index, move in enumerate(moves):
@@ -618,9 +631,14 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
             continue
         # A pure piece inside an edited label is joined into that edited move
         # (moves spec 4.3 step 4), so it is expected, not a false positive.
+        # The stand-in does not trim blank edge lines (4.3 step 1), so they
+        # do not count here.
+        def non_blank(rng: dict, lines: list[str]) -> set[int]:
+            return {n for n in line_set(rng) if lines[n - 1].strip()}
+
         inside = any(
-            line_set(pred["left"]) <= line_set(label["left"])
-            and line_set(pred["right"]) <= line_set(label["right"])
+            non_blank(pred["left"], left) <= line_set(label["left"])
+            and non_blank(pred["right"], right) <= line_set(label["right"])
             for label in edited_labels
         )
         if inside:

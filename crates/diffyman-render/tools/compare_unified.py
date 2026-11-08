@@ -182,7 +182,7 @@ def main() -> int:
         else:
             g = run(
                 ["git", "-c", "core.quotePath=false", "diff", "--no-index", "--no-color",
-                 "--no-ext-diff", "--no-indent-heuristic", *git_flags, left.name, right.name],
+                 "--no-ext-diff", *git_flags, left.name, right.name],
                 cwd=case, env=GIT_ENV,
             )
             same_git = normalize_git(g.stdout) == ours.stdout

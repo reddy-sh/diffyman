@@ -68,7 +68,7 @@ pub fn archive_format(bytes: &[u8]) -> Option<Format> {
     }
     let compressed = if bytes.starts_with(&stream::GZIP_MAGIC) {
         Format::TarGz
-    } else if bytes.starts_with(&stream::ZSTD_MAGIC) {
+    } else if bytes.starts_with(&stream::ZSTD_MAGIC) || stream::is_skippable_frame(bytes) {
         Format::TarZst
     } else {
         return None;

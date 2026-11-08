@@ -1,0 +1,38 @@
+�import { writeRecord } from "./store.js";
+
+function setup() {
+  console.log("ready");
+}
+
+function logEvent(name, payload) {
+  const stamp = "2026-01-02T03:04:05Z";
+  const message = `${stamp} événement ${name}`;
+  writeRecord({ name, payload }, "café", message);
+  console.debug("logged", name);
+  return payload;
+}
+
+export function createLogger(prefix) {
+  const events = [];
+
+  return { prefix, events, logEvent };
+}
+�import { writeRecord } from "./store.js";
+
+function setup() {
+  console.log("ready");
+}
+
+export function createLogger(prefix) {
+  const events = [];
+
+  function logEvent(name, payload) {
+    const stamp = "2026-11-08T09:10:11Z";
+    const summary = `${stamp} événement ${name}`;
+    writeRecord({ name, payload }, "café", summary);
+    console.debug("logged", name);
+    return payload;
+  }
+
+  return { prefix, events, logEvent };
+}

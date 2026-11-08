@@ -74,6 +74,13 @@ wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node
 uv run --no-project --python 3.12 python tests/conformance/run_bindings.py
 ```
 
+The WASM package without archive support (feature `archives` off, [ADR 0008](docs/adr/0008-wasm-target.md)) must refuse the cases of [spec §19.7](docs/spec/diff-document.md) with an `unsupported` error and match on all others:
+
+```sh
+wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node-slim -- --no-default-features
+uv run --no-project --python 3.12 python tests/conformance/run_bindings.py --wasm-pkg bindings/wasm/pkg-node-slim
+```
+
 ## Golden corpus
 
 Cases live in `tests/corpus/text/<case>/` and `tests/corpus/moved/<case>/`. Each holds `left.*`, `right.*`, `options.json` and `expected.json` (moved cases also have `labels.json`). `expected.json` is the canonical JSON of the document without `provenance`, written as exact bytes with no trailing newline.

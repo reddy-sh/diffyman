@@ -4,8 +4,9 @@ Usage (from the repository root):
 
     uv run --python 3.12 fuzz/seed_corpus.py
 
-Reads tests/corpus/{text,moved,binary}/*/ and writes fuzz/corpus/<target>/seed-*,
-replacing earlier seeds. Inputs are framed as the targets expect
+Reads tests/corpus/{text,moved,binary}/*/ (and the archive inputs of
+tests/corpus/tree/*/ for the tar and zip targets) and writes
+fuzz/corpus/<target>/seed-*, replacing earlier seeds. Inputs are framed as the targets expect
 (diffyman_fuzz::chunks: every chunk but the last is a little-endian u16
 length followed by the bytes). Seeds over MAX_SEED bytes are skipped so the
 fuzzers keep a small default input size.
@@ -77,6 +78,30 @@ def cases() -> list[tuple[str, bytes, bytes, bytes]]:
     return found
 
 
+def archives() -> list[tuple[str, str, bytes]]:
+    """The archive inputs of tests/corpus/tree as (name, format, bytes)."""
+    found = []
+    for case in sorted((CORPUS / "tree").iterdir()):
+        if not case.is_dir():
+            continue
+        for path in sorted(case.iterdir()):
+            if not path.is_file() or not path.name.startswith(("left.", "right.")):
+                continue
+            data = path.read_bytes()
+            if data.startswith((b"PK\x03\x04", b"PK\x05\x06")):
+                kind = "zip"
+            elif len(data) >= 512 and data[257:262] == b"ustar":
+                kind = "tar"
+            elif data.startswith((b"\x1f\x8b", b"\x28\xb5\x2f\xfd")) or (
+                len(data) >= 4 and data[0] & 0xF0 == 0x50 and data[1:4] == b"\x2a\x4d\x18"
+            ):
+                kind = "compressed"
+            else:
+                continue
+            found.append((f"tree-{case.name}-{path.name}", kind, data))
+    return found
+
+
 def option_bits(options: bytes) -> dict:
     try:
         value = json.loads(options)
@@ -109,8 +134,22 @@ def moves_bytes(options: dict) -> tuple[int, int]:
 
 def main() -> int:
     seeds: dict[str, dict[str, bytes]] = {
-        t: {} for t in ("diff", "options", "jcs_roundtrip", "refine", "moves")
+        t: {} for t in ("diff", "options", "jcs_roundtrip", "refine", "moves", "tar", "zip")
     }
+    # tar mode byte: bits 0-1 wrapping (0 plain, 1 gzip, 2 zstd, 3 as is),
+    # bit 2 small limits, bit 3 no checksum fix-up. zip mode byte: bit 0 small
+    # limits.
+    for name, kind, data in archives():
+        if kind == "zip":
+            seeds["zip"][name] = b"\x00" + data
+            seeds["zip"][name + "-small"] = b"\x01" + data
+        elif kind == "tar":
+            seeds["tar"][name] = b"\x00" + data
+            seeds["tar"][name + "-gzip"] = b"\x01" + data
+            seeds["tar"][name + "-zstd-small"] = b"\x06" + data
+        else:
+            seeds["tar"][name] = b"\x03" + data
+            seeds["tar"][name + "-small"] = b"\x07" + data
     json_seeds = []
     for name, options, left, right in cases():
         bits = option_bits(options)

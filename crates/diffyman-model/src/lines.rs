@@ -13,6 +13,12 @@
 //!   from the text on demand.
 //! - [`LineCursor`]: a forward-only walk that stores nothing, for output that
 //!   visits lines in order.
+//! - [`IndexedText`]: a text with its [`LineIndex`], built together so they
+//!   always match. The engine hands both inputs of a text document out as
+//!   [`TextInputs`], so a renderer can show their lines without splitting
+//!   them again.
+
+use std::sync::Arc;
 
 /// How a line ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -296,6 +302,68 @@ impl LineIndex {
     }
 }
 
+/// A text and its [`LineIndex`]. They are built together and cannot be
+/// changed, so every line the index gives lies on character boundaries of
+/// the text. Cloning shares the index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexedText<'a> {
+    text: &'a str,
+    index: Arc<LineIndex>,
+}
+
+impl<'a> IndexedText<'a> {
+    /// Indexes the lines of `text`.
+    pub fn new(text: &'a str) -> IndexedText<'a> {
+        IndexedText {
+            text,
+            index: Arc::new(LineIndex::new(text)),
+        }
+    }
+
+    /// The text.
+    pub fn text(&self) -> &'a str {
+        self.text
+    }
+
+    /// The line index of the text.
+    pub fn index(&self) -> &LineIndex {
+        &self.index
+    }
+
+    /// Number of lines.
+    pub fn len(&self) -> usize {
+        self.index.len()
+    }
+
+    /// True for a text with no lines.
+    pub fn is_empty(&self) -> bool {
+        self.index.is_empty()
+    }
+
+    /// Line `i` (0-based).
+    #[inline]
+    pub fn line(&self, i: usize) -> Line {
+        self.index.line(self.text, i)
+    }
+
+    /// The content of line `i` (0-based), without its terminator.
+    #[inline]
+    pub fn content(&self, i: usize) -> &'a str {
+        self.line(i).content(self.text)
+    }
+}
+
+/// Both inputs of a text document as the engine decoded them: each side
+/// without its UTF-8 BOM, split into lines. Given out together with the
+/// document they were compared into (`diffyman::diff_document_with_text`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextInputs<'a> {
+    /// The left input.
+    pub left: IndexedText<'a>,
+    /// The right input.
+    pub right: IndexedText<'a>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,6 +450,22 @@ mod tests {
             assert_eq!(index.last_terminator(), want.last().map(|l| l.terminator));
             assert_eq!(LineCursor::new(text).collect::<Vec<_>>(), want);
         }
+    }
+
+    #[test]
+    fn indexed_text_gives_the_split_lines() {
+        let text = "é\r\nb\rc";
+        let indexed = IndexedText::new(text);
+        let want = split_lines(text);
+        assert_eq!(indexed.len(), want.len());
+        for (i, line) in want.iter().enumerate() {
+            assert_eq!(indexed.line(i), *line);
+            assert_eq!(indexed.content(i), line.content(text));
+        }
+        assert_eq!(indexed.text(), text);
+        assert!(IndexedText::new("").is_empty());
+        let shared = indexed.clone();
+        assert!(Arc::ptr_eq(&shared.index, &indexed.index));
     }
 
     #[test]

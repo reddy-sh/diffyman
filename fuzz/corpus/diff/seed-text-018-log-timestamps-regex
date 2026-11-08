@@ -1,4 +1,4 @@
-?{
+â{
   "algorithm": "histogram",
   "granularity": "line",
   "ignore": {
@@ -12,7 +12,15 @@
   "context": 3,
   "positionEncoding": "utf-8",
   "detectMoves": false,
-  "adapter": "auto"
+  "adapter": "auto",
+  "tree": {
+    "followSymlinks": false,
+    "ignoreFiles": false,
+    "exclude": [],
+    "detectMoves": true,
+    "maxDepth": 3,
+    "childBudget": 16777216
+  }
 }
 *2026-03-14T08:00:01.120Z INFO  worker-1 started, pid 4120
 2026-03-14T08:00:01.348Z INFO  worker-2 started, pid 4121

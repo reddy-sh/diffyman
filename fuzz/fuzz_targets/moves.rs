@@ -7,7 +7,8 @@
 //! block start, block length, target) and `extra` inserted, so moves are
 //! likely; otherwise the right side is `extra`. Asserts that every document
 //! passes `check_document` (which checks the moves: ranges, kinds, ops they
-//! reference, one move per line), that a second run is identical, and that
+//! reference, one move per line, and the inline spans of edited moves), that
+//! a second run is identical, and that
 //! moves never change hunks or stats (spec §6.5).
 #![no_main]
 

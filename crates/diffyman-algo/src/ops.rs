@@ -125,26 +125,26 @@ fn push_change(ops: &mut Vec<LineOp>, ls: usize, ll: usize, rs: usize, rl: usize
     ops.push(LineOp::change(ls, ll, rs, rl));
 }
 
-/// [`full_ops`] of a diff whose first `prefix` and last `suffix` lines match
-/// on both sides and were left out: `core` aligns the lines in between.
-/// `left_len` and `right_len` are the full line counts.
-pub fn full_ops_trimmed(
+/// The full-file alignment of a diff whose first `prefix` and last `suffix`
+/// lines match on both sides and were left out: `core` aligns the lines in
+/// between. `left_len` and `right_len` are the full line counts.
+pub fn expand_trimmed(
     core: &Alignment,
     prefix: usize,
     suffix: usize,
     left_len: usize,
     right_len: usize,
-) -> Vec<LineOp> {
+) -> Alignment {
     let expand = |flags: &[bool], len: usize| -> Vec<bool> {
         let mut full = vec![false; len];
         full[prefix..prefix + flags.len()].copy_from_slice(flags);
         debug_assert_eq!(prefix + flags.len() + suffix, len);
         full
     };
-    full_ops(&Alignment {
+    Alignment {
         removed: expand(&core.removed, left_len),
         added: expand(&core.added, right_len),
-    })
+    }
 }
 
 /// True for a change op whose lines are all blank (empty or whitespace only),

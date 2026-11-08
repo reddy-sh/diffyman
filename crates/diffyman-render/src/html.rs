@@ -1,16 +1,17 @@
 //! Self-contained HTML report: one file with inline CSS, no scripts and no
-//! external resources.
+//! external resources. This module holds the page shell, the entry points
+//! and the text view; `hex` and `tree` hold the binary and tree views.
 
 use std::fmt::Write as _;
 
 use diffyman_model::{
-    Algorithm, DiffDocument, FileMeta, Granularity, LineTerminator, MoveKind, OpKind,
-    PositionEncoding, Severity, Side, Span, Status, WhitespaceMode,
+    Algorithm, DiffDocument, FileMeta, Granularity, Kind, LineTerminator, MoveKind, OpKind,
+    PositionEncoding, Severity, Side, Span, Status, Warning, WhitespaceMode,
 };
 
 use crate::RenderError;
 use crate::layout::{self, RHunk, ROp};
-use crate::source::{self, SideText, Source, Term, range0};
+use crate::source::{self, Computed, SideText, Source, Term, range0};
 use crate::text::{self, push_escaped};
 use crate::unified::header_range;
 
@@ -42,6 +43,19 @@ pub struct HtmlOptions {
     /// Longest line content shown, in bytes (default 10000). Longer lines are
     /// cut at a character boundary with a notice.
     pub max_line_bytes: usize,
+    /// Bytes shown in hex dumps, both sides and every byte range together
+    /// (default 65536). Each side of one range shows at most 256 bytes; once
+    /// the total is used up, further ranges are listed without a dump and a
+    /// notice says so.
+    pub max_hex_bytes: usize,
+    /// How many levels of child documents a tree report shows inline
+    /// (default 4): 1 shows the changes inside the modified entries, 2 also
+    /// those inside archives nested in the tree, and so on. 0 shows none.
+    pub max_depth: u32,
+    /// Entry content a tree report asks its [`EntryContents`] for, both sides
+    /// and every entry together, in bytes (default 256 MiB). Entries past it
+    /// are shown without their content.
+    pub max_content_bytes: u64,
 }
 
 impl Default for HtmlOptions {
@@ -52,13 +66,50 @@ impl Default for HtmlOptions {
             title: None,
             max_bytes: 8 * 1024 * 1024,
             max_line_bytes: 10_000,
+            max_hex_bytes: 64 * 1024,
+            max_depth: 4,
+            max_content_bytes: 256 << 20,
         }
+    }
+}
+
+/// Supplies the contents of the modified entries of a tree document, so the
+/// HTML report can show the changes inside them, not only their positions.
+///
+/// It is implemented for every `FnMut(&[&str]) -> Option<(Vec<u8>, Vec<u8>)>`.
+pub trait EntryContents {
+    /// The left and right content of the `modified` file entry at `path`:
+    /// the entry's `path` in each enclosing tree, outermost first, so
+    /// `["inner.zip", "a.txt"]` is `a.txt` inside the archive entry
+    /// `inner.zip`. `None` when the content is not available.
+    ///
+    /// Each content must be the bytes the child document describes: its size
+    /// and SHA-256 are checked, and an entry whose content does not match is
+    /// shown without it.
+    fn contents(&mut self, path: &[&str]) -> Option<(Vec<u8>, Vec<u8>)>;
+}
+
+impl<F> EntryContents for F
+where
+    F: FnMut(&[&str]) -> Option<(Vec<u8>, Vec<u8>)>,
+{
+    fn contents(&mut self, path: &[&str]) -> Option<(Vec<u8>, Vec<u8>)> {
+        self(path)
+    }
+}
+
+/// An [`EntryContents`] that has no content.
+struct NoContents;
+
+impl EntryContents for NoContents {
+    fn contents(&mut self, _path: &[&str]) -> Option<(Vec<u8>, Vec<u8>)> {
+        None
     }
 }
 
 /// Bytes kept free for the page header (styles, file details, warnings and
 /// the moves list) when the size cap is split between the views.
-const HEADER_RESERVE: usize = 96 * 1024;
+pub(crate) const HEADER_RESERVE: usize = 96 * 1024;
 /// A row of the file details table: label and value for one side.
 type MetaRow = (&'static str, fn(&FileMeta) -> String);
 /// Entries listed in the moved-blocks section.
@@ -76,52 +127,90 @@ const MAX_LISTED_MOVES: usize = 200;
 ///   bidi-control characters are replaced by visible labels such as `RLO`, so
 ///   they cannot reorder the page; a notice says when there are any.
 /// - No script and no external resource. The view switch is CSS only.
+///
+/// By kind:
+///
+/// - `text`: side-by-side and inline views of the hunks ([`HtmlView`]).
+/// - `binary`: a table of the changed byte ranges (offset, length, change)
+///   with a hex dump of both sides of each range, within
+///   [`HtmlOptions::max_hex_bytes`].
+/// - `tree`: the changed entries (status, path, both sides' type, size and
+///   SHA-256), the unchanged ones in a collapsed list, the tree warnings
+///   flagged at the top, and each modified entry's child document inline
+///   in a collapsed `<details>`, down to [`HtmlOptions::max_depth`]. The
+///   inputs are not read: pass empty slices. Child documents are shown
+///   from the document alone (line and byte positions, no content); use
+///   [`html_with_contents`] to show their content.
+///
+/// For kinds `text` and `binary`, `left` and `right` must be the inputs the
+/// document describes.
 pub fn html(
     doc: &DiffDocument,
     left: &[u8],
     right: &[u8],
     options: &HtmlOptions,
 ) -> Result<String, RenderError> {
-    let src = source::load(doc, left, right)?;
-    let (nl, nr) = src.counts();
-    let hunks = if doc.status == Status::Error {
-        Vec::new()
-    } else {
-        layout::hunks(doc, nl, nr, options.context)
-    };
-    let views: &[ViewKind] = match options.view {
-        HtmlView::Both => &[ViewKind::Split, ViewKind::Inline],
-        HtmlView::SideBySide => &[ViewKind::Split],
-        HtmlView::Inline => &[ViewKind::Inline],
-    };
-    let show_eol = doc.left.line_terminator != doc.right.line_terminator
-        || [doc.left.line_terminator, doc.right.line_terminator]
-            .contains(&Some(LineTerminator::Mixed));
-    let ctx = Ctx {
-        doc,
-        src: &src,
-        hunks: &hunks,
-        moves: MoveIndex::new(doc, nl, nr),
-        show_eol,
-        max_line: options.max_line_bytes,
-        encoding: doc.position_encoding,
-        digits: nl.max(nr).max(1).to_string().len(),
-        first_view: views[0],
-    };
-    let mut flags = Flags::default();
-    let budget = options.max_bytes.saturating_sub(HEADER_RESERVE) / views.len();
-    let mut bodies = Vec::new();
-    let mut truncated = false;
-    if !hunks.is_empty() {
-        for &view in views {
-            let (body, cut) = ctx.view(view, budget, &mut flags);
-            truncated |= cut;
-            bodies.push((view, body));
-        }
-    }
+    html_with_contents(doc, left, right, &mut NoContents, options)
+}
 
-    let mut out =
-        String::with_capacity(bodies.iter().map(|(_, b)| b.len()).sum::<usize>() + 16_384);
+/// [`html`], with the contents of tree entries from `contents`, so the
+/// child documents of modified entries show the changed lines and bytes
+/// themselves. Contents are asked for in path order, only for entries the
+/// report shows, and within [`HtmlOptions::max_content_bytes`]. For kinds
+/// other than `tree`, `contents` is not used.
+pub fn html_with_contents(
+    doc: &DiffDocument,
+    left: &[u8],
+    right: &[u8],
+    contents: &mut dyn EntryContents,
+    options: &HtmlOptions,
+) -> Result<String, RenderError> {
+    page(doc, source::Given::Bytes(left, right), contents, options)
+}
+
+/// [`html`] for a document the caller has just computed from `inputs`: the
+/// same page, without hashing, decoding and splitting the inputs again (see
+/// [`Computed`]). A tree document's entries have no content here; use
+/// [`html_with_contents`] for that.
+pub fn html_computed(
+    doc: &DiffDocument,
+    inputs: &Computed<'_>,
+    options: &HtmlOptions,
+) -> Result<String, RenderError> {
+    page(
+        doc,
+        source::Given::Computed(*inputs),
+        &mut NoContents,
+        options,
+    )
+}
+
+fn page(
+    doc: &DiffDocument,
+    given: source::Given<'_>,
+    contents: &mut dyn EntryContents,
+    options: &HtmlOptions,
+) -> Result<String, RenderError> {
+    match doc.kind {
+        Kind::Text => text_page(doc, given, options),
+        Kind::Binary => crate::hex::page(doc, given, options),
+        Kind::Tree => crate::tree::page(doc, contents, options),
+        other => Err(RenderError::UnsupportedKind(format!("{other:?}"))),
+    }
+}
+
+/// The page around a view: head, styles, title, `header` (written by the
+/// caller, after the title so it sees the title's characters in `flags`),
+/// `main` and the footer.
+pub(crate) fn assemble(
+    doc: &DiffDocument,
+    options: &HtmlOptions,
+    extra_css: &str,
+    flags: &mut Flags,
+    main: &str,
+    header: impl FnOnce(&mut String, &mut Flags),
+) -> String {
+    let mut out = String::with_capacity(main.len() + 16_384);
     let title = match &options.title {
         Some(t) => t.clone(),
         None => format!(
@@ -137,22 +226,169 @@ pub fn html(
     push_escaped(&mut out, &text::escape_controls(&title));
     out.push_str("</title>\n<style>\n");
     out.push_str(CSS);
-    let _ = writeln!(out, ".cn{{width:calc({}ch + 1em)}}", ctx.digits);
+    out.push_str(extra_css);
     out.push_str("</style>\n</head>\n<body>\n<header>\n<h1>");
-    plain(&mut out, &title, &mut flags);
+    plain(&mut out, &title, flags);
     out.push_str("</h1>\n");
-    ctx.header(&mut out, &mut flags, truncated, options);
+    header(&mut out, flags);
     out.push_str("</header>\n<main>\n");
+    out.push_str(main);
+    out.push_str("</main>\n<footer>\n<p>Diff Document <code>");
+    push_escaped(&mut out, &doc.id);
+    out.push_str("</code>, schema ");
+    push_escaped(&mut out, &doc.schema_version);
+    out.push_str(".</p>\n</footer>\n</body>\n</html>\n");
+    out
+}
+
+/// `left → right`, the first line of every header.
+pub(crate) fn files_line(out: &mut String, doc: &DiffDocument, flags: &mut Flags) {
+    out.push_str("<p class=\"files\">");
+    plain(out, doc.left.name.as_deref().unwrap_or("left"), flags);
+    out.push_str(" <span aria-hidden=\"true\">→</span><span class=\"sr\">compared with</span> ");
+    plain(out, doc.right.name.as_deref().unwrap_or("right"), flags);
+    out.push_str("</p>\n");
+}
+
+/// The status line of an error document.
+pub(crate) const ERROR_STATUS: &str = "<p class=\"status st-error\"><strong>Error.</strong> The comparison could not be completed; see the warnings below.</p>\n";
+
+/// The notice about bidi-control or invisible characters, when there were any.
+pub(crate) fn char_notices(out: &mut String, flags: &Flags) {
+    if flags.bidi {
+        out.push_str("<p class=\"notice\" role=\"note\"><strong>Bidirectional control characters.</strong> The content holds characters that can reorder how text is displayed (as in Trojan Source attacks). They are shown as labels such as <span class=\"inv\">RLO</span> and have no effect here.</p>\n");
+    } else if flags.invisible {
+        out.push_str("<p class=\"notice\" role=\"note\"><strong>Invisible characters.</strong> The content holds control or zero-width characters. They are shown as labels such as <span class=\"inv\">ZWSP</span>.</p>\n");
+    }
+}
+
+/// The document's warnings as a section with a heading, when there are any.
+pub(crate) fn warnings_section(out: &mut String, warnings: &[Warning]) {
+    if warnings.is_empty() {
+        return;
+    }
+    out.push_str("<section aria-labelledby=\"warnings-h\">\n<h2 id=\"warnings-h\">Warnings</h2>\n");
+    warnings_list(out, warnings);
+    out.push_str("</section>\n");
+}
+
+/// The warnings as a list, one item per warning.
+pub(crate) fn warnings_list(out: &mut String, warnings: &[Warning]) {
+    out.push_str("<ul class=\"warnings\">\n");
+    for w in warnings {
+        let (class, label) = if w.severity == Severity::Error {
+            ("sev-error", "Error")
+        } else {
+            ("sev-warning", "Warning")
+        };
+        let _ = write!(out, "<li class=\"{class}\"><strong>{label}</strong> <code>");
+        push_escaped(out, w.code.as_str());
+        out.push_str("</code>");
+        match w.side {
+            Some(Side::Left) => out.push_str(" (left)"),
+            Some(Side::Right) => out.push_str(" (right)"),
+            _ => {}
+        }
+        out.push_str(": ");
+        push_escaped(out, &text::escape_controls(&w.message));
+        out.push_str("</li>\n");
+    }
+    out.push_str("</ul>\n");
+}
+
+/// Whether changed lines show their terminators: the sides use different
+/// styles, or one mixes them.
+fn show_eol(doc: &DiffDocument) -> bool {
+    doc.left.line_terminator != doc.right.line_terminator
+        || [doc.left.line_terminator, doc.right.line_terminator]
+            .contains(&Some(LineTerminator::Mixed))
+}
+
+/// A text document's hunks as one inline table, for a tree report: element
+/// ids start with `ids`, and the table stops near `budget` bytes. Returns
+/// the HTML (empty when there is nothing to show) and whether it was cut.
+pub(crate) fn text_fragment(
+    doc: &DiffDocument,
+    left: &[u8],
+    right: &[u8],
+    ids: &str,
+    options: &HtmlOptions,
+    budget: usize,
+    flags: &mut Flags,
+) -> Result<(String, bool), RenderError> {
+    let src = source::load(doc, source::Given::Bytes(left, right))?;
+    if doc.status == Status::Error {
+        return Ok((String::new(), false));
+    }
+    let (nl, nr) = src.counts();
+    let hunks = layout::hunks(doc, nl, nr, options.context);
+    if hunks.is_empty() {
+        return Ok((String::new(), false));
+    }
+    let ctx = Ctx {
+        doc,
+        src: &src,
+        hunks: &hunks,
+        moves: MoveIndex::new(doc, nl, nr),
+        show_eol: show_eol(doc),
+        max_line: options.max_line_bytes,
+        encoding: doc.position_encoding,
+        digits: nl.max(nr).max(1).to_string().len(),
+        first_view: ViewKind::Inline,
+        ids,
+        embedded: true,
+    };
+    Ok(ctx.view(ViewKind::Inline, budget, flags))
+}
+
+fn text_page(
+    doc: &DiffDocument,
+    given: source::Given<'_>,
+    options: &HtmlOptions,
+) -> Result<String, RenderError> {
+    let src = source::load(doc, given)?;
+    let (nl, nr) = src.counts();
+    let hunks = if doc.status == Status::Error {
+        Vec::new()
+    } else {
+        layout::hunks(doc, nl, nr, options.context)
+    };
+    let views: &[ViewKind] = match options.view {
+        HtmlView::Both => &[ViewKind::Split, ViewKind::Inline],
+        HtmlView::SideBySide => &[ViewKind::Split],
+        HtmlView::Inline => &[ViewKind::Inline],
+    };
+    let ctx = Ctx {
+        doc,
+        src: &src,
+        hunks: &hunks,
+        moves: MoveIndex::new(doc, nl, nr),
+        show_eol: show_eol(doc),
+        max_line: options.max_line_bytes,
+        encoding: doc.position_encoding,
+        digits: nl.max(nr).max(1).to_string().len(),
+        first_view: views[0],
+        ids: "",
+        embedded: false,
+    };
+    let mut flags = Flags::default();
+    let budget = options.max_bytes.saturating_sub(HEADER_RESERVE) / views.len();
+    let mut bodies = Vec::new();
+    let mut truncated = false;
+    if !hunks.is_empty() {
+        for &view in views {
+            let (body, cut) = ctx.view(view, budget, &mut flags);
+            truncated |= cut;
+            bodies.push((view, body));
+        }
+    }
+
+    let mut main = String::with_capacity(bodies.iter().map(|(_, b)| b.len()).sum::<usize>() + 512);
     if bodies.is_empty() {
-        out.push_str("<p class=\"empty\">");
-        out.push_str(match doc.status {
-            Status::Error => "No diff to show: the comparison ended with an error.",
-            _ => "No changes to show.",
-        });
-        out.push_str("</p>\n");
+        main.push_str(empty_notice(doc.status));
     } else {
         if bodies.len() > 1 {
-            out.push_str(concat!(
+            main.push_str(concat!(
                 "<input type=\"radio\" name=\"view\" id=\"view-split\" class=\"vt\" checked>",
                 "<label for=\"view-split\">Side by side</label>\n",
                 "<input type=\"radio\" name=\"view\" id=\"view-inline\" class=\"vt\">",
@@ -165,19 +401,33 @@ pub fn html(
                 ViewKind::Inline => ("inline", "Inline view"),
             };
             let _ = writeln!(
-                out,
+                main,
                 "<section class=\"view {class}\" aria-label=\"{label}\">"
             );
-            out.push_str(body);
-            out.push_str("</section>\n");
+            main.push_str(body);
+            main.push_str("</section>\n");
         }
     }
-    out.push_str("</main>\n<footer>\n<p>Diff Document <code>");
-    push_escaped(&mut out, &doc.id);
-    out.push_str("</code>, schema ");
-    push_escaped(&mut out, &doc.schema_version);
-    out.push_str(".</p>\n</footer>\n</body>\n</html>\n");
-    Ok(out)
+    drop(bodies);
+    let extra_css = format!(".cn{{width:calc({}ch + 1em)}}\n", ctx.digits);
+    Ok(assemble(
+        doc,
+        options,
+        &extra_css,
+        &mut flags,
+        &main,
+        |out, flags| ctx.header(out, flags, truncated, options),
+    ))
+}
+
+/// The paragraph shown instead of a view when there is nothing to show.
+pub(crate) fn empty_notice(status: Status) -> &'static str {
+    match status {
+        Status::Error => {
+            "<p class=\"empty\">No diff to show: the comparison ended with an error.</p>\n"
+        }
+        _ => "<p class=\"empty\">No changes to show.</p>\n",
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -205,10 +455,10 @@ impl ViewKind {
 
 /// What was seen while rendering, for the notices in the header.
 #[derive(Debug, Default)]
-struct Flags {
-    bidi: bool,
-    invisible: bool,
-    long_lines: bool,
+pub(crate) struct Flags {
+    pub bidi: bool,
+    pub invisible: bool,
+    pub long_lines: bool,
 }
 
 /// How a line is shown in a cell.
@@ -231,6 +481,8 @@ struct MoveIndex {
     right: Vec<(usize, usize, usize)>,
     /// Valid moves: `(index, kind, left range, right range)`.
     list: Vec<MoveEntry>,
+    /// The inline spans of each entry of `list` (`moves[].inline`, spec §6.5).
+    spans: Vec<OpSpans>,
 }
 
 impl MoveIndex {
@@ -239,6 +491,7 @@ impl MoveIndex {
             left: Vec::new(),
             right: Vec::new(),
             list: Vec::new(),
+            spans: Vec::new(),
         };
         if doc.status == Status::Error {
             return index;
@@ -253,6 +506,7 @@ impl MoveIndex {
             index.left.push((l.0, l.1, i));
             index.right.push((r.0, r.1, i));
             index.list.push((i, m.kind, l, r));
+            index.spans.push(OpSpans::new(&m.inline));
         }
         index.left.sort_unstable();
         index.right.sort_unstable();
@@ -277,6 +531,14 @@ impl MoveIndex {
             .binary_search_by_key(&index, |e| e.0)
             .ok()
             .map(|at| &self.list[at])
+    }
+
+    /// The inline spans of move `index`.
+    fn spans(&self, index: usize) -> Option<&OpSpans> {
+        self.list
+            .binary_search_by_key(&index, |e| e.0)
+            .ok()
+            .map(|at| &self.spans[at])
     }
 }
 
@@ -315,9 +577,18 @@ struct Ctx<'a, 'd> {
     digits: usize,
     /// The view the header's links point into.
     first_view: ViewKind,
+    /// Prefix of every element id, so several documents fit on one page.
+    ids: &'a str,
+    /// A table inside a tree report: fixed line-number columns.
+    embedded: bool,
 }
 
 impl Ctx<'_, '_> {
+    /// Prefix of the element ids of `view`.
+    fn anchor(&self, view: ViewKind) -> String {
+        format!("{}{}", self.ids, view.prefix())
+    }
+
     fn side(&self, side: Side) -> &SideText<'_> {
         let s = if side == Side::Left {
             &self.src.left
@@ -332,7 +603,11 @@ impl Ctx<'_, '_> {
     fn view(&self, view: ViewKind, budget: usize, flags: &mut Flags) -> (String, bool) {
         let mut out = String::new();
         let cols = view.columns();
-        out.push_str("<table class=\"diff\">\n<colgroup>");
+        out.push_str(if self.embedded {
+            "<table class=\"diff emb\">\n<colgroup>"
+        } else {
+            "<table class=\"diff\">\n<colgroup>"
+        });
         match view {
             ViewKind::Split => out.push_str(
                 "<col class=\"cn\"><col class=\"cm\"><col><col class=\"cn\"><col class=\"cm\"><col>",
@@ -376,7 +651,7 @@ impl Ctx<'_, '_> {
             let _ = writeln!(
                 out,
                 "<tbody id=\"{}h{}\"><tr class=\"hh\"><th colspan=\"{cols}\" scope=\"rowgroup\">@@ -{} +{} @@<span class=\"sr\"> hunk {}</span></th></tr>",
-                view.prefix(),
+                self.anchor(view),
                 i + 1,
                 header_range((l, ln)),
                 header_range((r, rn)),
@@ -590,6 +865,12 @@ impl Ctx<'_, '_> {
         let ranges = if tag.is_empty() {
             Vec::new()
         } else {
+            // A moved line shows the spans of its move, every other changed
+            // line those of its op (spec §6.5). Spans off the line are
+            // ignored either way.
+            let spans = moved
+                .and_then(|(index, _)| self.moves.spans(index))
+                .unwrap_or(spans);
             byte_ranges(
                 content,
                 spans.on(side == Side::Right, line as u64 + 1),
@@ -617,7 +898,7 @@ impl Ctx<'_, '_> {
         let Some(&(_, kind, l, r)) = self.moves.get(index) else {
             return;
         };
-        let p = view.prefix();
+        let p = self.anchor(view);
         let n = index + 1;
         let edited = if kind == MoveKind::Edited {
             ", edited"
@@ -641,13 +922,7 @@ impl Ctx<'_, '_> {
 
     fn header(&self, out: &mut String, flags: &mut Flags, truncated: bool, options: &HtmlOptions) {
         let doc = self.doc;
-        out.push_str("<p class=\"files\">");
-        plain(out, doc.left.name.as_deref().unwrap_or("left"), flags);
-        out.push_str(
-            " <span aria-hidden=\"true\">→</span><span class=\"sr\">compared with</span> ",
-        );
-        plain(out, doc.right.name.as_deref().unwrap_or("right"), flags);
-        out.push_str("</p>\n");
+        files_line(out, doc, flags);
         match doc.status {
             Status::Identical => {
                 out.push_str("<p class=\"status st-identical\"><strong>Identical.</strong> No changes under the selected options.");
@@ -656,7 +931,7 @@ impl Ctx<'_, '_> {
                 }
                 out.push_str("</p>\n");
             }
-            Status::Error => out.push_str("<p class=\"status st-error\"><strong>Error.</strong> The comparison could not be completed; see the warnings below.</p>\n"),
+            Status::Error => out.push_str(ERROR_STATUS),
             _ => {
                 out.push_str("<p class=\"status st-different\"><strong>Different.</strong>");
                 if let Some(s) = &doc.stats {
@@ -677,11 +952,7 @@ impl Ctx<'_, '_> {
         if truncated {
             out.push_str("<p class=\"notice\" role=\"note\"><strong>Truncated.</strong> This report reached its size limit; not every hunk is shown.</p>\n");
         }
-        if flags.bidi {
-            out.push_str("<p class=\"notice\" role=\"note\"><strong>Bidirectional control characters.</strong> The content holds characters that can reorder how text is displayed (as in Trojan Source attacks). They are shown as labels such as <span class=\"inv\">RLO</span> and have no effect here.</p>\n");
-        } else if flags.invisible {
-            out.push_str("<p class=\"notice\" role=\"note\"><strong>Invisible characters.</strong> The content holds control or zero-width characters. They are shown as labels such as <span class=\"inv\">ZWSP</span>.</p>\n");
-        }
+        char_notices(out, flags);
         if flags.long_lines {
             let _ = writeln!(
                 out,
@@ -700,7 +971,7 @@ impl Ctx<'_, '_> {
             "</ul>\n"
         ));
         self.details(out, flags, options);
-        self.warnings(out);
+        warnings_section(out, &doc.warnings);
         self.moves_list(out);
     }
 
@@ -822,37 +1093,11 @@ impl Ctx<'_, '_> {
         parts.join(", ")
     }
 
-    fn warnings(&self, out: &mut String) {
-        if self.doc.warnings.is_empty() {
-            return;
-        }
-        out.push_str("<section aria-labelledby=\"warnings-h\">\n<h2 id=\"warnings-h\">Warnings</h2>\n<ul class=\"warnings\">\n");
-        for w in &self.doc.warnings {
-            let (class, label) = if w.severity == Severity::Error {
-                ("sev-error", "Error")
-            } else {
-                ("sev-warning", "Warning")
-            };
-            let _ = write!(out, "<li class=\"{class}\"><strong>{label}</strong> <code>");
-            push_escaped(out, w.code.as_str());
-            out.push_str("</code>");
-            match w.side {
-                Some(Side::Left) => out.push_str(" (left)"),
-                Some(Side::Right) => out.push_str(" (right)"),
-                _ => {}
-            }
-            out.push_str(": ");
-            push_escaped(out, &text::escape_controls(&w.message));
-            out.push_str("</li>\n");
-        }
-        out.push_str("</ul>\n</section>\n");
-    }
-
     fn moves_list(&self, out: &mut String) {
         if self.moves.list.is_empty() {
             return;
         }
-        let p = self.first_view.prefix();
+        let p = self.anchor(self.first_view);
         out.push_str("<section aria-labelledby=\"moves-h\">\n<h2 id=\"moves-h\">Moved blocks</h2>\n<ol class=\"moves\">\n");
         for &(index, kind, l, r) in self.moves.list.iter().take(MAX_LISTED_MOVES) {
             let n = index + 1;
@@ -1030,7 +1275,7 @@ fn close(out: &mut String, (span, trail): (bool, bool), tag: &str) {
 }
 
 /// Writes text escaped, with invisible characters as labels.
-fn plain(out: &mut String, s: &str, flags: &mut Flags) {
+pub(crate) fn plain(out: &mut String, s: &str, flags: &mut Flags) {
     for c in s.chars() {
         push_char(out, c, flags);
     }

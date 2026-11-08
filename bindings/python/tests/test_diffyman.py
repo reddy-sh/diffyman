@@ -23,7 +23,7 @@ GROUPS = ("text", "moved", "binary", "tree")
 LEFT = b"apple\nbanana\ncherry\ndate\nelderberry\n"
 RIGHT = b"apple\nblueberry\ncherry\ndate\nelderberry\nfig"
 # Diff Document spec section 14: the worked example (unnamed inputs give a different id).
-WORKED_EXAMPLE_ID = "sha256:3f3cc30959bd88671f71e392eb77fe668a9eef4400e34400af62a76dd22ac80b"
+WORKED_EXAMPLE_ID = "sha256:f221a785d0e51a6a0ab0887619d144522fd921910db3b2460b4865712f8de99e"
 
 
 def without_provenance(doc: dict[str, Any]) -> dict[str, Any]:
@@ -49,7 +49,7 @@ def only(case: pathlib.Path, stem: str) -> pathlib.Path:
 
 
 def test_versions() -> None:
-    assert diffyman.SCHEMA_VERSION == "0.3.0"
+    assert diffyman.SCHEMA_VERSION == "0.4.0"
     assert diffyman.__version__ == diffyman.ENGINE_VERSION
     assert diffyman.ENGINE_VERSION
 
@@ -214,3 +214,55 @@ def test_folders_and_archives_give_tree_documents(tmp_path: pathlib.Path) -> Non
     )
     assert archive["kind"] == "tree"
     assert archive["left"]["name"] is None
+
+
+def test_max_input_size_bounds_path_inputs(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "old.txt").write_bytes(LEFT)
+    (tmp_path / "new.txt").write_bytes(RIGHT)
+    limit = max(len(LEFT), len(RIGHT))
+    doc = diffyman.diff_document(
+        tmp_path / "old.txt", tmp_path / "new.txt", max_input_size=limit
+    )
+    assert doc["status"] == "different"
+    with pytest.raises(OSError, match="^limit-exceeded: "):
+        diffyman.diff(tmp_path / "old.txt", tmp_path / "new.txt", max_input_size=limit - 1)
+    # Bytes and str inputs are already in memory: the limit is for paths only.
+    assert diffyman.diff_document(LEFT, RIGHT, max_input_size=0)["status"] == "different"
+    for bad in (-1, 1.5, True, "10"):
+        with pytest.raises((TypeError, ValueError)):
+            diffyman.diff(LEFT, RIGHT, max_input_size=bad)  # type: ignore[arg-type]
+
+
+def test_max_input_size_bounds_folder_diffs(tmp_path: pathlib.Path) -> None:
+    folder = tmp_path / "folder"
+    folder.mkdir()
+    (folder / "a.txt").write_bytes(LEFT)
+    archive = tmp_path / "big.zip"
+    archive.write_bytes(b"\0" * 4096)
+    with pytest.raises(OSError, match="^limit-exceeded: "):
+        diffyman.diff(folder, archive, max_input_size=1024)
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "mkfifo"), reason="needs named pipes")
+def test_pipes_are_read_up_to_the_limit(tmp_path: pathlib.Path) -> None:
+    import os
+
+    fifo = tmp_path / "endless"
+    os.mkfifo(fifo)
+
+    def write_more_than_the_limit() -> None:
+        # Writes until the reader closes the pipe (BrokenPipeError) or 1 MiB is out.
+        try:
+            with open(fifo, "wb") as pipe:
+                for _ in range(256):
+                    pipe.write(b"x" * 4096)
+        except BrokenPipeError:
+            pass
+
+    writer = threading.Thread(target=write_more_than_the_limit, daemon=True)
+    writer.start()
+    with pytest.raises(OSError, match="^limit-exceeded: "):
+        diffyman.diff(fifo, tmp_path / "missing-is-never-read", max_input_size=64 * 1024)
+    writer.join(timeout=10)
+    assert not writer.is_alive()
+    assert diffyman.MAX_STREAM_BYTES == 1 << 32

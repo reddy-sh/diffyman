@@ -2030,6 +2030,50 @@ retry_count = 5
 )
 
 
+GO_SYNC_HEAD = b("""
+func Sync(src, dst Store) error {
+""")
+GO_SYNC_TAIL = b("""
+  }
+  log.Printf("synced %d items", len(items))
+  return nil
+}
+""")
+case(
+    "047-neg-reindented-check-whitespace-change",
+    [("a", GO_SYNC_HEAD), ("list_l", b("""
+  items, err := src.List()
+""")), ("check", b("""
+  if err != nil {
+    return err
+  }
+""")), ("loop", b("""
+  for _, item := range items {
+""")), ("put_l", b("""
+    dst.Put(item)
+""")), ("c", GO_SYNC_TAIL)],
+    [("a", GO_SYNC_HEAD), ("list_r", b("""
+  items := src.ListCached()
+""")), ("loop", b("""
+  for _, item := range items {
+""")), ("put_r", b("""
+    err := dst.Put(item)
+""")), ("check", b("""
+    if err != nil {
+      return err
+    }
+""")), ("c", GO_SYNC_TAIL)],
+    [],
+    "The inputs of 040 under ignore.whitespace change. The error check now compares "
+    "equal although it moved into the loop with a deeper indent, so the line diff keeps "
+    "it in place, and the loop header with the Put call (which kept their indentation) "
+    "end up deleted below it and inserted above it, like an edited move. The check is "
+    "the block that changed scope, and it is below the move minimum: moves spec 4.5 "
+    "(re-indented swaps) reports no move.",
+    ignore={"whitespace": "change"},
+)
+
+
 # ---------------------------------------------------------------------------
 # Writer
 # ---------------------------------------------------------------------------
@@ -2067,6 +2111,9 @@ def write_case(entry: dict) -> dict:
         (directory / f"{side}.txt").write_bytes(data)
     options = json.loads(json.dumps(OPTIONS))
     options["ignore"].update(entry["ignore"])
+    if any(kind == "edited" for _, _, kind in entry["moves"]):
+        # Edited moves carry inline spans (moves spec 4.7), shown with smart.
+        options["granularity"] = "smart"
     (directory / "options.json").write_text(json.dumps(options, indent=2) + "\n", encoding="utf-8")
     labels = {"moves": moves, "notes": entry["notes"]}
     (directory / "labels.json").write_text(

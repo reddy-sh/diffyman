@@ -1,0 +1,4 @@
+left.bin -> right.bin: different, 1 changed range, +16 -0 bytes, 99.81% similar
+  left:     application/octet-stream, 4096 bytes
+  right:    application/octet-stream, 4112 bytes
+  bytes:    16 added, 0 removed, 4096 unchanged

@@ -27,7 +27,7 @@ The exit codes are stable.
 |---|---|---|
 | 0 | The inputs are identical under the resolved options | Success |
 | 1 | The inputs differ, or a tree is `partial` (some content could not be compared, spec §19.6) | Not used |
-| 2 | Error: bad arguments, an unreadable file, invalid options, a document with `status: "error"`, or a format that does not apply (HTML for a binary or tree document) | Error |
+| 2 | Error: bad arguments, an unreadable file, invalid options, or a document with `status: "error"` | Error |
 
 "Identical" follows the options: two files that differ only in ignored whitespace, case, masked text or blank lines exit with 0. Compare the `sha256` fields of `--json` output to test byte equality.
 
@@ -38,16 +38,17 @@ The exit codes are stable.
 | `text` (default) | `-f text` | Unified diff; control, bidi-control and invisible characters in content shown as `<ESC>`, `<RLO>`, `<ZWSP>` and so on | `Binary files a/x and b/y differ` | One `git diff --name-status` line per changed entry: `A`, `D`, `M`, `T`, `R old new` |
 | `unified` | `-f unified` | Unified diff that `patch` and `git apply` accept; bytes unchanged (CRLF, no final newline, BOM) | `Binary files a/x and b/y differ` | For two folders, a patch per modified text file (`--- a/<path>`, `+++ b/<path>`); one line for every other change (`Only in <side>: <path>`, `Moved <old> to <new>`, `Type changed <path>: file to directory`, `Files a/<path> and b/<path> differ`), which `patch` and `git apply` skip |
 | `json` | `-f json`, `--json` | The canonical (RFC 8785) Diff Document on one line, then a newline. `--pretty` indents it instead | same | same |
-| `html` | `-f html` | One self-contained HTML page (inline CSS, no script, no external resource) with side-by-side and inline views | exit code 2 | exit code 2 |
+| `html` | `-f html` | One self-contained HTML page (inline CSS, no script, no external resource) with side-by-side and inline views | The changed byte ranges (offset, length, change) with a hex dump of both sides of each, media types and sizes | A table of the changed entries (status, path, type and size of both sides, short SHA-256, renames), the unchanged ones collapsed, folder and archive warnings flagged at the top, and each modified entry's child document inline in a collapsible section |
 | `summary` | `-f summary` | A verdict line and stats lines | same | same, with entry counts |
 | NDJSON | `--json-stream` | One canonical JSON object per line: each element of `hunks` | each element of `bytes` | each element of `tree.entries` |
 
 - An identical pair prints nothing in the `text` and `unified` formats, like `diff`.
 - Warnings and errors from the document go to standard error as `diffyman: warning: ...` and `diffyman: error: ...` in the `text`, `unified`, `html` and `--json-stream` formats. The `summary` lists their codes, and JSON carries them in `warnings`.
-- A document with `status: "error"` prints nothing in the `text` and `unified` formats; its errors go to standard error and the exit code is 2. `--json` still prints the document.
+- A document with `status: "error"` prints nothing in the `text` and `unified` formats; its errors go to standard error and the exit code is 2. `--json` still prints the document, and `html` a report that lists the errors.
 - `--json-stream` writes the same objects as the `--json` document, in the same order, each canonical on its own line. It prints nothing for an identical pair or an error document; the exit code tells which.
 - Unified output: `--- a/<left name>` and `+++ b/<right name>` headers, GNU hunk headers (`@@ -3 +3 @@`), and context lines taken from the left file, so a patch made under an ignore option still applies to the left file. Names with control or bidi characters are quoted like git does.
-- For two archives, the unified format lists changes but cannot show the content of a modified entry; `--json` has each entry's child document.
+- For two archives, the unified format lists changes but cannot show the content of a modified entry (`Files a/<path> and b/<path> differ`), and the HTML report lists a modified text entry's hunks by line number and a binary entry's byte ranges without a hex dump. The engine holds an archive entry's bytes only while it computes that entry's child document; getting them back would mean listing the archive again, which inflates and hashes every entry (as much work as the comparison itself) and decompresses a compressed tar once more. `--json` has each entry's child document. For two folders, both formats read the modified files back from disk (at most 64 MiB each, the child input limit) and check their size and SHA-256 against the document.
+- HTML limits: the report stops adding rows near 8 MiB and says so, shows at most 64 KiB of hex dump (256 bytes per side of one range), reads at most 256 MiB of entry content, and shows child documents down to 4 levels of nesting. Names, paths, link targets and content are escaped, and control, invisible and bidi-control characters are shown as labels such as `RLO`.
 - `-o, --output <FILE>` writes to a file instead of standard output. The file is created only after the inputs have been compared, and an output that is one of the input files (by any path, including a hard link) is an error (exit code 2) that leaves the input untouched. `textconv -o` follows the same rule.
 
 ### Color
@@ -56,7 +57,7 @@ The exit codes are stable.
 
 ## Options
 
-Every diff option of the [spec, §9](spec/diff-document.md#9-options) can be given in a JSON file with `--options <FILE>` (see `diffyman schema --options`). The common ones also have flags. A flag replaces the file's value for its key; `--ignore-regex` and `--exclude` append to the file's list. The combined options go through the same rules as the JSON form, so an invalid value is an error (exit code 2) whichever way it was given.
+Every diff option of the [spec, §9](spec/diff-document.md#9-options) can be given in a JSON file with `--options <FILE>` (see `diffyman schema --options`). The common ones also have flags. A flag replaces the file's value for its key; `--ignore-regex` and `--exclude` append to the file's list. The combined options go through the same rules as the JSON form, so an invalid value is an error (exit code 2) whichever way it was given. The file must be valid JSON of at most 1 MiB, and a key given twice in one object is an error (`invalid options: ...: duplicate key "..."`). Error messages show control and bidi-control characters from paths or keys as `\u{..}` escapes.
 
 | Flag | Options key |
 |---|---|
@@ -82,6 +83,7 @@ Every diff option of the [spec, §9](spec/diff-document.md#9-options) can be giv
 - A folder on either side gives a tree document (spec §19); its other side must be a folder or an archive. Two archives (zip, tar, tar.gz, tar.zst, recognized from their first bytes) also give a tree. Archives are read in memory and never extracted.
 - Other pairs are detected as text or binary from their content (spec §16).
 - Regular files are memory-mapped, so large inputs stay in the file cache instead of the process heap; `--no-mmap`, pipes and special files are read instead. The engine's limits apply in full (spec §7, §17, §19.6): an input over a limit gives a `limit-exceeded` error or a `tree-limit` warning, never a crash.
+- Reading is bounded (spec §19.1, reading paths). A pipe, a device or `/dev/stdin` is read up to 4 GiB, so an endless source such as `/dev/zero` stops there; a regular file is read whole, except the archive side of a folder diff, which is read (not mapped) and only up to 4 GiB, the archive limit (a larger file is refused by its size). `--max-input-size <SIZE>` (bytes, or with a `K`, `M`, `G` or `T` suffix in powers of 1024) sets one limit for every input file, the archive side of a folder diff and the `textconv` input; a regular file over it is refused by its size before it is read or mapped. An input over the limit is an error, `diffyman: error: limit-exceeded: <path> is larger than <N> bytes`, with exit code 2 and no document.
 
 ## Examples
 
@@ -226,7 +228,7 @@ Options:
           - text:    Unified diff for people: control and bidi characters in content are shown as `<ESC>`-style markers; folders and archives give one `git diff --name-status` line per changed entry
           - unified: Unified diff that `patch` and `git apply` accept, bytes unchanged; folders give one patch per changed text file
           - json:    The canonical (RFC 8785) Diff Document
-          - html:    One self-contained HTML report (text documents only)
+          - html:    One self-contained HTML report: line views for text, changed byte ranges with hex dumps for binary files, an entries table with each modified entry's changes for folders and archives
           - summary: A verdict line and stats
 
       --json
@@ -305,6 +307,9 @@ Options:
 
       --no-mmap
           Read input files into memory instead of memory-mapping them
+
+      --max-input-size <SIZE>
+          Largest input file to read, in bytes or with a K, M, G or T suffix (powers of 1024). A larger one is an error (exit code 2). Without it, regular files have no limit and pipes, devices and standard input are read up to 4G
 
   -h, --help
           Print help (see a summary with '-h')
@@ -335,7 +340,7 @@ Options:
           - text:    Unified diff for people: control and bidi characters in content are shown as `<ESC>`-style markers; folders and archives give one `git diff --name-status` line per changed entry
           - unified: Unified diff that `patch` and `git apply` accept, bytes unchanged; folders give one patch per changed text file
           - json:    The canonical (RFC 8785) Diff Document
-          - html:    One self-contained HTML report (text documents only)
+          - html:    One self-contained HTML report: line views for text, changed byte ranges with hex dumps for binary files, an entries table with each modified entry's changes for folders and archives
           - summary: A verdict line and stats
 
       --json
@@ -414,6 +419,9 @@ Options:
 
       --no-mmap
           Read input files into memory instead of memory-mapping them
+
+      --max-input-size <SIZE>
+          Largest input file to read, in bytes or with a K, M, G or T suffix (powers of 1024). A larger one is an error (exit code 2). Without it, regular files have no limit and pipes, devices and standard input are read up to 4G
 
   -h, --help
           Print help (see a summary with '-h')
@@ -479,6 +487,9 @@ Options:
 
       --no-mmap
           Read the input into memory instead of memory-mapping it
+
+      --max-input-size <SIZE>
+          Largest input to read, in bytes or with a K, M, G or T suffix (powers of 1024). A larger one is an error (exit code 2). Without it, regular files have no limit and pipes, devices and standard input are read up to 4G
 
   -h, --help
           Print help (see a summary with '-h')

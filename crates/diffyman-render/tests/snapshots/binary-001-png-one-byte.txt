@@ -1,0 +1,4 @@
+left.png -> right.png: different, 1 changed range, +1 -1 bytes, 99.91% similar
+  left:     image/png, 1108 bytes
+  right:    image/png, 1108 bytes
+  bytes:    1 added, 1 removed, 1107 unchanged

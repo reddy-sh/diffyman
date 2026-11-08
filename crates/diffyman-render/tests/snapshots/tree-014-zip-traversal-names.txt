@@ -1,0 +1,5 @@
+left.zip -> right.zip: different, 11 changed entries (11 removed), 15.38% similar
+  left:     application/zip, 12 entries, 561 bytes
+  right:    application/zip, 1 entry, 119 bytes
+  entries:  0 added, 11 removed, 0 modified, 0 moved, 0 type changes, 1 unchanged
+  warnings: unsafe-path (left)

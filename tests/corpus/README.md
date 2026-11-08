@@ -10,13 +10,13 @@ it follows are [`docs/spec/diff-document.md`](../../docs/spec/diff-document.md)
 
 ```
 tests/corpus/
-  text/NNN-slug/       41 text conformance cases
+  text/NNN-slug/       43 text conformance cases
     left.<ext>         left input, byte-exact
     right.<ext>        right input, byte-exact
     options.json       options object (diff-document.md section 9)
     case.md            one paragraph: what the case tests, what a correct result shows
     expected.json      golden Diff Document (added later, see below)
-  moved/NNN-slug/      45 labeled moved-block cases
+  moved/NNN-slug/      47 labeled moved-block cases
     left.txt
     right.txt
     options.json       same shape, with "detectMoves": true
@@ -28,7 +28,7 @@ tests/corpus/
     options.json
     case.md
     expected.json
-  tree/NNN-slug/       27 folder and archive cases (diff-document.md section 19)
+  tree/NNN-slug/       29 folder and archive cases (diff-document.md section 19)
     left/ or left.<ext>    a folder, or an archive (zip, tar, tar.gz, tar.zst) or file
     right/ or right.<ext>
     options.json
@@ -157,7 +157,9 @@ These consequences of schema 0.3.0 are deliberate:
 - `text/036-blank-lines-ignored` runs the inputs of 026 with
   `ignore.blankLines: true` and is `identical`; `text/037-blank-lines-near-changes`
   shows `ignored` ops inside hunks next to real changes (section 7.3 step 3
-  and 7.4).
+  and 7.4); in `text/043-blank-lines-slider-merge` slider compaction joins a
+  blank deletion to a real one, so the blank line is counted, as in git
+  (section 7.3.1 rule 4).
 - Every `moved/` case sets `"detectMoves": true` and has a golden
   `expected.json` with real `moves[]` (`text.moves@1`). Separately, the
   runner scores the predicted moves against `labels.json` (moves spec section
@@ -165,11 +167,14 @@ These consequences of schema 0.3.0 are deliberate:
   metrics pass. `detectMoves` is the only move option (diff-document.md
   section 9): the detected kinds follow the moves algorithm ID, and move keys
   follow `ignore.regex` and `ignore.whitespace` (moves spec section 4.4).
-  Every moved case uses `ignore.whitespace: "none"`, so indentation changes
-  are allowed with a constant delta and the rest of each line must match
-  exactly; `moved/042-pure-masked-timestamps` is the only one with
-  `ignore.regex`, and `moved/044-pure-crlf-conversion` the only one whose
-  sides use different terminators (LF left, CRLF right).
+  Every labeled moved case uses `ignore.whitespace: "none"`, so indentation
+  changes are allowed with a constant delta and the rest of each line must
+  match exactly; `moved/042-pure-masked-timestamps` and
+  `moved/046-edited-indent-masked-utf16` use `ignore.regex`, and
+  `moved/044-pure-crlf-conversion` is the only one whose sides use different
+  terminators (LF left, CRLF right). The negative case
+  `moved/047-neg-reindented-check-whitespace-change` runs the inputs of 040
+  under `ignore.whitespace: "change"` (re-indented swaps, moves spec 4.5).
 
 ## Labels
 
@@ -208,10 +213,10 @@ standing in for word segments.
 | of which several moves (zebra) | 011, 012, 013 | 3 |
 | Long single-line moves | 019-021 | 3 |
 | Indentation changes | 022-025 | 4 |
-| Edited moves (one with a line over 256 graphemes) | 026-031, 041, 043 | 8 |
-| Negative (`moves: []`): trivial lines, braces, short blocks, a short single line, delete plus unrelated insert, copies, duplicated text, in-place rewrite, repeated short lines, a config section whose values all changed | 032-040, 045 | 10 |
+| Edited moves (one with a line over 256 graphemes, one with word spans in UTF-16 offsets) | 026-031, 041, 043, 046 | 9 |
+| Negative (`moves: []`): trivial lines, braces, short blocks, a short single line, delete plus unrelated insert, copies, duplicated text, in-place rewrite, repeated short lines, a config section whose values all changed, a re-indented check under `ignore.whitespace: "change"` | 032-040, 045, 047 | 11 |
 
-That is 45 cases with 39 labeled moves (31 pure, 8 edited). Edited cases are
+That is 47 cases with 40 labeled moves (31 pure, 9 edited). Edited cases are
 built so that no unchanged run inside the block meets the pure minimum size,
 so the only sensible answer is one edited block; 041 is the exception that
 tests joining such pieces.

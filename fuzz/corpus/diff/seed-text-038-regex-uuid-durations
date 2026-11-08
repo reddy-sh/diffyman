@@ -1,4 +1,4 @@
-Y{
+ü{
   "algorithm": "histogram",
   "granularity": "line",
   "ignore": {
@@ -13,7 +13,15 @@ Y{
   "context": 1,
   "positionEncoding": "utf-8",
   "detectMoves": false,
-  "adapter": "auto"
+  "adapter": "auto",
+  "tree": {
+    "followSymlinks": false,
+    "ignoreFiles": false,
+    "exclude": [],
+    "detectMoves": true,
+    "maxDepth": 3,
+    "childBudget": 16777216
+  }
 }
 ~GET /api/orders 200 req=3f2b8c1e-9a4d-4e7b-8c21-5d6f7a8b9c0d in 12 ms
 GET /api/orders/17 200 req=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d in 8 ms

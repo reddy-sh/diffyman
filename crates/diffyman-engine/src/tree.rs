@@ -6,37 +6,30 @@ use diffyman_adapter_tree::{
     ListOptions, Listing, PairStatus, Source,
 };
 pub(crate) use diffyman_adapter_tree::{LIBRARY_VERSIONS, TREE_ID, archive_format};
-use diffyman_algo::key::KeyBuilder;
 use diffyman_model::{
     Adapter, ChildDocument, EntrySide, EntryStatus, EntryType, FileMeta, Kind, Options, Side,
     Stats, Status, Tree, TreeEntry, TreeStats, Warning, WarningCode,
 };
 use serde_json::Value;
 
+use crate::context::Context;
 use crate::{Input, empty_document, finish_warnings, has_error, similarity};
 
-/// What a whole top-level diff shares, down through its child documents.
-pub(crate) struct Context {
-    /// 0 for the top-level document, plus 1 per child level (spec §19.5).
-    pub depth: u32,
+/// The archive limits and budgets of one top-level diff.
+pub(crate) struct TreeState {
     /// What is left of each side's archive content budget (spec §19.6).
     budget: [u64; 2],
     /// What is left of `tree.childBudget`.
     child_budget: u64,
     limits: Limits,
-    /// The comparison keys of the text options, unless they failed.
-    pub key_builder: Option<KeyBuilder>,
-    /// Option errors, which apply whatever the kind (spec §9).
-    pub option_warnings: Vec<Warning>,
     exclude: Option<Exclude>,
 }
 
-impl Context {
-    /// Compiles the options once for the whole diff.
-    pub fn new(options: &Options) -> Context {
+impl TreeState {
+    /// The full budgets, and `tree.exclude` compiled; its errors go to
+    /// `option_warnings` (spec §19.2).
+    pub fn new(options: &Options, option_warnings: &mut Vec<Warning>) -> TreeState {
         let limits = Limits::default();
-        let mut option_warnings = Vec::new();
-        let key_builder = crate::key_builder(options, &mut option_warnings);
         let exclude = match Exclude::new(&options.tree.exclude) {
             Ok(exclude) => exclude,
             Err(e) => {
@@ -49,26 +42,22 @@ impl Context {
                 None
             }
         };
-        Context {
-            depth: 0,
+        TreeState {
             budget: [limits.content_budget; 2],
             child_budget: u64::from(options.tree.child_budget),
             limits,
-            key_builder,
-            option_warnings,
             exclude,
         }
     }
+}
 
-    /// [`Context::new`] with other limits (for tests).
-    #[cfg(test)]
-    pub fn with_limits(options: &Options, limits: Limits) -> Context {
-        Context {
-            budget: [limits.content_budget; 2],
-            limits,
-            ..Context::new(options)
-        }
-    }
+/// [`Context::new`] with other limits (for tests).
+#[cfg(test)]
+pub(crate) fn context_with_limits(options: &Options, limits: Limits) -> Context {
+    let mut ctx = Context::new(options);
+    ctx.tree.budget = [limits.content_budget; 2];
+    ctx.tree.limits = limits;
+    ctx
 }
 
 /// One side of a tree: its source (`None` when it is not an archive) and
@@ -257,14 +246,19 @@ pub(crate) fn tree_document(
         let list_options = ListOptions {
             follow_symlinks: options.tree.follow_symlinks,
             ignore_files: options.tree.ignore_files,
-            exclude: ctx.exclude.as_ref(),
+            exclude: ctx.tree.exclude.as_ref(),
         };
         for i in 0..2 {
             let Some(source) = &sources[i] else {
                 warnings.push(Warning::new(WarningCode::InvalidArchive, Some(side_of(i))));
                 continue;
             };
-            match adapter::list(source, &list_options, &ctx.limits, &mut ctx.budget[i]) {
+            match adapter::list(
+                source,
+                &list_options,
+                &ctx.tree.limits,
+                &mut ctx.tree.budget[i],
+            ) {
                 Ok(listing) => listings[i] = Some(listing),
                 Err(ListError::Invalid) => {
                     warnings.push(Warning::new(WarningCode::InvalidArchive, Some(side_of(i))));
@@ -420,15 +414,17 @@ fn children(
     if candidates.is_empty() {
         return (out, false);
     }
-    if reserve > ctx.child_budget {
+    if reserve > ctx.tree.child_budget {
         // The holder does not fit even without children: none is computed.
         return (out, true);
     }
-    ctx.child_budget -= reserve;
+    ctx.tree.child_budget -= reserve;
     let wanted_left: Vec<usize> = candidates.iter().map(|c| c.1).collect();
     let wanted_right: Vec<usize> = candidates.iter().map(|c| c.2).collect();
-    let mut left_contents = Contents::open(left_source, listings[0], &wanted_left, &ctx.limits);
-    let mut right_contents = Contents::open(right_source, listings[1], &wanted_right, &ctx.limits);
+    let mut left_contents =
+        Contents::open(left_source, listings[0], &wanted_left, &ctx.tree.limits);
+    let mut right_contents =
+        Contents::open(right_source, listings[1], &wanted_right, &ctx.tree.limits);
     let child_options = Options {
         adapter: match options.adapter {
             Adapter::Tree => Adapter::Auto,
@@ -447,7 +443,7 @@ fn children(
     ];
     let mut omitted = false;
     for (k, li, ri) in candidates {
-        if ctx.child_budget < min_child {
+        if ctx.tree.child_budget < min_child {
             omitted = true;
             continue;
         }
@@ -455,23 +451,23 @@ fn children(
         // Reading archive content again counts against the side's content
         // budget like the listing did (spec §19.6).
         let sizes = [le.size.unwrap_or(0), re.size.unwrap_or(0)];
-        if (0..2).any(|i| archives[i] && sizes[i] > ctx.budget[i]) {
+        if (0..2).any(|i| archives[i] && sizes[i] > ctx.tree.budget[i]) {
             omitted = true;
             continue;
         }
         for i in 0..2 {
             if archives[i] {
-                ctx.budget[i] -= sizes[i];
+                ctx.tree.budget[i] -= sizes[i];
             }
         }
         let (Some(left_bytes), Some(right_bytes)) = (
-            left_contents.get(le, &ctx.limits),
-            right_contents.get(re, &ctx.limits),
+            left_contents.get(le, &ctx.tree.limits),
+            right_contents.get(re, &ctx.tree.limits),
         ) else {
             omitted = true;
             continue;
         };
-        let saved = ctx.child_budget;
+        let saved = ctx.tree.child_budget;
         ctx.depth += 1;
         let mut child = crate::document(
             Input::named(&left_bytes, basename(&le.path)),
@@ -482,7 +478,7 @@ fn children(
         ctx.depth -= 1;
         // Nested children drew from the budget; the child's own size,
         // which includes them, is what counts.
-        ctx.child_budget = saved;
+        ctx.tree.child_budget = saved;
         drop((left_bytes, right_bytes));
         let Ok(id) = diffyman_model::compute_id(&child) else {
             omitted = true;
@@ -492,13 +488,13 @@ fn children(
         let child = ChildDocument::from(child);
         match canonical_len(|c| diffyman_model::jcs::to_canonical_writer(&child, c)) {
             Some(size) if size <= saved => {
-                ctx.child_budget = saved - size;
+                ctx.tree.child_budget = saved - size;
                 out[k] = Some(Box::new(child));
             }
             _ => omitted = true,
         }
     }
-    ctx.child_budget += reserve;
+    ctx.tree.child_budget += reserve;
     (out, omitted)
 }
 
@@ -519,6 +515,12 @@ fn basename(path: &str) -> &str {
 /// be a folder or an archive; anything else is an `invalid-archive` error
 /// document. A path that cannot be read is [`crate::Error::Io`].
 ///
+/// Files are read with the default rule of [`crate::read_path`]: a regular
+/// file whole, a pipe or device up to [`crate::MAX_STREAM_BYTES`]. A file
+/// paired with a folder is read only up to the 4 GiB archive limit (spec
+/// §19.6); a larger one is [`crate::Error::Io`] (`limit-exceeded: ...`),
+/// refused by its size before it is read.
+///
 /// Feature `fs` (on by default, off for WASM).
 #[cfg(feature = "fs")]
 pub fn diff_paths(
@@ -527,11 +529,26 @@ pub fn diff_paths(
     options: &Options,
     settings: &crate::Settings,
 ) -> Result<diffyman_model::DiffDocument, crate::Error> {
-    use crate::Error;
+    diff_paths_with_limit(left, right, options, settings, None)
+}
+
+/// Like [`diff_paths`], with the read limit of each file that is not a
+/// folder (spec §19.1): `None` for the default rule of [`crate::read_path`],
+/// `Some(n)` for at most `n` bytes per file (and never more than 4 GiB for a
+/// file paired with a folder). A file over the limit is
+/// [`crate::Error::Io`] (`limit-exceeded: ...`) and no document is produced.
+/// Files inside folders are not affected: they are listed by streaming and
+/// read again only up to their listed size.
+#[cfg(feature = "fs")]
+pub fn diff_paths_with_limit(
+    left: &std::path::Path,
+    right: &std::path::Path,
+    options: &Options,
+    settings: &crate::Settings,
+    limit: Option<u64>,
+) -> Result<diffyman_model::DiffDocument, crate::Error> {
     crate::validate_options(options)?;
-    let read = |p: &std::path::Path| {
-        std::fs::read(p).map_err(|e| Error::Io(format!("cannot read {}: {e}", p.display())))
-    };
+    let read = |p: &std::path::Path| crate::read_path(p, limit);
     let (left_dir, right_dir) = (left.is_dir(), right.is_dir());
     let (left_name, right_name) = (path_name(left), path_name(right));
     if !left_dir && !right_dir {
@@ -544,8 +561,19 @@ pub fn diff_paths(
         );
     }
     let timer = crate::Timer::start();
-    let lb = if left_dir { Vec::new() } else { read(left)? };
-    let rb = if right_dir { Vec::new() } else { read(right)? };
+    let archive_max = Limits::default().max_archive_bytes;
+    let read_archive =
+        |p: &std::path::Path| crate::read_path(p, Some(archive_limit(limit, archive_max)));
+    let lb = if left_dir {
+        Vec::new()
+    } else {
+        read_archive(left)?
+    };
+    let rb = if right_dir {
+        Vec::new()
+    } else {
+        read_archive(right)?
+    };
     let left_side = if left_dir {
         TreeSide::folder(left, left_name)
     } else {
@@ -559,6 +587,14 @@ pub fn diff_paths(
     let mut ctx = Context::new(options);
     let doc = tree_document(left_side, right_side, options, &mut ctx);
     crate::finish_document(doc, options, settings, &timer)
+}
+
+/// The read limit of the file paired with a folder: it is listed as an
+/// archive, which can be no larger than `archive_max` (spec §19.1, §19.6), so
+/// a larger regular file is refused by its size instead of being read whole.
+#[cfg(feature = "fs")]
+fn archive_limit(limit: Option<u64>, archive_max: u64) -> u64 {
+    limit.map_or(archive_max, |n| n.min(archive_max))
 }
 
 #[cfg(feature = "fs")]

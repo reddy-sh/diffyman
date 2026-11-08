@@ -11,6 +11,8 @@ homepage.workspace = true
 authors.workspace = true
 
 [dependencies]
+# Only for the line split (`diffyman_model::lines`).
+diffyman-model.workspace = true
 gix-imara-diff.workspace = true
 similar.workspace = true
 unicode-segmentation.workspace = true

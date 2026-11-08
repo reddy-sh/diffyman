@@ -2,4 +2,4 @@ left.txt -> right.txt: different, 2 changes in 2 hunks, +8 -8 lines, 74.19% simi
   left:     31 lines, 645 bytes, LF
   right:    31 lines, 649 bytes, LF
   lines:    8 added, 8 removed, 23 unchanged
-  moves:    1 (0 pure, 1 edited), 6 lines moved
+  moves:    1 (0 pure, 1 edited), 7 lines moved

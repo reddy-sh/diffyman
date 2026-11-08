@@ -86,11 +86,18 @@ pub struct KeyBuilder {
     whitespace: WhitespaceMode,
     fold: Option<CaseMapperBorrowed<'static>>,
     masks: Vec<Regex>,
+    /// Finds two spaces in a row (whitespace mode `change`).
+    double_space: memchr::memmem::Finder<'static>,
 }
 
 /// Applies Unicode simple case folding (CaseFolding.txt statuses C and S).
 pub fn simple_fold(c: char) -> char {
-    CaseMapper::new().simple_fold(c)
+    if c.is_ascii() {
+        // CaseFolding.txt maps only `A`–`Z` among ASCII characters.
+        c.to_ascii_lowercase()
+    } else {
+        CaseMapper::new().simple_fold(c)
+    }
 }
 
 /// States plus transitions of an NFA: a platform-independent size measure.
@@ -174,6 +181,7 @@ impl KeyBuilder {
             whitespace: options.whitespace,
             fold: options.ignore_case.then(CaseMapper::new),
             masks: compile_masks(&options.regex)?,
+            double_space: memchr::memmem::Finder::new(b"  "),
         })
     }
 
@@ -266,6 +274,10 @@ impl KeyBuilder {
     /// Appends one unmasked piece of a line. A placeholder is not whitespace:
     /// runs never cross it, and only the piece at the end of the line loses
     /// its trailing whitespace.
+    ///
+    /// One pass, straight into `out`. The whitespace characters are ASCII
+    /// bytes, which never occur inside a multi-byte UTF-8 sequence, so the
+    /// text is split at byte positions that are always character boundaries.
     fn push_text(&self, out: &mut Vec<u8>, text: &str, at_end: bool) {
         let text = if at_end {
             match self.whitespace {
@@ -277,21 +289,152 @@ impl KeyBuilder {
         } else {
             text
         };
-        let normalized = match self.whitespace {
-            WhitespaceMode::None | WhitespaceMode::Trailing => std::borrow::Cow::Borrowed(text),
-            WhitespaceMode::Change => collapse_runs(text),
-            WhitespaceMode::All => {
-                std::borrow::Cow::Owned(text.chars().filter(|c| !is_whitespace(*c)).collect())
+        let collapse = match self.whitespace {
+            WhitespaceMode::None | WhitespaceMode::Trailing => {
+                self.push_folded(out, text);
+                return;
             }
+            WhitespaceMode::Change => true,
+            WhitespaceMode::All => false,
         };
-        match self.fold {
-            Some(fold) => {
-                let mut buf = [0; 4];
-                for c in normalized.chars() {
-                    out.extend_from_slice(fold.simple_fold(c).encode_utf8(&mut buf).as_bytes());
+        let bytes = text.as_bytes();
+        if bytes.is_ascii() {
+            push_ascii_runs(
+                out,
+                bytes,
+                collapse,
+                self.fold.is_some(),
+                &self.double_space,
+            );
+            return;
+        }
+        let (mut start, mut i) = (0, 0);
+        while i < bytes.len() {
+            if is_whitespace_byte(bytes[i]) {
+                self.push_folded(out, &text[start..i]);
+                while i < bytes.len() && is_whitespace_byte(bytes[i]) {
+                    i += 1;
                 }
+                if collapse {
+                    out.push(b' ');
+                }
+                start = i;
+            } else {
+                i += 1;
             }
-            None => out.extend_from_slice(normalized.as_bytes()),
+        }
+        self.push_folded(out, &text[start..]);
+    }
+
+    /// Appends `text`, case folded when the options ask for it.
+    #[inline]
+    fn push_folded(&self, out: &mut Vec<u8>, text: &str) {
+        match self.fold {
+            Some(fold) => fold_into(fold, text, out),
+            None => out.extend_from_slice(text.as_bytes()),
+        }
+    }
+}
+
+/// True for the bytes of the whitespace characters ([`is_whitespace`]).
+#[inline]
+fn is_whitespace_byte(b: u8) -> bool {
+    matches!(b, b'\t' | 0x0B | 0x0C | b' ')
+}
+
+/// Whitespace modes `change` (`collapse`: each run becomes one space) and
+/// `all` (runs are dropped) on ASCII text, lowercased with `fold` (the
+/// simple case folding of ASCII).
+///
+/// The text is copied and lowercased in bulk first (lowercasing leaves
+/// whitespace alone), then its runs are closed up in place; the result is
+/// never longer than the text. Under `change`, text whose only whitespace is
+/// spaces (the common case) is searched for two spaces in a row
+/// (`double_space`), and each piece after such a run moves once; other text
+/// is compacted byte by byte, without branches.
+fn push_ascii_runs(
+    out: &mut Vec<u8>,
+    bytes: &[u8],
+    collapse: bool,
+    fold: bool,
+    double_space: &memchr::memmem::Finder<'_>,
+) {
+    let at = out.len();
+    out.extend_from_slice(bytes);
+    if fold {
+        out[at..].make_ascii_lowercase();
+    }
+    let dst = &mut out[at..];
+    if !collapse || memchr::memchr3(b'\t', 0x0B, 0x0C, bytes).is_some() {
+        let n = compact_runs(dst, collapse);
+        out.truncate(at + n);
+        return;
+    }
+    let (mut write, mut read) = (0, 0);
+    // `read` is 0 or just past a run, so the next two spaces in a row start
+    // the next run of two or more.
+    while let Some(found) = double_space.find(&bytes[read..]) {
+        let start = read + found;
+        let mut end = start + 2;
+        while bytes.get(end) == Some(&b' ') {
+            end += 1;
+        }
+        // Keep `read..=start` (the piece and one space), drop the rest.
+        if write != read {
+            dst.copy_within(read..=start, write);
+        }
+        write += start + 1 - read;
+        read = end;
+    }
+    if write != read {
+        dst.copy_within(read.., write);
+    }
+    write += bytes.len() - read;
+    out.truncate(at + write);
+}
+
+/// Closes up the whitespace runs of `text` in place: one space per run with
+/// `collapse`, none without. Returns the new length.
+fn compact_runs(text: &mut [u8], collapse: bool) -> usize {
+    let mut n = 0;
+    let mut in_run = false;
+    for i in 0..text.len() {
+        let b = text[i];
+        let ws = is_whitespace_byte(b);
+        text[n] = if ws { b' ' } else { b };
+        n += usize::from(!ws || (collapse && !in_run));
+        in_run = ws;
+    }
+    n
+}
+
+/// Appends the simple case folding of `text`. ASCII runs are lowercased as
+/// bytes: the only ASCII entries of CaseFolding.txt map `A`–`Z` to `a`–`z`.
+/// Other characters go through the Unicode tables. A run of non-ASCII bytes
+/// starts and ends next to an ASCII byte (or the text's ends), so it is
+/// always a whole number of characters.
+fn fold_into(fold: CaseMapperBorrowed<'static>, text: &str, out: &mut Vec<u8>) {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let start = i;
+        while i < bytes.len() && bytes[i].is_ascii() {
+            i += 1;
+        }
+        if i > start {
+            let at = out.len();
+            out.extend_from_slice(&bytes[start..i]);
+            out[at..].make_ascii_lowercase();
+        }
+        let start = i;
+        while i < bytes.len() && !bytes[i].is_ascii() {
+            i += 1;
+        }
+        if i > start {
+            let mut buf = [0; 4];
+            for c in text[start..i].chars() {
+                out.extend_from_slice(fold.simple_fold(c).encode_utf8(&mut buf).as_bytes());
+            }
         }
     }
 }
@@ -414,9 +557,13 @@ pub fn intern_sides(
 //   prefix first), found on raw bytes first and then extended by keys.
 // - Only the lines in between (the core) are interned. Token ids are a
 //   relabeling of the full-sequence ids, which the algorithms do not depend on.
-// - Keys are borrowed from the text when no option normalizes lines
-//   (`KeyBuilder::is_exact`); otherwise each distinct key is copied once into
-//   one arena. The hash table holds 8 bytes per distinct key.
+// - No key is stored. Each token remembers the first line that has it; two
+//   lines with the same raw bytes have the same key, and other lines with the
+//   same hash build both keys again to compare them. When no option
+//   normalizes lines (`KeyBuilder::is_exact`) the key is the raw bytes. The
+//   hash table holds 8 bytes per distinct key, plus 4 for its first line.
+// - Both sides' keys are built and hashed on two threads (where there are
+//   threads), then interned in order.
 // ---------------------------------------------------------------------------
 
 /// One side of a comparison: its text and line index.
@@ -596,44 +743,69 @@ struct Slot {
     hash: u32,
 }
 
-/// Where the key of each token is.
-enum KeyStore<'a> {
-    /// Raw line bytes: token `t` is the line `first[t]` (left lines first,
-    /// then right lines; both sides together have fewer than 2^32 lines).
-    Raw {
-        sides: [TextLines<'a>; 2],
-        first: Vec<u32>,
-    },
-    /// Normalized keys, one after another; token `t` ends at `ends[t]`.
-    Owned { bytes: Vec<u8>, ends: Vec<usize> },
+/// The keys of the tokens: token `t` is the key of global line `first[t]`
+/// (left lines first, then right lines; both sides together have fewer than
+/// 2^32 lines). No key is stored: two lines with the same raw bytes have the
+/// same key, and other pairs build both keys again (only when their hashes
+/// are equal, so almost only for lines whose keys are equal).
+struct LineKeys<'a> {
+    sides: [TextLines<'a>; 2],
+    first: Vec<u32>,
+    /// The key rules; `None` when no option normalizes lines, so keys are
+    /// the raw bytes.
+    builder: Option<&'a KeyBuilder>,
+    /// Scratch keys of the two lines compared.
+    bufs: (Vec<u8>, Vec<u8>),
 }
 
-impl KeyStore<'_> {
+impl<'a> LineKeys<'a> {
+    /// The raw bytes (with terminator) of global line `line`.
     #[inline]
-    fn get(&self, token: u32) -> &[u8] {
-        match self {
-            KeyStore::Raw { sides, first } => {
-                let line = first[token as usize] as usize;
-                let left_len = sides[0].len();
-                if line < left_len {
-                    sides[0].raw(line)
-                } else {
-                    sides[1].raw(line - left_len)
-                }
-            }
-            KeyStore::Owned { bytes, ends } => {
-                let t = token as usize;
-                let start = if t == 0 { 0 } else { ends[t - 1] };
-                &bytes[start..ends[t]]
-            }
+    fn raw(&self, line: u32) -> &'a [u8] {
+        let line = line as usize;
+        let left_len = self.sides[0].len();
+        if line < left_len {
+            self.sides[0].raw(line)
+        } else {
+            self.sides[1].raw(line - left_len)
         }
     }
 
+    /// Writes the key of global line `line` into `out`.
+    fn key_into(sides: &[TextLines<'_>; 2], builder: &KeyBuilder, line: u32, out: &mut Vec<u8>) {
+        let line = line as usize;
+        let left_len = sides[0].len();
+        let (side, i) = if line < left_len {
+            (sides[0], line)
+        } else {
+            (sides[1], line - left_len)
+        };
+        let l = side.line(i);
+        builder.key_into(l.content(side.text), l.terminator, out);
+    }
+
+    /// True when token `token` has the key of global line `line`, whose raw
+    /// bytes are `raw`.
+    #[inline]
+    fn same(&mut self, token: u32, line: u32, raw: &[u8]) -> bool {
+        let stored = self.first[token as usize];
+        self.raw(stored) == raw || (self.builder.is_some() && self.same_key(stored, line))
+    }
+
+    /// True when global lines `a` and `b` have the same normalized key.
+    #[inline(never)]
+    fn same_key(&mut self, a: u32, b: u32) -> bool {
+        let Some(builder) = self.builder else {
+            return false;
+        };
+        let (ka, kb) = &mut self.bufs;
+        LineKeys::key_into(&self.sides, builder, a, ka);
+        LineKeys::key_into(&self.sides, builder, b, kb);
+        ka == kb
+    }
+
     fn len(&self) -> usize {
-        match self {
-            KeyStore::Raw { first, .. } => first.len(),
-            KeyStore::Owned { ends, .. } => ends.len(),
-        }
+        self.first.len()
     }
 }
 
@@ -641,62 +813,48 @@ impl KeyStore<'_> {
 struct LineInterner<'a> {
     table: hashbrown::HashTable<Slot>,
     state: foldhash::fast::FixedState,
-    keys: KeyStore<'a>,
+    keys: LineKeys<'a>,
 }
 
 impl<'a> LineInterner<'a> {
-    fn new(exact: bool, sides: [TextLines<'a>; 2]) -> LineInterner<'a> {
+    fn new(builder: &'a KeyBuilder, sides: [TextLines<'a>; 2]) -> LineInterner<'a> {
         LineInterner {
             table: hashbrown::HashTable::new(),
             state: foldhash::fast::FixedState::with_seed(HASH_SEED),
-            keys: if exact {
-                KeyStore::Raw {
-                    sides,
-                    first: Vec::new(),
-                }
-            } else {
-                KeyStore::Owned {
-                    bytes: Vec::new(),
-                    ends: Vec::new(),
-                }
+            keys: LineKeys {
+                sides,
+                first: Vec::new(),
+                builder: (!builder.is_exact()).then_some(builder),
+                bufs: (Vec::new(), Vec::new()),
             },
         }
     }
 
-    /// The token of `key`, if it was interned.
-    fn find(&self, key: &[u8]) -> Option<u32> {
-        let h = hash32(self.state, key);
-        self.table
-            .find(spread(h), |s| s.hash == h && self.keys.get(s.token) == key)
+    /// The token of the key of global line `line` (hashed with
+    /// [`line_hash`]), if it was interned.
+    fn find(&mut self, h: u32, line: u32) -> Option<u32> {
+        let LineInterner { table, keys, .. } = self;
+        let raw = keys.raw(line);
+        table
+            .find(spread(h), |s| s.hash == h && keys.same(s.token, line, raw))
             .map(|s| s.token)
     }
 
-    /// The token of `key`, found at global line `line`.
+    /// The token of the key of global line `line`, whose [`line_hash`] is
+    /// `h`, assigning the next one if it is new.
     #[inline]
-    fn intern(&mut self, key: &[u8], line: u32) -> u32 {
-        let h = hash32(self.state, key);
-        self.intern_hashed(key, h, line)
-    }
-
-    /// Like [`LineInterner::intern`], with `h` already computed by [`hash32`].
-    #[inline]
-    fn intern_hashed(&mut self, key: &[u8], h: u32, line: u32) -> u32 {
+    fn intern_hashed(&mut self, h: u32, line: u32) -> u32 {
         let LineInterner { table, keys, .. } = self;
+        let raw = keys.raw(line);
         match table.entry(
             spread(h),
-            |s| s.hash == h && keys.get(s.token) == key,
+            |s| s.hash == h && keys.same(s.token, line, raw),
             |s| spread(s.hash),
         ) {
             hashbrown::hash_table::Entry::Occupied(e) => e.get().token,
             hashbrown::hash_table::Entry::Vacant(e) => {
                 let token = u32::try_from(keys.len()).unwrap_or(u32::MAX);
-                match keys {
-                    KeyStore::Raw { first, .. } => first.push(line),
-                    KeyStore::Owned { bytes, ends } => {
-                        bytes.extend_from_slice(key);
-                        ends.push(bytes.len());
-                    }
-                }
+                keys.first.push(line);
                 e.insert(Slot { token, hash: h });
                 token
             }
@@ -708,11 +866,31 @@ impl<'a> LineInterner<'a> {
     }
 }
 
-/// [`hash32`] of the raw bytes of each core line of both sides. The sides are
-/// hashed on two threads when they are large and the platform has threads;
-/// the values do not depend on that.
-fn exact_hashes(
+/// [`hash32`] of the key of line `i` of `lines`: of the raw bytes when no
+/// option normalizes lines, otherwise of the key built into `buf`.
+#[inline]
+fn line_hash(
     state: foldhash::fast::FixedState,
+    builder: &KeyBuilder,
+    lines: TextLines<'_>,
+    i: usize,
+    buf: &mut Vec<u8>,
+) -> u32 {
+    if builder.is_exact() {
+        hash32(state, lines.raw(i))
+    } else {
+        let l = lines.line(i);
+        builder.key_into(l.content(lines.text), l.terminator, buf);
+        hash32(state, buf)
+    }
+}
+
+/// [`line_hash`] of each core line of both sides. The sides are hashed (and
+/// their keys built) on two threads when they are large and the platform
+/// has threads; the values do not depend on that.
+fn core_hashes(
+    state: foldhash::fast::FixedState,
+    builder: &KeyBuilder,
     left: TextLines<'_>,
     right: TextLines<'_>,
     prefix: usize,
@@ -722,8 +900,12 @@ fn exact_hashes(
     #[cfg(not(target_family = "wasm"))]
     const PARALLEL_MIN_LINES: usize = 1 << 16;
     let hashes = |lines: TextLines<'_>| -> Vec<u32> {
-        (prefix..lines.len() - suffix)
-            .map(|i| hash32(state, lines.raw(i)))
+        let core = prefix..lines.len() - suffix;
+        if builder.is_exact() {
+            return core.map(|i| hash32(state, lines.raw(i))).collect();
+        }
+        let mut buf = Vec::new();
+        core.map(|i| line_hash(state, builder, lines, i, &mut buf))
             .collect()
     };
     #[cfg(not(target_family = "wasm"))]
@@ -759,35 +941,16 @@ pub fn tokenize_core(
     right: TextLines<'_>,
 ) -> CoreTokens {
     let (prefix, suffix) = common_lines(builder, left, right);
-    let mut interner = LineInterner::new(builder.is_exact(), [left, right]);
-    let (l, r) = if builder.is_exact() {
-        // Hash both sides first (in parallel where there are threads), then
-        // intern in order. Each hash is overwritten by its token, so the
-        // hashes need no memory of their own.
-        let (mut l, mut r) = exact_hashes(interner.state, left, right, prefix, suffix);
-        for (side, lines, tokens) in [(0, left, &mut l), (1, right, &mut r)] {
-            for (k, slot) in tokens.iter_mut().enumerate() {
-                let i = prefix + k;
-                *slot =
-                    interner.intern_hashed(lines.raw(i), *slot, global_line(left.len(), side, i));
-            }
+    let mut interner = LineInterner::new(builder, [left, right]);
+    // Hash both sides first (in parallel where there are threads), then
+    // intern in order. Each hash is overwritten by its token, so the hashes
+    // need no memory of their own.
+    let (mut l, mut r) = core_hashes(interner.state, builder, left, right, prefix, suffix);
+    for (side, tokens) in [(0, &mut l), (1, &mut r)] {
+        for (k, slot) in tokens.iter_mut().enumerate() {
+            *slot = interner.intern_hashed(*slot, global_line(left.len(), side, prefix + k));
         }
-        (l, r)
-    } else {
-        let mut buf = Vec::new();
-        let mut side_tokens = |side: usize, lines: TextLines<'_>| -> Vec<u32> {
-            (prefix..lines.len() - suffix)
-                .map(|i| {
-                    let l = lines.line(i);
-                    builder.key_into(l.content(lines.text), l.terminator, &mut buf);
-                    interner.intern(&buf, global_line(left.len(), side, i))
-                })
-                .collect()
-        };
-        let l = side_tokens(0, left);
-        let r = side_tokens(1, right);
-        (l, r)
-    };
+    }
     CoreTokens {
         prefix,
         suffix,
@@ -797,6 +960,95 @@ pub fn tokenize_core(
     }
 }
 
+/// One side of a trimmed comparison, for [`crate::slider`]: two core lines
+/// compare by token, any other pair by key (raw bytes when no option
+/// normalizes lines), so a run can slide into the common prefix or suffix.
+pub struct KeyedSide<'a> {
+    builder: &'a KeyBuilder,
+    lines: TextLines<'a>,
+    prefix: usize,
+    tokens: &'a [u32],
+    bufs: (Vec<u8>, Vec<u8>),
+}
+
+impl<'a> KeyedSide<'a> {
+    /// `tokens` are the core tokens of `lines`, which start at line `prefix`.
+    pub fn new(
+        builder: &'a KeyBuilder,
+        lines: TextLines<'a>,
+        prefix: usize,
+        tokens: &'a [u32],
+    ) -> KeyedSide<'a> {
+        KeyedSide {
+            builder,
+            lines,
+            prefix,
+            tokens,
+            bufs: (Vec::new(), Vec::new()),
+        }
+    }
+
+    fn token(&self, i: usize) -> Option<u32> {
+        i.checked_sub(self.prefix)
+            .and_then(|k| self.tokens.get(k))
+            .copied()
+    }
+}
+
+impl crate::slider::SliderSide for KeyedSide<'_> {
+    fn len(&self) -> usize {
+        self.lines.len()
+    }
+
+    fn same(&mut self, i: usize, j: usize) -> (bool, u64) {
+        if let (Some(a), Some(b)) = (self.token(i), self.token(j)) {
+            return (a == b, 1);
+        }
+        let (a, b) = (self.lines.raw(i), self.lines.raw(j));
+        let cost = 1 + (a.len() as u64 + b.len() as u64) / 64;
+        if self.builder.is_exact() {
+            return (a == b, cost);
+        }
+        let (li, lj) = (self.lines.line(i), self.lines.line(j));
+        let text = self.lines.text;
+        self.builder
+            .key_into(li.content(text), li.terminator, &mut self.bufs.0);
+        self.builder
+            .key_into(lj.content(text), lj.terminator, &mut self.bufs.1);
+        (self.bufs.0 == self.bufs.1, cost)
+    }
+
+    fn content(&self, i: usize) -> &[u8] {
+        self.lines.line(i).content(self.lines.text).as_bytes()
+    }
+}
+
+/// The full-file alignment of a trimmed comparison (`core_alignment` is
+/// `align` over the core), compacted by [`crate::slider::compact`] with
+/// [`crate::slider::compaction_budget`].
+pub fn compact_core(
+    builder: &KeyBuilder,
+    left: TextLines<'_>,
+    right: TextLines<'_>,
+    core: &CoreTokens,
+    core_alignment: &crate::line_diff::Alignment,
+) -> (crate::line_diff::Alignment, crate::slider::CompactReport) {
+    let mut full = crate::ops::expand_trimmed(
+        core_alignment,
+        core.prefix,
+        core.suffix,
+        left.len(),
+        right.len(),
+    );
+    let report = crate::slider::compact(
+        &mut full,
+        &mut KeyedSide::new(builder, left, core.prefix, &core.left),
+        &mut KeyedSide::new(builder, right, core.prefix, &core.right),
+        crate::slider::compaction_budget(left.len(), right.len()),
+    );
+    (full, report)
+}
+
 /// [`crate::line_diff::is_approximate`] of the full token sequences, from the
 /// core tokens and the core alignment (`align` over the core).
 ///
@@ -804,6 +1056,8 @@ pub fn tokenize_core(
 /// and suffix lines have the same keys on both sides, so a key "occurs on the
 /// other side" when it is in the other core or in the common lines. The
 /// common lines are only read (hashed) when the core alone cannot decide.
+/// A core with one side empty (a pure insertion or deletion) is never
+/// approximate: no search runs on it.
 pub fn is_approximate_core(
     builder: &KeyBuilder,
     left: TextLines<'_>,
@@ -811,6 +1065,9 @@ pub fn is_approximate_core(
     core: &CoreTokens,
     alignment: &crate::line_diff::Alignment,
 ) -> bool {
+    if core.left.is_empty() || core.right.is_empty() {
+        return false;
+    }
     let max = crate::line_diff::EXACT_MAX_EDITS;
     let size = core.num_tokens as usize;
     let presence = |side: &[u32]| -> Vec<bool> {
@@ -862,23 +1119,14 @@ pub fn is_approximate_core(
     }
     // Index the keys of the pending tokens, then look up every common line.
     let sides = [left, right];
-    let exact = builder.is_exact();
-    let mut interner = LineInterner::new(exact, sides);
+    let mut interner = LineInterner::new(builder, sides);
+    let state = interner.state;
     let mut tokens_of: Vec<u32> = Vec::new();
     let mut buf = Vec::new();
-    let key_into = |side: usize, i: usize, buf: &mut Vec<u8>| {
-        let lines = sides[side];
-        let l = lines.line(i);
-        builder.key_into(l.content(lines.text), l.terminator, buf);
-    };
     for &(side, i) in &pending {
         let line = core.prefix + i;
-        let local = if exact {
-            interner.intern(sides[side].raw(line), global_line(left.len(), side, line))
-        } else {
-            key_into(side, line, &mut buf);
-            interner.intern(&buf, 0)
-        };
+        let h = line_hash(state, builder, sides[side], line, &mut buf);
+        let local = interner.intern_hashed(h, global_line(left.len(), side, line));
         if local as usize == tokens_of.len() {
             tokens_of.push(if side == 0 {
                 core.left[i]
@@ -890,13 +1138,8 @@ pub fn is_approximate_core(
     let n = left.len();
     let common = (0..core.prefix).chain(n - core.suffix..n);
     for i in common {
-        let found = if exact {
-            interner.find(left.raw(i))
-        } else {
-            key_into(0, i, &mut buf);
-            interner.find(&buf)
-        };
-        if let Some(local) = found {
+        let h = line_hash(state, builder, left, i, &mut buf);
+        if let Some(local) = interner.find(h, global_line(left.len(), 0, i)) {
             let t = tokens_of[local as usize] as usize;
             counted += weight[t] as usize;
             weight[t] = 0;
@@ -1173,10 +1416,10 @@ mod tests {
 
     use crate::line_diff::{self, LineAlgorithm};
     use crate::lines::split_lines;
-    use crate::ops::{LineOp, full_ops, full_ops_trimmed};
+    use crate::ops::{LineOp, full_ops};
 
     /// The reference path: every line interned with an owned key, the full
-    /// sequences aligned.
+    /// sequences aligned and compacted by token.
     fn reference(
         builder: &KeyBuilder,
         algorithm: LineAlgorithm,
@@ -1186,12 +1429,27 @@ mod tests {
         let (ll, rl) = (split_lines(left), split_lines(right));
         let mut interner = Interner::new();
         let (lt, rt) = intern_sides(builder, &mut interner, left, &ll, right, &rl);
-        let alignment = line_diff::align(algorithm, &lt, &rt, interner.num_tokens());
+        let mut alignment = line_diff::align(algorithm, &lt, &rt, interner.num_tokens());
         let approximate = line_diff::is_approximate(&lt, &rt, &alignment);
+        let report = crate::slider::compact(
+            &mut alignment,
+            &mut crate::slider::TokenSide {
+                tokens: &lt,
+                content: |i: usize| ll[i].content(left).as_bytes(),
+            },
+            &mut crate::slider::TokenSide {
+                tokens: &rt,
+                content: |j: usize| rl[j].content(right).as_bytes(),
+            },
+            u64::MAX,
+        );
+        assert!(!report.exhausted);
         (full_ops(&alignment), approximate)
     }
 
-    /// The large-input path: trimmed, borrowed or arena keys, core aligned.
+    /// The large-input path: trimmed, borrowed or arena keys, core aligned,
+    /// compacted over the whole files (runs may slide into the prefix and
+    /// suffix, compared by key there).
     fn trimmed(
         builder: &KeyBuilder,
         algorithm: LineAlgorithm,
@@ -1210,8 +1468,9 @@ mod tests {
         let core = tokenize_core(builder, l, r);
         let alignment = line_diff::align(algorithm, &core.left, &core.right, core.num_tokens);
         let approximate = is_approximate_core(builder, l, r, &core, &alignment);
-        let ops = full_ops_trimmed(&alignment, core.prefix, core.suffix, l.len(), r.len());
-        (ops, approximate)
+        let (compacted, report) = compact_core(builder, l, r, &core, &alignment);
+        assert!(!report.exhausted);
+        (full_ops(&compacted), approximate)
     }
 
     struct Rng(u64);
@@ -1376,6 +1635,129 @@ mod tests {
                     let got = trimmed(builder, algorithm, &left, &right);
                     assert_eq!(got.1, want, "{copies} copies");
                     assert_eq!(got, reference(builder, algorithm, &left, &right));
+                }
+            }
+        }
+    }
+
+    /// The key as the straightforward definition builds it: mask, whitespace
+    /// mode on a copy, then every character through the Unicode tables.
+    fn reference_key(opts: &KeyOptions, content: &str, terminator: Terminator) -> Vec<u8> {
+        let masks = compile_masks(&opts.regex).unwrap();
+        let fold = CaseMapper::new();
+        let piece = |out: &mut Vec<u8>, text: &str, at_end: bool| {
+            let text = match opts.whitespace {
+                WhitespaceMode::Trailing | WhitespaceMode::Change if at_end => {
+                    text.trim_end_matches(is_whitespace)
+                }
+                _ => text,
+            };
+            let normalized: String = match opts.whitespace {
+                WhitespaceMode::Change => collapse_runs(text).into_owned(),
+                WhitespaceMode::All => text.chars().filter(|c| !is_whitespace(*c)).collect(),
+                _ => text.to_owned(),
+            };
+            for c in normalized.chars() {
+                let c = if opts.ignore_case {
+                    fold.simple_fold(c)
+                } else {
+                    c
+                };
+                out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+            }
+        };
+        let mut out = Vec::new();
+        let mut pos = 0;
+        for (start, end, index) in masked_ranges(&masks, content) {
+            piece(&mut out, &content[pos..start], false);
+            out.extend_from_slice(&[MASK_BYTE, index]);
+            pos = end;
+        }
+        piece(&mut out, &content[pos..], true);
+        if opts.whitespace == WhitespaceMode::None {
+            out.push(0xFF);
+            out.push(match terminator {
+                Terminator::Lf => b'n',
+                Terminator::CrLf => b'w',
+                Terminator::Cr => b'r',
+                Terminator::None => b'0',
+            });
+        }
+        out
+    }
+
+    /// The one-pass key builder (ASCII fast paths, no copies) gives the
+    /// bytes of the reference definition for every option combination.
+    #[test]
+    fn one_pass_keys_match_the_reference() {
+        let pieces = [
+            "", " ", "\t", "\u{b}", "\u{c}", "  \t ", "a", "Z", "Hello", "WORLD", "ß", "ẞ", "İ",
+            "K", "Ⱥ", "ſ", "ΣΑΣ", "Ǆ", "\u{a0}", "猫", "é", "e\u{301}", "🙂", "12:00:01", "x=1",
+        ];
+        let mut lines: Vec<String> = Vec::new();
+        for a in pieces {
+            for b in pieces {
+                lines.push(format!("{a}{b}"));
+                lines.push(format!(" {a} \t{b}  "));
+                lines.push(format!("{a}  {b}\u{c}{a}"));
+            }
+        }
+        let regexes = [Vec::new(), vec![r"\d+".to_owned(), "(?i)world".to_owned()]];
+        let modes = [
+            WhitespaceMode::None,
+            WhitespaceMode::Trailing,
+            WhitespaceMode::Change,
+            WhitespaceMode::All,
+        ];
+        for whitespace in modes {
+            for ignore_case in [false, true] {
+                for regex in &regexes {
+                    let opts = KeyOptions {
+                        whitespace,
+                        ignore_case,
+                        regex: regex.clone(),
+                    };
+                    let builder = KeyBuilder::new(&opts).unwrap();
+                    let mut buf = Vec::new();
+                    for line in &lines {
+                        builder.key_into(line, Terminator::CrLf, &mut buf);
+                        let want = reference_key(&opts, line, Terminator::CrLf);
+                        assert_eq!(buf, want, "{opts:?} {line:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The ASCII shortcut of [`simple_fold`] agrees with the Unicode tables.
+    #[test]
+    fn ascii_folding_matches_the_tables() {
+        let tables = CaseMapper::new();
+        for b in 0u8..=0x7F {
+            let c = char::from(b);
+            assert_eq!(simple_fold(c), tables.simple_fold(c), "{c:?}");
+        }
+    }
+
+    /// A pure insertion or deletion is exact, even when the inserted lines
+    /// repeat lines of the other side (no search runs on an empty core side).
+    #[test]
+    fn pure_insertions_are_never_approximate() {
+        let base: String = (0..20).fold(String::new(), |mut s, i| {
+            let _ = writeln!(s, "line {i}");
+            s
+        });
+        let copies = "line 3\n".repeat(600);
+        let middle = format!("{}{copies}{}", &base[..35], &base[35..]);
+        for grown in [middle, format!("{copies}{base}"), format!("{base}{copies}")] {
+            for builder in &builders() {
+                for algorithm in ALGORITHMS {
+                    let inserted = trimmed(builder, algorithm, &base, &grown);
+                    assert!(!inserted.1, "{algorithm:?}");
+                    assert_eq!(inserted, reference(builder, algorithm, &base, &grown));
+                    let deleted = trimmed(builder, algorithm, &grown, &base);
+                    assert!(!deleted.1, "{algorithm:?}");
+                    assert_eq!(deleted, reference(builder, algorithm, &grown, &base));
                 }
             }
         }

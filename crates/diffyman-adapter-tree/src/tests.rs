@@ -192,6 +192,14 @@ fn zstd_raw(data: &[u8]) -> Vec<u8> {
     out
 }
 
+/// A zstd skippable frame: magic `0x184D2A50 + nibble`, length, user data.
+fn skippable(nibble: u8, data: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x50 | nibble, 0x2a, 0x4d, 0x18];
+    out.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+    out.extend_from_slice(data);
+    out
+}
+
 fn sample_tar() -> Vec<u8> {
     let mut t = Vec::new();
     tar_push(&mut t, tar_header(b"dir/", b'5', 0, b""), b"");
@@ -258,6 +266,19 @@ fn archives_are_recognized_from_their_bytes() {
     big_window.extend_from_slice(&[0x00, 20 << 3]);
     big_window.extend_from_slice(&[1, 0, 0, b'x']);
     assert_eq!(archive_format(&big_window), None);
+    // A zstd tar may start with skippable frames (as `zstd` and `pzstd`
+    // write for metadata); what follows them decides.
+    let lead = skippable(0, b"metadata");
+    let skipped = [lead.clone(), skippable(0xf, b""), zstd_raw(&tar)].concat();
+    assert_eq!(archive_format(&skipped), Some(Format::TarZst));
+    let text = [lead.clone(), zstd_raw(b"just text")].concat();
+    assert_eq!(archive_format(&text), None);
+    assert_eq!(archive_format(&lead), None, "only a skippable frame");
+    assert_eq!(archive_format(&lead[..10]), None, "cut short");
+    let mut lying = lead;
+    lying[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+    lying.extend_from_slice(&zstd_raw(&tar));
+    assert_eq!(archive_format(&lying), None, "length past the end");
 }
 
 // ---------------------------------------------------------------------------
@@ -525,21 +546,94 @@ fn zip_structure_errors_and_entry_limits() {
     );
     // A zip64 end record that claims a huge count is refused before the
     // central directory is read.
-    let mut forged = zip(&[z("a", b"1")]);
-    let mut record = b"PK\x06\x06".to_vec();
-    record.extend_from_slice(&44u64.to_le_bytes());
-    record.extend_from_slice(&[45, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    record.extend_from_slice(&u64::MAX.to_le_bytes());
-    record.extend_from_slice(&u64::MAX.to_le_bytes());
-    record.extend_from_slice(&[0; 16]);
-    let at = forged.len() - 22;
-    forged.splice(at..at, record);
+    let forged = zip64(&zip(&[z("a", b"1")]), u64::MAX);
     assert_eq!(list_bytes(&forged).unwrap_err(), ListError::Limit);
+    let declared = |count: u64| zip64(&zip(&[z("a", b"1")]), count);
+    assert_eq!(
+        list_with(&declared(2), &small, None).unwrap_err(),
+        ListError::Limit
+    );
     let big = Limits {
         max_archive_bytes: 10,
         ..Limits::default()
     };
     assert_eq!(list_with(&bytes, &big, None).unwrap_err(), ListError::Limit);
+}
+
+/// Rewrites the end of a zip built by [`zip`] as zip64: a zip64 end record
+/// that declares `count` entries, its locator, and a zip32 end record whose
+/// fields defer to it.
+fn zip64(zip32: &[u8], count: u64) -> Vec<u8> {
+    let end = zip32.len() - 22;
+    let mut out = zip32[..end].to_vec();
+    let cd_size = u64::from(u32::from_le_bytes(
+        zip32[end + 12..end + 16].try_into().unwrap(),
+    ));
+    let cd_offset = u64::from(u32::from_le_bytes(
+        zip32[end + 16..end + 20].try_into().unwrap(),
+    ));
+    let record_at = out.len() as u64;
+    out.extend_from_slice(b"PK\x06\x06");
+    out.extend_from_slice(&44u64.to_le_bytes());
+    out.extend_from_slice(&[45, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&cd_size.to_le_bytes());
+    out.extend_from_slice(&cd_offset.to_le_bytes());
+    out.extend_from_slice(b"PK\x06\x07");
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&record_at.to_le_bytes());
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(b"PK\x05\x06");
+    out.extend_from_slice(&[0; 4]);
+    out.extend_from_slice(&[0xff; 4]);
+    out.extend_from_slice(&[0xff; 8]);
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
+/// Signature bytes inside entry data are not end records: a stored entry
+/// that holds a zip64 end record with a huge count is listed normally.
+#[test]
+fn end_record_signatures_inside_entries_are_data() {
+    let mut fake64 = b"PK\x06\x06".to_vec();
+    fake64.extend_from_slice(&44u64.to_le_bytes());
+    fake64.extend_from_slice(&[45, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    fake64.extend_from_slice(&u64::MAX.to_le_bytes());
+    fake64.extend_from_slice(&u64::MAX.to_le_bytes());
+    fake64.extend_from_slice(&[0; 16]);
+    let stored = |name: &str, data: &[u8]| Z {
+        method: 0,
+        ..z(name, data)
+    };
+    // The record alone, and the record with a locator after it: neither is
+    // named by an end record at the end of the archive.
+    let locator = b"PK\x06\x07\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0";
+    for content in [fake64.clone(), [&fake64[..], locator].concat()] {
+        let bytes = zip(&[stored("evil.bin", &content), stored("b.txt", b"beta\n")]);
+        let listing = list_bytes(&bytes).unwrap();
+        assert_eq!(
+            paths(&listing),
+            [("b.txt", EntryType::File), ("evil.bin", EntryType::File)]
+        );
+        assert_eq!(find(&listing, "evil.bin").sha256, Some(sha256(&content)));
+    }
+    // A whole zip64 end (record, locator, zip32 record) inside an entry is
+    // data too once it is further from the end than any end record can be.
+    let whole = zip64(&zip(&[z("a", b"1")]), u64::MAX);
+    assert_eq!(list_bytes(&whole).unwrap_err(), ListError::Limit);
+    let bytes = zip(&[
+        stored("inner.zip", &whole),
+        stored("pad.bin", &vec![7; 70_000]),
+    ]);
+    let small = Limits {
+        max_entries: 2,
+        ..Limits::default()
+    };
+    assert_eq!(list_with(&bytes, &small, None).unwrap().entries.len(), 2);
+    // A genuine zip64 archive with an honest count is listed.
+    let honest = zip64(&zip(&[z("a", b"1"), z("b", b"2")]), 2);
+    assert_eq!(list_with(&honest, &small, None).unwrap().entries.len(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -704,6 +798,24 @@ fn compressed_tars_list_like_plain_ones() {
     let mut frames = zstd_raw(a);
     frames.extend_from_slice(&zstd_raw(b));
     assert_eq!(paths(&list_bytes(&frames).unwrap()), paths(&plain));
+    // Skippable frames before, between and after the frames are stepped over.
+    let frames = [
+        skippable(0, b"leading metadata"),
+        zstd_raw(a),
+        skippable(0xf, b""),
+        zstd_raw(b),
+        skippable(7, &[0xff; 100]),
+    ]
+    .concat();
+    assert_eq!(archive_format(&frames), Some(Format::TarZst));
+    let listing = list_bytes(&frames).unwrap();
+    assert_eq!(paths(&listing), paths(&plain));
+    assert_eq!(find(&listing, "b.txt").sha256, find(&plain, "b.txt").sha256);
+    // A skippable frame whose length runs past the end breaks the stream.
+    let mut lying = skippable(0, b"metadata");
+    lying[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+    let cut = [zstd_raw(a), lying, zstd_raw(b)].concat();
+    assert_eq!(list_bytes(&cut).unwrap_err(), ListError::Invalid);
 }
 
 #[test]

@@ -259,6 +259,15 @@ fn moved(u: &mut Unstructured<'_>) -> Result<Move> {
         similarity: similarity(u)?,
         from_ops: list(u, op_ref)?,
         to_ops: list(u, op_ref)?,
+        inline: list(u, |u| {
+            Ok(Span {
+                side: side(u)?,
+                line: num(u)?,
+                start: num(u)?,
+                end: num(u)?,
+                op: op_kind(u)?,
+            })
+        })?,
     })
 }
 

@@ -1,6 +1,6 @@
 //! Diff Document types for diffyman, plus their canonical JSON form and JSON Schema.
 //!
-//! The normative definition is `docs/spec/diff-document.md` (schema `0.3.0`).
+//! The normative definition is `docs/spec/diff-document.md` (schema `0.4.0`).
 //! This crate holds no diff logic:
 //!
 //! - [`document`] and [`options`]: serde types for the document and its options.
@@ -9,9 +9,12 @@
 //!   `id` and `provenance`).
 //! - [`document_schema`] and [`options_schema`]: JSON Schema 2020-12 generated
 //!   from the types.
+//! - [`lines`]: the line split of spec §7.2 (LF, CRLF, lone CR) that line
+//!   positions in a document refer to, shared by the engine and renderers.
 
 pub mod document;
 pub mod jcs;
+pub mod lines;
 pub mod options;
 
 pub use document::*;
@@ -349,23 +352,47 @@ mod tests {
                 hunk: "h2".to_owned(),
                 op: 0,
             }],
+            inline: Vec::new(),
         };
         assert_eq!(
             jcs::to_canonical_string(&m).unwrap(),
             concat!(
                 r#"{"from":{"range":{"count":4,"start":3},"side":"left"},"#,
-                r#""fromOps":[{"hunk":"h1","op":1}],"id":"m1","kind":"pure","similarity":1,"#,
-                r#""to":{"range":{"count":4,"start":10},"side":"right"},"#,
+                r#""fromOps":[{"hunk":"h1","op":1}],"id":"m1","inline":[],"kind":"pure","#,
+                r#""similarity":1,"to":{"range":{"count":4,"start":10},"side":"right"},"#,
                 r#""toOps":[{"hunk":"h2","op":0}]}"#
             )
         );
         let edited = Move {
             kind: MoveKind::Edited,
             similarity: Similarity::from_basis_points(8750),
+            inline: vec![
+                Span {
+                    side: Side::Left,
+                    line: 4,
+                    start: 6,
+                    end: 9,
+                    op: OpKind::Delete,
+                },
+                Span {
+                    side: Side::Right,
+                    line: 11,
+                    start: 6,
+                    end: 10,
+                    op: OpKind::Insert,
+                },
+            ],
             ..m
         };
         let text = jcs::to_canonical_string(&edited).unwrap();
         assert!(text.contains(r#""similarity":0.875,"#), "{text}");
+        assert!(
+            text.contains(concat!(
+                r#""inline":[{"end":9,"line":4,"op":"delete","side":"left","start":6},"#,
+                r#"{"end":10,"line":11,"op":"insert","side":"right","start":6}],"#
+            )),
+            "{text}"
+        );
         let back: Move = serde_json::from_str(&text).unwrap();
         assert_eq!(back, edited);
     }
@@ -610,9 +637,10 @@ mod tests {
         assert_eq!(doc["title"], "DiffDocument");
         // Writers always emit every field (spec §4).
         assert_eq!(doc["required"].as_array().unwrap().len(), 19);
+        // 0.4.0 adds `inline` to moves.
         assert_eq!(
             doc["$defs"]["Move"]["required"].as_array().unwrap().len(),
-            7
+            8
         );
         let text = doc.to_string();
         assert!(text.contains("positionEncoding"));

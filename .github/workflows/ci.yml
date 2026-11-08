@@ -77,8 +77,11 @@ jobs:
 
       - name: Build the engine for wasm32
         if: runner.os == 'Linux'
-        # As the WASM binding uses it: without `fs` (no folder walking).
-        run: cargo build --locked -p diffyman --no-default-features --target wasm32-unknown-unknown
+        # As the WASM binding uses it: without `fs` (no folder walking), with
+        # and without archive support.
+        run: |
+          cargo build --locked -p diffyman --no-default-features --target wasm32-unknown-unknown
+          cargo build --locked -p diffyman --no-default-features --features archives --target wasm32-unknown-unknown
 
   bindings:
     # Spike B (docs/spikes/B-binding-round-trip.md): the CLI, the Python
@@ -126,13 +129,19 @@ jobs:
       - name: Python binding tests
         run: '"$VIRTUAL_ENV/bin/python" -m pytest -q bindings/python/tests'
 
-      - name: Build the WASM packages (Node.js and web)
+      - name: Build the WASM packages (Node.js and web; Node.js without archives)
         run: |
           wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node -- --locked
           wasm-pack build bindings/wasm --release --target web --out-dir pkg-web -- --locked
+          wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node-slim -- --locked --no-default-features
 
       - name: Cross-binding conformance (CLI, Python, WASM)
         run: uv run --no-project --python 3.12 python tests/conformance/run_bindings.py --cli target/release/diffyman
+
+      - name: Cross-binding conformance, WASM without archives (typed `unsupported` errors)
+        run: >-
+          uv run --no-project --python 3.12 python tests/conformance/run_bindings.py
+          --cli target/release/diffyman --wasm-pkg bindings/wasm/pkg-node-slim
 
   deny:
     name: cargo-deny

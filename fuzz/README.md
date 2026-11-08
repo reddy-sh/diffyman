@@ -33,6 +33,10 @@ cargo test --manifest-path fuzz/Cargo.toml --lib
 | `jcs_roundtrip` | JSON text, and the same bytes as the source of an arbitrary `DiffDocument` | The tree writer and the direct canonical writer agree (both fail or give the same text); canonical text is a fixed point; a document reads back and writes the same bytes, with the same `id` and conformance form. |
 | `refine` | selector byte, left text, right text | `split_lines` gives exactly the spec §7.2 lines; for `word`, `char` and `smart` with every position encoding, refinement is deterministic, spans are non-empty, sorted, non-overlapping and on character boundaries, UTF-16 and code point spans are the UTF-8 spans converted, and for `word` and `char` the text outside the spans is the same on both sides. |
 | `moves` | two option bytes, left text, extra lines, move steps | With `detectMoves: true` (the right side is often the left side with blocks moved), every document passes the document checks; a second run is identical; moves never change hunks, ops, stats or status (spec §6.5). |
+| `tar` | mode byte, archive bytes | The tar reader of `diffyman-adapter-tree` on plain, gzip and zstd tar (the target compresses the input when the mode asks, and fixes the checksum of every block with the `ustar` magic unless bit 3 is set), with the default or small limits: the listing checks below, and a compressed tar lists the same entries and issues as the plain tar inside it unless a limit was hit. |
+| `zip` | mode byte, archive bytes | The zip listing (end record checks, central directory, overlapping entries, ratio and budget checks, CRC-checked inflation), with the default or small limits: the listing checks below. |
+
+The listing checks (`diffyman_fuzz::tree::check_listing`, spec §19.2–§19.6) cover: listing never panics and is deterministic (entries, issues, error and budget left); an input that is not an archive is invalid; entries are sorted by path, unique, normalized and within the entry, path and path text limits; an unsafe-looking path sets `unsafe_path`; every parent of a path is listed, and a parent that is not a directory sets `duplicate_path`; only files have a size or a hash and only links a target; hashed content never exceeds the budget spent; the listing paired with itself gives one pair per entry, `modified` only where content was not read; and every hashed file within the child limits reads back through `Contents` with its size and hash.
 
 The document checks (`diffyman_fuzz::check_document`) cover:
 
@@ -51,7 +55,7 @@ The targets split their input with `diffyman_fuzz::chunks`: every chunk but the 
 
 ## Seeds
 
-`corpus/<target>/seed-*` are built from the golden corpus (`tests/corpus/text`, `tests/corpus/moved` and `tests/corpus/binary`) by:
+`corpus/<target>/seed-*` are built from the golden corpus (`tests/corpus/text`, `tests/corpus/moved` and `tests/corpus/binary`, and the archive inputs of `tests/corpus/tree` for `tar` and `zip`) by:
 
 ```sh
 uv run --python 3.12 fuzz/seed_corpus.py

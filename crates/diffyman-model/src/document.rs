@@ -1,4 +1,4 @@
-//! Diff Document types (`docs/spec/diff-document.md`, schema `0.3.0`).
+//! Diff Document types (`docs/spec/diff-document.md`, schema `0.4.0`).
 //!
 //! Writing: every field the spec defines is always serialized, `null` included
 //! (spec §4).
@@ -21,13 +21,13 @@ use serde_json::Value;
 use crate::options::Options;
 
 /// The schema version written by this crate.
-pub const SCHEMA_VERSION: &str = "0.3.0";
+pub const SCHEMA_VERSION: &str = "0.4.0";
 
 /// The Diff Document: diffyman's only result format.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DiffDocument {
-    /// Semver string, `"0.3.0"` for this crate.
+    /// Semver string, `"0.4.0"` for this crate.
     pub schema_version: String,
     /// `"sha256:"` plus the hex SHA-256 of the canonical document without `id` and `provenance`.
     pub id: String,
@@ -47,11 +47,11 @@ pub struct DiffDocument {
     pub hunks: Vec<Hunk>,
     /// Moved blocks (spec §6.5); `[]` unless `options.detectMoves` is true.
     pub moves: Vec<Move>,
-    /// Structural changes (reserved; always `[]` in 0.3.0).
+    /// Structural changes (reserved; always `[]` in 0.4.0).
     pub structural: Vec<Value>,
-    /// Table diff (reserved; always `null` in 0.3.0).
+    /// Table diff (reserved; always `null` in 0.4.0).
     pub table: Option<Value>,
-    /// Page regions (reserved; always `[]` in 0.3.0).
+    /// Page regions (reserved; always `[]` in 0.4.0).
     pub regions: Vec<Value>,
     /// Changed byte ranges (spec §6.7); `[]` unless `kind` is `binary`.
     pub bytes: Vec<ByteRange>,
@@ -63,7 +63,7 @@ pub struct DiffDocument {
     pub options: Options,
     /// Audit data; excluded from `id` and from conformance.
     pub provenance: Provenance,
-    /// Plugin data under `x-<vendor>` keys; `{}` in 0.3.0.
+    /// Plugin data under `x-<vendor>` keys; `{}` in 0.4.0.
     pub extensions: BTreeMap<String, Value>,
 }
 
@@ -348,7 +348,7 @@ pub enum EntryType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ChildDocument {
-    /// Semver string, `"0.3.0"` for this crate.
+    /// Semver string, `"0.4.0"` for this crate.
     pub schema_version: String,
     /// `"sha256:"` plus the hex SHA-256 of the canonical document without `id`.
     pub id: String,
@@ -748,6 +748,10 @@ pub struct Move {
     pub from_ops: Vec<OpRef>,
     /// Every op the right range touches, in order.
     pub to_ops: Vec<OpRef>,
+    /// Inline spans inside an edited move (since 0.4.0, spec §6.5): what
+    /// changed between its two ranges, shaped and ordered like `Op::inline`.
+    /// `[]` for pure moves and when `granularity` is `line`.
+    pub inline: Vec<Span>,
 }
 
 /// Warning severity (open enum).

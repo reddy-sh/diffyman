@@ -49,9 +49,11 @@ diff-document.md wins.
 2. Moved-block detection (section 4) runs on deleted and inserted lines.
 3. Inline refinement (section 3) runs on `replace` ops, with lines that belong
    to a move removed from both token streams.
+4. Inline refinement runs on each edited move, over its two ranges (4.7).
 
 Moves never change hunks or ops. A moved line stays inside its `delete`,
-`insert` or `replace` op; `moves[]` adds the relation.
+`insert` or `replace` op; `moves[]` adds the relation, and the spans of a
+moved line are in its move, never in its op.
 
 ## 3. Granularity
 
@@ -68,7 +70,9 @@ removed, both sides are non-empty and each side has at most `REFINE_MAX_LINES`
 lines, `REFINE_MAX_BYTES` UTF-8 bytes and `REFINE_MAX_TOKENS` tokens. Pure
 `insert` and `delete` ops never do. A too-large op gets `inline: []`, and the
 document gets the warning `refine-skipped-limit` (diff-document.md §10): one
-entry per document, however many ops were skipped, with no count.
+entry per document, however many ops were skipped, with no count. An edited
+move is refined like one `replace` op of its two ranges (4.7), under the same
+limits and the same warning.
 
 A side's token stream is its lines in order. Each line terminator is one token
 that equals any other terminator (EOL rules report those differences).
@@ -159,7 +163,7 @@ Each is a golden case (`tests/corpus/smart-<name>/`):
 | `emoji` | `👩‍💻 ok` -> `👨‍💻 ok` | one span per side covering the whole ZWJ cluster |
 | `insert-only` | pure insert | no spans |
 | `too-big` | replace of 101 lines | `inline: []` + `refine-skipped-limit` |
-| `moved-in-replace` | replace op containing a moved block | moved lines carry no spans |
+| `moved-in-replace` | replace op containing a moved block | moved lines carry no spans on the op |
 
 ## 4. Moved blocks
 
@@ -189,7 +193,8 @@ A **moved block** is a pair (left range, right range) where:
 6. for `kind: "pure"`, the lines have equal move keys pairwise (4.4) and, where
    4.4 requires it, the same indentation delta; for `kind: "edited"`, the
    block similarity is `>= MOVE_EDITED_MIN_SIM_BP` and the word similarity
-   `>= MOVE_EDITED_MIN_WORD_SIM_BP` (4.5).
+   `>= MOVE_EDITED_MIN_WORD_SIM_BP` (4.5);
+7. it is not a re-indented swap (end of 4.5).
 
 **Sub-ops.** An `insert` or `delete` op is one sub-op. A `replace` op is
 aligned again over the move keys (4.4) of its own lines, with
@@ -399,6 +404,34 @@ when the indentation delta changes inside it, or when one side has an extra
 trivial line (a blank line or a lone `}`), which scores 0 and does not count
 in `nL + nR`.
 
+**Re-indented swaps.** After both passes, a selected move (pure or edited)
+is dropped when all of these hold:
+
+- Exactly one **anchor run** lies between its two ranges: after its left
+  range on the left and before its right range on the right, or the other
+  way round. An anchor run is a maximal run of line pairs that are matched
+  one to one: the lines of `equal` ops and the in-place lines of `replace`
+  ops (4.1), where runs that touch on both sides are one run.
+- Every non-blank line pair of that run has a different indentation on its
+  two sides (the whitespace before the first other character, compared
+  literally), and it has at least one.
+- The run's left lines are below the minimum size of 4.2.
+- The first non-blank lines of the move's two ranges have the same
+  indentation.
+
+Why: a block M that moved across a block B is the same edit as B moving
+across M. When the line diff kept B in place although every line of it
+changed its indentation (possible because `ignore.whitespace` `change` or
+`all` hides the amount of whitespace, or because 4.1 pairs lines by move
+key), while M kept its own indentation, B is the block that went into or
+out of a scope, and M did not move relative to its surroundings. B is too
+small to be a move itself, so the edit has no move to report. A typical
+case is an error check that moved into the loop below it (`moved/047`):
+without the rule the loop header, which never moved, is reported as an
+edited move across the check. The rule reads only the lines of the one run
+that a move crosses, each run at most once per document, until it finds a
+line pair with an unchanged indentation or the run reaches the minimum size.
+
 **Work limits** (deterministic, no clock):
 
 - If there are more than `MOVE_EDIT_MAX_PAIRS` segment pairs (left segments
@@ -438,6 +471,8 @@ in `nL + nR`.
   changed their indentation or terminator in place.
 - Blocks that share only their structure: lines that pair by grapheme
   similarity but lost most of their words (the word similarity of 4.5).
+- A block that looks moved only because the small block it crossed was kept
+  in place with a new indentation (re-indented swaps, 4.5).
 - Moves across files in a folder diff (out of scope for `text.moves@1`).
 
 ### 4.7 Output in `moves[]`
@@ -450,6 +485,32 @@ of diff-document.md §6.5. This section only fills in the values:
   reported as pure). `kind: "edited"` with `similarity` = `blockSim / 10000`
   for an edited move.
 - `fromOps` and `toOps` follow from the ranges and the hunks.
+- `inline` (diff-document.md §6.5, since schema 0.4.0) is `[]` for a pure
+  move and whenever `granularity` is `line`. For an edited move it is the
+  result of section 3 for one `replace` op whose left side is the lines of
+  `from.range` and whose right side is the lines of `to.range`, in order,
+  with every line of both ranges included (paired, unpaired and trivial
+  lines alike), with one change: each line's **indentation** takes no part.
+  The indentation is the whitespace before the first other character or
+  `ignore.regex` match, the part the move key removes (4.4 step 2); it gets
+  no token, so it is never in a span and never compared, while the offsets
+  still count from the start of the line. Everything else is as for an op:
+  the mode (`smart` chooses per move as per op), the comparison of tokens
+  under `ignore.whitespace` and `ignore.case`, regex masks as single tokens
+  (so a masked value that changed gets no span), the merge rule, the limits
+  of 3.1 and 3.4 (a move over them gets `[]` and the document
+  `refine-skipped-limit`) and the `smart` noise cutoff. Spans use the
+  absolute line numbers of each side, as on ops.
+
+Why the whole block and not line pairs: the move search's pairing of lines
+is internal and not part of the output, a block can hold lines without a
+partner (an added list item, a dropped comment) that a reader still wants
+marked, and one token diff over the block gives the same shape and the same
+limits as a `replace` op. A token can then align with a similar token on a
+neighbouring line, as in a multi-line `replace` op. Why without indentation:
+the move key leaves it out, so a block that moved into or out of a nested
+scope would otherwise be marked on every line for its new indentation, which
+the move already says.
 
 Derived data is not stored. Zebra stripes: in `to.range.start` order, a move
 whose right range directly follows the previous one gets the other stripe,
@@ -493,6 +554,11 @@ Minimum composition (>= 30 cases): >= 10 pure multi-line, >= 3 long single
 line, >= 4 indentation change, >= 6 edited, >= 6 negative (`moves: []`:
 trivial lines, in-place edits, copies, below threshold, repeated short lines),
 >= 2 CJK or RTL, >= 2 CRLF, >= 2 with several moves (zebra).
+
+The `edited` cases run with a `granularity` other than `line` (`smart`, and
+`word` with UTF-16 offsets in `046`), so their golden files also pin the
+inline spans of edited moves (4.7). Granularity never changes which moves
+are found, so the metrics of 5.3 do not depend on it.
 
 ### 5.2 `labels.json`
 
@@ -552,8 +618,10 @@ two ranges both equal the label's.
 
 Tracked, not gating: kind accuracy before v1, and the exact-boundary rate,
 target >= 0.80. A label may include a line that the line diff keeps in an
-`equal` op (most often a closing brace that the diff slides to the other end
-of a deleted block); no move can contain that line (4.1 rule 1), so such a
-label can match but never exactly. The runner prints metrics per case, per
+`equal` op; no move can contain that line (4.1 rule 1), so such a label can
+match but never exactly. Slider compaction (diff-document.md §7.3.1) keeps a
+deleted or inserted block whole in the usual cases (a closing brace or blank
+line between two blocks goes with the block it belongs to), so on the
+current corpus every matched label is exact. The runner prints metrics per case, per
 category (the word after the case number: `pure`, `single`, `indent`,
 `edited`, `neg`) and in total, and fails the run when a gate is missed.

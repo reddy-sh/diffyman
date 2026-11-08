@@ -32,11 +32,18 @@ impl Default for SummaryOptions {
 /// control or bidi characters are quoted like git does, so the line is safe
 /// to print on a terminal.
 pub fn summary_line(doc: &DiffDocument) -> String {
-    let mut out = format!(
-        "{} -> {}: ",
+    format!(
+        "{} -> {}: {}",
         name(&doc.left, "left"),
-        name(&doc.right, "right")
-    );
+        name(&doc.right, "right"),
+        verdict(doc)
+    )
+}
+
+/// The verdict of [`summary_line`], after the names: `different, 2 changes
+/// in 2 hunks, ...`.
+pub(crate) fn verdict(doc: &DiffDocument) -> String {
+    let mut out = String::new();
     match doc.status {
         Status::Error => {
             out.push_str("error: ");

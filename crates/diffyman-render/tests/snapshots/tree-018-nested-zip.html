@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="generator" content="diffyman">
+<title>Diff: left.zip → right.zip</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1f2328;--mute:#59636e;--bd:#d1d9e0;--hh:#eef3f8;--gap:#f6f8fa;--a-bg:#e1efff;--a-hi:#a8cdf5;--a-fg:#0b4f8a;--d-bg:#ffead9;--d-hi:#f4bd8f;--d-fg:#8f3f00;--mv:#7b3aa6;--mv-bg:#f4eafb;--i-bg:#f0f1f3;--inv-bg:#fff1a8;--inv-fg:#5a4500;--link:#0b5cad}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--mute:#9198a1;--bd:#3d444d;--hh:#161d27;--gap:#151b23;--a-bg:#0c2d4d;--a-hi:#1d5d99;--a-fg:#a8cdf5;--d-bg:#3a230f;--d-hi:#7c4517;--d-fg:#f4bd8f;--mv:#d2a8ef;--mv-bg:#2a1c36;--i-bg:#1b1f24;--inv-bg:#5a4500;--inv-fg:#fff1a8;--link:#79b8ff}}
+*{box-sizing:border-box}
+body{margin:0;padding:1rem 1.25rem 2rem;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--link)}
+h1{font-size:1.35rem;margin:0 0 .25rem;overflow-wrap:anywhere}
+h2{font-size:1.05rem;margin:1rem 0 .4rem}
+code,.diff{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.files{margin:0;color:var(--mute);overflow-wrap:anywhere}
+.notice{border:1px solid var(--bd);border-left:4px solid var(--mv);padding:.4rem .75rem;background:var(--gap)}
+.legend{display:flex;flex-wrap:wrap;gap:.25rem 1.25rem;list-style:none;padding:0;margin:.5rem 0;font-size:.9rem}
+.key{display:inline-block;min-width:1.7em;text-align:center;font-weight:700;border:1px solid var(--bd);border-radius:3px}
+.key.d{background:var(--d-bg);color:var(--d-fg)}.key.a{background:var(--a-bg);color:var(--a-fg)}.key.mv{background:var(--mv-bg);color:var(--mv)}.key.i{background:var(--i-bg);color:var(--mute)}
+details{margin:.5rem 0}summary{cursor:pointer}
+table.meta{border-collapse:collapse;font-size:.85rem;margin:.5rem 0}
+.meta th,.meta td{border:1px solid var(--bd);padding:.15rem .5rem;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+.warnings{padding-left:1.25rem}.sev-error strong{color:var(--d-fg)}
+.empty{font-size:1.05rem;padding:1rem;border:1px solid var(--bd);background:var(--gap)}
+.vt{position:absolute;opacity:0;width:1px;height:1px}
+.vt+label{display:inline-block;padding:.2rem .8rem;border:1px solid var(--bd);border-radius:4px;margin:0 .3rem .6rem 0;cursor:pointer}
+.vt:checked+label{background:var(--hh);border-color:var(--fg);font-weight:600}
+.vt:focus-visible+label{outline:2px solid var(--link);outline-offset:2px}
+#view-split:checked~.inline,#view-inline:checked~.split{display:none}
+table.diff{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;line-height:1.45;border:1px solid var(--bd)}
+.cm{width:1.6em}
+.diff thead th{background:var(--hh);text-align:left;font-weight:600;padding:.25rem .5rem;border-bottom:1px solid var(--bd);overflow-wrap:anywhere}
+.diff td{padding:0 .4rem;vertical-align:top}
+.diff .n{color:var(--mute);text-align:right;-webkit-user-select:none;user-select:none}
+.diff .m{padding:0;text-align:center;font-weight:700;-webkit-user-select:none;user-select:none}
+.diff .c{white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext;tab-size:4}
+.diff .hh th{background:var(--hh);color:var(--mute);text-align:left;font-weight:400;padding:.2rem .5rem;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd)}
+.diff .gap td{background:var(--gap);color:var(--mute);text-align:center;font-style:italic;padding:.1rem}
+.diff .cut td{background:var(--inv-bg);color:var(--inv-fg);text-align:center;padding:.4rem}
+.d{background:var(--d-bg)}.m.d{color:var(--d-fg)}
+.a{background:var(--a-bg)}.m.a{color:var(--a-fg)}
+.i{background:var(--i-bg);color:var(--mute)}
+.x{background:var(--gap)}
+.mv{background:var(--mv-bg)}.m.mv{color:var(--mv)}.c.mv{box-shadow:inset 3px 0 0 var(--mv)}
+del{background:var(--d-hi);color:inherit;text-decoration:line-through 1px}
+ins{background:var(--a-hi);color:inherit;text-decoration:underline 2px;text-underline-offset:2px}
+.inv{display:inline-block;font:600 .7em/1.2 system-ui,sans-serif;padding:0 .2em;margin:0 .05em;border:1px solid var(--inv-fg);border-radius:3px;background:var(--inv-bg);color:var(--inv-fg);vertical-align:.1em;text-decoration:none;unicode-bidi:isolate}
+.tab{border-bottom:1px dotted var(--mute)}
+.tw{outline:1px dashed var(--mute);outline-offset:-1px}
+.eol{margin-left:.35em;font:.75em system-ui,sans-serif;color:var(--mute);-webkit-user-select:none;user-select:none}
+.cl{font:italic .8em system-ui,sans-serif;color:var(--mute)}
+.mvl{float:right;margin-left:.5em;padding:0 .35em;font:.75em/1.6 system-ui,sans-serif;border:1px solid var(--mv);border-radius:3px;color:var(--mv);text-decoration:none;-webkit-user-select:none;user-select:none}
+.mvl:focus-visible,.mvl:hover{text-decoration:underline}
+footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhere}
+@media print{.vt,.vt+label{display:none}.view{display:block!important}}
+table.ranges,table.entries{width:100%;border-collapse:collapse;font-size:13px;line-height:1.45;border:1px solid var(--bd);margin:.25rem 0 .75rem}
+.ranges th,.entries th{background:var(--hh);text-align:left;font-weight:600;padding:.25rem .5rem;border-bottom:1px solid var(--bd)}
+.ranges td,.entries td{padding:.2rem .5rem;vertical-align:top;border-top:1px solid var(--bd);overflow-wrap:anywhere}
+.ranges .n{color:var(--mute);text-align:right;width:3em}
+.ranges .op,.entries .st{white-space:nowrap}
+.loc{display:block;font-size:.85rem;color:var(--mute)}
+code.hex{display:block;white-space:pre;overflow-x:auto;font-size:12px;line-height:1.4;margin-top:.2rem}
+.ho{color:var(--mute)}
+.key.r{background:var(--mv-bg);color:var(--mv)}
+tr.cut td{background:var(--inv-bg);color:var(--inv-fg);text-align:center;padding:.4rem}
+.entries .p{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.key.ch{background:var(--hh);color:var(--fg)}.key.tc{background:var(--inv-bg);color:var(--inv-fg)}.key.eq{background:var(--gap);color:var(--mute)}
+.badge{display:inline-block;margin-left:.4em;padding:0 .35em;font:.75em/1.6 system-ui,sans-serif;border:1px solid var(--bd);border-radius:3px;color:var(--mute);vertical-align:.1em}
+.badge.bad{border-color:var(--d-fg);color:var(--d-fg);font-weight:700}
+.notice.flag{border-left-color:var(--d-fg)}
+.mute{color:var(--mute)}
+.entries tr.child>td{border-top:0;padding-top:0}
+.child details{margin:0 0 .4rem}
+.child summary{color:var(--mute)}
+.child .warnings{margin:.25rem 0;font-size:.85rem}
+.note{color:var(--mute);font-style:italic;margin:.25rem 0}
+.hunks{margin:.25rem 0;padding-left:1.25rem}
+.diff.emb{margin:.25rem 0}.diff.emb .cn{width:calc(8ch + 1em)}
+details.same{margin-top:.75rem}
+.st-partial strong{color:var(--d-fg)}
+</style>
+</head>
+<body>
+<header>
+<h1>Diff: left.zip → right.zip</h1>
+<p class="files">left.zip <span aria-hidden="true">→</span><span class="sr">compared with</span> right.zip</p>
+<p class="status st-different"><strong>Different.</strong> 1 changed entry: 0 added, 0 removed, 1 modified, 0 moved, 0 type changes; 1 unchanged; 50% similar.</p>
+<p class="notice" role="note"><strong>Positions only.</strong> The content of some modified entries was not available to this report, so their changes are listed by line number or byte offset.</p>
+<ul class="legend" aria-label="Legend"><li><span class="key a">+</span> added</li><li><span class="key d">−</span> removed</li><li><span class="key ch">~</span> modified</li><li><span class="key mv">→</span> moved (same content, new path)</li><li><span class="key tc">≠</span> type changed</li><li><span class="key eq">=</span> unchanged</li><li><span class="badge bad">unsafe path</span> absolute or climbing out of the tree</li><li><span class="inv">RLO</span> invisible or control character</li></ul>
+<details>
+<summary>Sides and options</summary>
+<table class="meta">
+<thead><tr><td></td><th scope="col">Left</th><th scope="col">Right</th></tr></thead>
+<tbody>
+<tr><th scope="row">Name</th><td>left.zip</td><td>right.zip</td></tr>
+<tr><th scope="row">Type</th><td>application/zip</td><td>application/zip</td></tr>
+<tr><th scope="row">Entries</th><td>2</td><td>2</td></tr>
+<tr><th scope="row">Size</th><td>421 bytes</td><td>517 bytes</td></tr>
+<tr><th scope="row">SHA-256</th><td><code>8c3d7c57971c975caab36f9595b9e05017e777712e514c769edefbdc6d44b3bd</code></td><td><code>f804485c0e1e7cb2e38bc14584fb0fd61cad63c7e325d3f03c3c079114b780cf</code></td></tr>
+</tbody>
+</table>
+<p>Options: moves detected yes, symbolic links followed no, ignore files used no, 0 patterns excluded, max depth 3, child budget 16777216 bytes.</p>
+</details>
+</header>
+<main>
+<h2>Entries</h2>
+<table class="entries">
+<thead><tr><th scope="col">Status</th><th scope="col">Path</th><th scope="col">Left</th><th scope="col">Right</th><th scope="col">SHA-256</th></tr></thead>
+<tbody>
+<tr><td class="st"><span class="key ch" aria-hidden="true">~</span> modified</td><td class="p">inner.zip</td><td>file, 211 bytes</td><td>file, 307 bytes</td><td><code title="25d5bc1ce88b6f3aef4da286255667ff6eee1b28db9c43d6693a76b7ff8c352d">25d5bc1ce88b</code> <span aria-hidden="true">→</span><span class="sr">then</span> <code title="33891fc912238f0e2acc50e317fb555d99712fcb290c2633836c427f10fe7326">33891fc91223</code></td></tr>
+<tr class="child"><td></td><td colspan="4"><details>
+<summary>Archive: different, 2 changed entries (1 added, 1 modified), 40% similar</summary>
+<table class="entries">
+<thead><tr><th scope="col">Status</th><th scope="col">Path</th><th scope="col">Left</th><th scope="col">Right</th><th scope="col">SHA-256</th></tr></thead>
+<tbody>
+<tr><td class="st"><span class="key ch" aria-hidden="true">~</span> modified</td><td class="p">a.txt</td><td>file, 6 bytes</td><td>file, 12 bytes</td><td><code title="5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03">5891b5b522d5</code> <span aria-hidden="true">→</span><span class="sr">then</span> <code title="aadc1955c030f723e9d89ed9d486b4eef5b0d1c6945be0dd6b7b340d42928ec9">aadc1955c030</code></td></tr>
+<tr class="child"><td></td><td colspan="4"><details>
+<summary>Text: different, 1 change in 1 hunk, +1 -1 lines, 0% similar</summary>
+<p class="note">The content of this entry is not available to this report, so the changes are listed by line number.</p>
+<ul class="hunks">
+<li><code>@@ -1 +1 @@</code> 1 line removed, 1 added</li>
+</ul>
+</details></td></tr>
+<tr><td class="st"><span class="key a" aria-hidden="true">+</span> added</td><td class="p">b.txt</td><td><span class="mute" aria-hidden="true">—</span><span class="sr">absent</span></td><td>file, 4 bytes</td><td><span class="mute">—</span> <span aria-hidden="true">→</span><span class="sr">then</span> <code title="7aa7a5359173d05b63cfd682e3c38487f3cb4f7f1d60659fe59fab1505977d4c">7aa7a5359173</code></td></tr>
+</tbody>
+</table>
+<details class="same">
+<summary>1 unchanged entry</summary>
+<table class="entries">
+<thead><tr><th scope="col">Status</th><th scope="col">Path</th><th scope="col">Left</th><th scope="col">Right</th><th scope="col">SHA-256</th></tr></thead>
+<tbody>
+<tr><td class="st"><span class="key eq" aria-hidden="true">=</span> unchanged</td><td class="p">keep.txt</td><td>file, 5 bytes</td><td>file, 5 bytes</td><td><code title="a6328afc76e9db71da297ebff4b0d3e7a7eb3b01d917c05a6573fef121b6ecb6">a6328afc76e9</code></td></tr>
+</tbody>
+</table>
+</details>
+</details></td></tr>
+</tbody>
+</table>
+<details class="same">
+<summary>1 unchanged entry</summary>
+<table class="entries">
+<thead><tr><th scope="col">Status</th><th scope="col">Path</th><th scope="col">Left</th><th scope="col">Right</th><th scope="col">SHA-256</th></tr></thead>
+<tbody>
+<tr><td class="st"><span class="key eq" aria-hidden="true">=</span> unchanged</td><td class="p">top.txt</td><td>file, 4 bytes</td><td>file, 4 bytes</td><td><code title="f7de2947c64cb6435e15fb2bef359d1ed5f6356b2aebb7b20535e3772904e6db">f7de2947c64c</code></td></tr>
+</tbody>
+</table>
+</details>
+</main>
+<footer>
+<p>Diff Document <code>sha256:3a7662171b14fe686ba7f7dc64d4f335b303749b2d4f48e6d25f577650a4555a</code>, schema 0.4.0.</p>
+</footer>
+</body>
+</html>

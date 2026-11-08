@@ -17,6 +17,23 @@ pub(crate) const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 /// Magic number of a zstd frame.
 pub(crate) const ZSTD_MAGIC: [u8; 4] = [0x28, 0xb5, 0x2f, 0xfd];
 
+/// True when `bytes` start with the magic number of a zstd skippable frame
+/// (`0x184D2A50` to `0x184D2A5F`, little-endian).
+pub(crate) fn is_skippable_frame(bytes: &[u8]) -> bool {
+    bytes.len() >= 4 && bytes[0] & 0xf0 == 0x50 && bytes[1..4] == [0x2a, 0x4d, 0x18]
+}
+
+/// The bytes after the skippable frames at the start of `data`, or `None`
+/// when one of them is cut short. Each frame is its magic number, a 4-byte
+/// little-endian length and that many bytes of user data.
+fn skip_skippable_frames(mut data: &[u8]) -> Option<&[u8]> {
+    while is_skippable_frame(data) {
+        let len = u32::from_le_bytes(data.get(4..8)?.try_into().ok()?);
+        data = data.get(usize::try_from(len).ok()?.checked_add(8)?..)?;
+    }
+    Some(data)
+}
+
 /// The error a guarded reader returns when the ratio limit trips.
 #[derive(Debug)]
 pub(crate) struct RatioExceeded;
@@ -46,6 +63,20 @@ impl Read for Counting<'_> {
         let n = self.data.read(buf)?;
         self.taken.set(self.taken.get() + n as u64);
         Ok(n)
+    }
+}
+
+impl Counting<'_> {
+    /// Steps over the zstd skippable frames at the current position; they
+    /// count as compressed bytes read. `false` when one is cut short.
+    fn skip_frames(&mut self) -> bool {
+        let Some(rest) = skip_skippable_frames(self.data) else {
+            return false;
+        };
+        let skipped = self.data.len() - rest.len();
+        self.taken.set(self.taken.get() + skipped as u64);
+        self.data = rest;
+        true
     }
 }
 
@@ -124,6 +155,8 @@ pub(crate) fn peek(format: Format, bytes: &[u8], len: usize, limits: &Limits) ->
 }
 
 /// One or more zstd frames, one after another (`ruzstd`, window limited).
+/// Skippable frames before, between and after them are stepped over; `ruzstd`
+/// leaves them to the caller.
 struct Zstd<'a> {
     decoder:
         Option<ruzstd::decoding::StreamingDecoder<Counting<'a>, ruzstd::decoding::FrameDecoder>>,
@@ -131,7 +164,17 @@ struct Zstd<'a> {
 }
 
 impl<'a> Zstd<'a> {
-    fn new(source: Counting<'a>, max_window: u64) -> Result<Zstd<'a>, ListError> {
+    fn new(mut source: Counting<'a>, max_window: u64) -> Result<Zstd<'a>, ListError> {
+        if !source.skip_frames() {
+            return Err(ListError::Invalid);
+        }
+        if source.data.is_empty() {
+            // Only skippable frames: an empty stream.
+            return Ok(Zstd {
+                decoder: None,
+                max_window,
+            });
+        }
         let decoder =
             ruzstd::decoding::StreamingDecoder::new_with_max_window_size(source, max_window)
                 .map_err(|_| ListError::Invalid)?;
@@ -159,7 +202,10 @@ impl Read for Zstd<'_> {
             let Some(done) = self.decoder.take() else {
                 return Ok(0);
             };
-            let source = done.into_inner();
+            let mut source = done.into_inner();
+            if !source.skip_frames() {
+                return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+            }
             if source.data.is_empty() {
                 return Ok(0);
             }

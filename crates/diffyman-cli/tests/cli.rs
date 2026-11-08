@@ -159,6 +159,22 @@ fn golden_outputs() {
             "tree-011.summary.txt",
             1,
         ),
+        (
+            "binary/002-inserted-bytes",
+            &["-f", "html"],
+            "binary-002.html",
+            1,
+        ),
+        // Two folders: the modified entries' content is read back, so the
+        // report shows their lines and bytes.
+        (
+            "tree/002-folder-changes",
+            &["-f", "html"],
+            "tree-002.html",
+            1,
+        ),
+        // Two zips: the entries' changes are listed by position.
+        ("tree/011-zip-changes", &["-f", "html"], "tree-011.html", 1),
     ];
     for (case, extra, name, exit) in cases {
         let out = diff_case(case, extra);
@@ -226,10 +242,14 @@ fn exit_codes() {
     assert_eq!(code(&out), 2);
     assert_eq!(code(&diffyman(&["diff", path(&left)])), 2);
     assert_eq!(code(&diffyman(&["no-such-command"])), 2);
-    // HTML is for text documents only.
-    let out = diff_case("tree/011-zip-changes", &["-f", "html"]);
+    // HTML covers every kind, and an error document still gets a report
+    // (exit code 2).
+    let out = diff_case("tree/020-zip-corrupt", &["-f", "html"]);
     assert_eq!(code(&out), 2);
-    assert!(stderr(&out).contains("HTML output supports text documents only"));
+    assert!(stdout(&out).contains("<code>invalid-archive</code> (left)"));
+    let out = diff_case("binary/001-png-one-byte", &["-f", "html"]);
+    assert_eq!(code(&out), 1);
+    assert!(stdout(&out).contains("<code class=\"hex\">"));
 }
 
 #[test]
@@ -454,6 +474,160 @@ fn dir_compares_folders_only() {
     let out = diffyman(&["dir", path(&left), path(&right)]);
     assert_eq!(code(&out), 2);
     assert!(stderr(&out).contains("is not a folder"), "{}", stderr(&out));
+}
+
+/// `--max-input-size` refuses a larger input before comparing it, the same
+/// way for mapped and read files, folder diffs and `textconv`.
+#[test]
+fn inputs_over_the_read_limit_are_refused() {
+    let (left, right) = sides("text/004-simple-line-edit");
+    let size = std::fs::metadata(&left).unwrap().len();
+    let within = size
+        .max(std::fs::metadata(&right).unwrap().len())
+        .to_string();
+    let below = (size - 1).to_string();
+    let base = ["diff", path(&left), path(&right), "--json"];
+    assert_eq!(
+        code(&diffyman(
+            &[&base[..], &["--max-input-size", &within]].concat()
+        )),
+        1
+    );
+    for extra in [&[][..], &["--no-mmap"][..]] {
+        let out = diffyman(&[&base[..], &["--max-input-size", &below], extra].concat());
+        assert_eq!(code(&out), 2);
+        assert!(out.stdout.is_empty());
+        let err = stderr(&out);
+        assert!(
+            err.starts_with("diffyman: error: limit-exceeded: "),
+            "{err}"
+        );
+        assert!(
+            err.contains(&format!("is larger than {below} bytes")),
+            "{err}"
+        );
+    }
+    let out = diffyman(&["textconv", path(&left), "--max-input-size", "1"]);
+    assert_eq!(code(&out), 2);
+    assert!(stderr(&out).contains("limit-exceeded"), "{}", stderr(&out));
+    // The archive side of a folder diff.
+    let (folder, _) = sides("tree/010-folder-vs-zip");
+    let (_, zip) = sides("tree/010-folder-vs-zip");
+    let zip_size = std::fs::metadata(&zip).unwrap().len();
+    let limit = |n: u64| n.to_string();
+    let run = |n: u64| {
+        diffyman(&[
+            "diff",
+            path(&folder),
+            path(&zip),
+            "--max-input-size",
+            &limit(n),
+        ])
+    };
+    let out = run(zip_size - 1);
+    assert_eq!(code(&out), 2, "{}", stderr(&out));
+    assert!(stderr(&out).contains("limit-exceeded"), "{}", stderr(&out));
+    assert_eq!(
+        code(&run(zip_size)),
+        code(&diffyman(&["diff", path(&folder), path(&zip)]))
+    );
+    // Sizes take units; nonsense is a usage error.
+    assert_eq!(
+        code(&diffyman(
+            &[&base[..], &["--max-input-size", "1M"]].concat()
+        )),
+        1
+    );
+    assert_eq!(
+        code(&diffyman(
+            &[&base[..], &["--max-input-size", "lots"]].concat()
+        )),
+        2
+    );
+}
+
+/// A pipe is read up to the limit and no further: a writer that would go on
+/// past it is cut off, and the diff ends with `limit-exceeded`.
+#[cfg(unix)]
+#[test]
+fn pipes_stop_at_the_read_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let fifo = dir.path().join("fifo");
+    let made = Command::new("mkfifo").arg(&fifo).status();
+    if !made.is_ok_and(|s| s.success()) {
+        return; // No mkfifo on this system.
+    }
+    let other = dir.path().join("other.txt");
+    std::fs::write(&other, "x\n").unwrap();
+    let feed = |len: usize| {
+        let fifo = fifo.clone();
+        std::thread::spawn(move || {
+            use std::io::Write as _;
+            let mut writer = std::fs::OpenOptions::new().write(true).open(fifo).unwrap();
+            // The reader closes the pipe once it is over its limit.
+            let _ = writer.write_all(&vec![b'x'; len]);
+        })
+    };
+    let writer = feed(8 << 20);
+    let out = diffyman(&["diff", path(&fifo), path(&other), "--max-input-size", "64K"]);
+    writer.join().unwrap();
+    assert_eq!(code(&out), 2);
+    let err = stderr(&out);
+    assert!(err.contains("limit-exceeded: "), "{err}");
+    assert!(err.contains("is larger than 65536 bytes"), "{err}");
+    // Within the limit (here the default for pipes) the pipe is compared.
+    let writer = feed(1000);
+    let out = diffyman(&["diff", path(&fifo), path(&other), "--json"]);
+    writer.join().unwrap();
+    assert_eq!(code(&out), 1, "{}", stderr(&out));
+    let doc: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(doc["left"]["size"], 1000);
+}
+
+/// Options files: a key given twice is an error, control characters in
+/// messages are escaped, and an oversized file is not read.
+#[test]
+fn options_files_are_strict() {
+    let (left, right) = sides("text/004-simple-line-edit");
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("options.json");
+    let run = |json: &[u8]| {
+        std::fs::write(&file, json).unwrap();
+        diffyman(&["diff", path(&left), path(&right), "--options", path(&file)])
+    };
+    let out = run(br#"{"context": 1, "ignore": {"case": true, "case": false}}"#);
+    assert_eq!(code(&out), 2);
+    let err = stderr(&out);
+    assert!(err.contains("invalid options: "), "{err}");
+    assert!(err.contains(r#"duplicate key "case""#), "{err}");
+    for json in [
+        &b"{\"\\u001b[2J\\u001b]0;owned\\u0007\": 1}"[..],
+        &b"{\"\\u202e\\u001b\": 1, \"\\u202e\\u001b\": 1}"[..],
+    ] {
+        let out = run(json);
+        assert_eq!(code(&out), 2);
+        let err = stderr(&out);
+        assert!(
+            err.starts_with("diffyman: error: invalid options: "),
+            "{err}"
+        );
+        let body = err.trim_end_matches('\n');
+        assert!(
+            !body.chars().any(|c| c.is_control() || c == '\u{202e}'),
+            "raw control character in {err:?}"
+        );
+        assert!(body.contains("\\u{1b}"), "{err}");
+    }
+    let mut big = b"{\"ignore\": {\"regex\": [\"".to_vec();
+    big.resize(2 << 20, b'a');
+    big.extend_from_slice(b"\"]}}");
+    let out = run(&big);
+    assert_eq!(code(&out), 2);
+    assert!(
+        stderr(&out).contains("limit-exceeded: "),
+        "{}",
+        stderr(&out)
+    );
 }
 
 #[test]

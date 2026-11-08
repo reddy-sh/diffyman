@@ -143,8 +143,9 @@ below match the earlier build byte for byte (text, and JSON without `provenance`
   pages stay in the file cache, outside the process footprint. Unsafe code is denied workspace-wide;
   the map is the one allowed exception.
 - **Lines.** `lines::LineIndex` keeps only line start offsets (4 bytes per line under 4 GiB); content
-  and terminator are derived from the text on demand. The text renderer walks lines with a forward
-  `LineCursor` instead of a line table.
+  and terminator are derived from the text on demand. Since increment 1c the split lives in
+  `diffyman-model` (`diffyman_model::lines`, re-exported by `diffyman-algo`), so the renderers split
+  exactly as the engine does, and the CLI renders from the engine's own index (below).
 - **Identical inputs.** Byte-identical sides are decoded once (one SHA-256, one line index) and never
   tokenized: the whole file is the common prefix.
 - **Trim before interning.** `key::tokenize_core` finds the common prefix and suffix on raw bytes,
@@ -153,14 +154,16 @@ below match the earlier build byte for byte (text, and JSON without `provenance`
   token ids are a relabeling that the algorithms do not depend on. `key::is_approximate_core` gives the
   same answer as `is_approximate` on the full sequences: a changed line also counts when its key occurs
   only in the trimmed lines, which are read only when the core alone cannot decide.
-- **Keys and interning.** With no normalizing option, the key of a line is its raw bytes, borrowed from
-  the text (equal raw bytes mean equal content and terminator). Otherwise each distinct key is copied
-  once into one arena, built in a reused buffer. The table (`hashbrown` 0.15.5 `HashTable`, `foldhash`
-  0.1.5, fixed seed) stores a token and a 32-bit hash per distinct key, so it grows without reading keys
-  again. Ids are assigned in first-seen order, so the hash function never affects output.
+- **Keys and interning.** No key is stored: each token remembers the first line that has it. With no
+  normalizing option the key of a line is its raw bytes (equal raw bytes mean equal content and
+  terminator). Otherwise lines with equal raw bytes still have equal keys, and two lines with equal
+  hashes but different bytes build both keys again to compare them (increment 1c; before, each
+  distinct key was copied into an arena). The table (`hashbrown` 0.15.5 `HashTable`, `foldhash` 0.1.5,
+  fixed seed) stores a token and a 32-bit hash per distinct key, so it grows without reading keys again.
+  Ids are assigned in first-seen order, so the hash function never affects output.
 - **Threads.** On native targets, the two sides are decoded (SHA-256, UTF-8 check, line index) on two
-  threads above 4 MiB per side, and line keys are hashed on two threads above 65,536 lines per side;
-  ids are still assigned in order on one thread. WASM builds have no threads.
+  threads above 4 MiB per side, and line keys are built and hashed on two threads above 65,536 lines
+  per side; ids are still assigned in order on one thread. WASM builds have no threads.
 - **Output.** The canonical writer streams to any `io::Write` (and the document id is hashed as it is
   produced): each object is serialized once to read its keys, then once per key in sorted order,
   writing only that member. No text or JSON tree is held, whatever the document size.
@@ -180,3 +183,104 @@ the line diff and 0.1 s to writing the 19 MB document. The remaining footprint i
 index (77 MB), the tokens (77 MB), the interning table (about 210 MB while it exists) and the
 Histogram working set. With a cold file cache, the first pass reads the files from disk and the run
 is I/O bound.
+
+#### Rendered output and normalized keys (increment 1c)
+
+Output is unchanged: no golden file or renderer snapshot was re-blessed, and the spike-A outputs
+match the previous build byte for byte (JSON without `provenance`, text, unified and HTML, 1 GB log
+pair; 7 more cases under 7 ignore-option sets).
+
+- **Renderers reuse the engine's lines.** `diffyman::diff_document_with_text` also returns both
+  decoded inputs (`TextInputs`: each text with its `LineIndex`, shared when the inputs are
+  byte-identical). `diffyman_render::unified_computed` and `html_computed` take them with the input
+  bytes as `Computed`, so a caller that has just computed the document (the CLI) is not hashed,
+  validated and split again. They still check sizes, line counts, that each text fills its input, and
+  the hunk structure, so a wrong claim can give wrong lines but never a panic. `unified` and `html`
+  keep the full SHA-256 check for documents from anywhere else, now with the 4-byte index instead of
+  a 24-byte line record.
+- **Key building in one pass.** Whitespace modes write straight into the key buffer instead of a new
+  `String` per line; ASCII runs are case folded as bytes (CaseFolding.txt maps only `A`–`Z` among
+  ASCII), other characters through `icu_casemap`; under `change`, an ASCII line is copied and
+  lowercased in bulk and only its runs of two or more spaces are closed up (found with a prebuilt
+  `memchr::memmem` finder). A test pins the bytes to the straightforward definition for every mode.
+
+| 1 GB log pair, CLI | Before | After |
+|---|---|---|
+| `--json` | 1.91 s, 537 MB | 2.02 s, 535 MB |
+| text (default format) | 3.60 s, 1,021 MB | 2.12 s, 593 MB |
+| `--format unified` | 3.48 s, 1,021 MB | 2.00 s, 583 MB |
+| `--format html` | 3.30 s, 987 MB | 1.99 s, 546 MB |
+| `--json -i --ignore-whitespace change` | 16.75 s, 1,489 MB | 2.46 s, 534 MB |
+| text `-i --ignore-whitespace change` | 18.57 s, 1,974 MB | 2.60 s, 590 MB |
+
+Before, case folding through the Unicode tables took about half of the `-i` run, the per-line
+`String` and the copying of every distinct key (about 1 GB for this pair) most of the rest. Single
+runs vary by up to 0.3 s on this machine; six interleaved `--json` runs of each build differ by
+about 2% (1.98 s against 2.02 s median).
+
+### Slider compaction
+
+Added in Phase 1, increment 1c. This changes output, but no version has been released, so the IDs stay
+`text.histogram@1`, `text.myers@1` and `text.patience@1` (as for the Histogram budget above); the change
+is recorded here and in the status log.
+
+- **Problem.** A run of changed lines whose first line equals the line below it, or whose last line
+  equals the line above it, can be shown at several positions. The algorithms place such sliders
+  wherever their search ends, so an inserted function often started with the closing brace or blank
+  line of its neighbour. Moved blocks then lost a boundary line to an `equal` op (exact boundaries
+  0.825 on the labeled corpus), and unified output differed from `git diff --histogram` on 14 of 40
+  random edit pairs.
+- **Decision.** After the line diff, every algorithm's alignment goes through slider compaction
+  (spec §7.3.1): each run slides up and then down as far as it can, merging with runs it touches; it is
+  lined up with a change on the other side when it can be, and otherwise placed by git's indent
+  heuristic. The heuristic is always on, with no option: it is git's default since 2.14, the point is
+  to agree with what people see in git, and an option would add a field to the document for little
+  gain. `--no-indent-heuristic` output (runs at their lowest position) is not offered.
+- **Independent implementation.** git's xdiff is LGPL, so no code was copied or translated.
+  `crates/diffyman-algo/src/slider.rs` implements the behaviour from its public description: the git
+  documentation of `--indent-heuristic`, Michael Haggerty's 2016 description of the heuristic and its
+  tuned weights, and the observable output of git on test inputs. The weights are numeric facts of
+  that published heuristic; the rules are written out in spec §7.3.1.
+- **Where.** The engine compacts the whole-file alignment (`key::compact_core`), because a run may
+  slide into the common prefix or suffix that the line diff trims. Inside the trimmed region lines
+  compare by token; outside it by key (raw bytes when no option normalizes lines). The binary adapter
+  and the sub-op alignment of move detection use `line_diff::align` directly and are not compacted.
+- **Bounds.** Work units (one per shift or absorbed line, one per comparison plus one per 64 bytes
+  compared outside the trimmed region, one per line the heuristic reads) under a budget of
+  `max(1,000,000, 64 × lines)`; past it the pass stops and the rest stays as the algorithm left it. No
+  clock. 200,000 copies of one line with one more inserted cost under 8 units per line.
+- **Ignored blank lines.** Compaction keeps the number of changed lines on each side, but not which
+  lines form one change op, and `ignore.blankLines` is applied after it (spec §7.3 step 3). A blank-only
+  run that joins or lines up with a change that holds a non-blank line is then counted instead of
+  `ignored` (or the other way round), so `linesAdded`, `linesRemoved` and `similarity` can change under
+  that option. git's `--ignore-blank-lines` behaves the same way, and keeping the classification of the
+  uncompacted alignment would bring back the arbitrary positions compaction removes, so this is kept
+  and specified (spec §7.3.1 rule 4, case `text/043`).
+- **Tests.** Unit tests in `slider/tests.rs` (lining up with the other side, the inserted-function
+  case, merging, the budget, 300 random rounds checking a valid alignment with the same changed keys,
+  linear work on repeated lines), and the trimmed-path tests in `key.rs` now compare compaction over
+  the trimmed core with compaction over the full token sequences for every whitespace mode, case
+  folding and regex masks.
+
+Results (release build, git 2.54):
+
+| Check | Before | After |
+|---|---|---|
+| Exact boundaries, 40 matched labeled moves | 0.825 (33) | 1.000 (40) |
+| 40 random edit pairs of repository files, unified output equal to `git diff --histogram` | 26 | 40 |
+| 100 more random pairs, same check | 77 | 100 |
+| The same 100 pairs, `--algorithm myers` against `git diff --diff-algorithm=myers` | not measured | 100 |
+| Spike-A 50 MB source pair, unified output equal to git's | no (1,563 of 2,560 hunk headers) | yes, byte for byte |
+| Text corpus, `compare_unified.py` (git without, then with, the indent heuristic) | 25 of 36 | 25 of 36 |
+
+Re-blessing changed 15 golden files (`text/037` and `moved/` 001, 002, 004, 007, 008, 010, 011, 012,
+013, 014, 026, 032, 041, 046) and 6 renderer snapshot files. In every one the changed-line counts,
+`linesUnchanged` and `similarity` are the same; only positions moved (an inserted or deleted function
+now starts at its header and takes its own blank line or brace), `hunkCount` changed in two cases
+(`moved/032`, `moved/041`: one hunk split in two) and seven moves gained the boundary line their label
+always had. The remaining text-corpus differences from git are VT and FF under `-b`, git's
+`--ignore-blank-lines` grouping, lone CR lines and where context lines come from under an ignore
+option (renderer README). Timing and memory through the CLI are unchanged within noise: the 1 GB log
+pair takes 1.95 s and 537 MB with `--json` (was 1.86 s and 537 MB), the 50 MB source pair 0.27 s (was
+0.25 s), 5 M copies of one line 0.55 s (was 0.54 s). The 1 GB pair has 5 fewer changes and 6 fewer
+hunks, with the same 98,992 added and 97,670 removed lines.

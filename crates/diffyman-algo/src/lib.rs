@@ -3,22 +3,26 @@
 //! Phase 1) moved-block detection.
 //!
 //! This crate knows nothing about the Diff Document JSON; `diffyman` (the
-//! engine) maps its results onto `diffyman-model` types.
+//! engine) maps its results onto `diffyman-model` types. It uses only the
+//! model's line split.
 //!
-//! - [`lines`]: LF, CRLF and lone-CR line splitting (Diff Document spec §7.2).
+//! - [`lines`]: LF, CRLF and lone-CR line splitting (Diff Document spec §7.2),
+//!   from `diffyman-model`, so renderers split lines exactly as the diff did.
 //! - [`key`]: comparison keys (whitespace modes, simple case folding, regex
 //!   masks) and token interning.
 //! - [`line_diff`]: `text.histogram@1`, `text.myers@1`, `text.patience@1`.
+//! - [`slider`]: slider compaction and the indent heuristic (spec §7.3.1).
 //! - [`ops`]: the full op list and hunk grouping (spec §7.3, §7.4).
 //! - [`refine`]: word, char and smart inline spans (`text.refine@1`).
 //! - [`moves`]: pure and edited moved blocks (`text.moves@1`).
 
 pub mod key;
 pub mod line_diff;
-pub mod lines;
+pub use diffyman_model::lines;
 pub mod moves;
 pub mod ops;
 pub mod refine;
+pub mod slider;
 
 /// Versions of the libraries whose behavior defines the algorithm IDs. They
 /// must match the exact pins in the workspace `Cargo.toml`.

@@ -1,12 +1,12 @@
 # Diff Document specification
 
-- **Schema version:** `0.3.0` (draft). Changes from `0.2.0` are listed in §18, changes from `0.1.0` in §15.
+- **Schema version:** `0.4.0` (draft). Changes from `0.3.0` are listed in §20, changes from `0.2.0` in §18, changes from `0.1.0` in §15.
 - **Status:** Phase 1. Normative for the reference engine and for the golden corpus.
 - **Keywords:** MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
 
 ## 1. Purpose
 
-The Diff Document is diffyman's only result format. The engine, the CLI (`--json`), every binding and the REST API all return it, and consumers render or store it without re-running the diff. Version 0.3.0 defines `kind: "text"`, with hunks and moved blocks, `kind: "binary"`, with changed byte ranges, and `kind: "tree"`, with the entries of two folders or archives and a child document for each changed file. Type detection (§16) decides which one a pair of inputs gets. The other blocks are reserved and stay `[]` or `null`.
+The Diff Document is diffyman's only result format. The engine, the CLI (`--json`), every binding and the REST API all return it, and consumers render or store it without re-running the diff. Version 0.4.0 defines `kind: "text"`, with hunks and moved blocks, `kind: "binary"`, with changed byte ranges, and `kind: "tree"`, with the entries of two folders or archives and a child document for each changed file. Type detection (§16) decides which one a pair of inputs gets. The other blocks are reserved and stay `[]` or `null`.
 
 This file is the single normative definition of the document shape, the options and the warning codes. [Text granularity and moved blocks](text-granularity-and-moves.md) defines how inline spans and moves are computed and refers back here for every shape. Where the two disagree, this file wins.
 
@@ -19,7 +19,7 @@ This file is the single normative definition of the document shape, the options 
 
 ## 3. Conformance
 
-Two documents are **conformant-equal** when their RFC 8785 bytes (§5) are identical once the top-level `provenance` key is removed. An engine or binding conforms when, for every case `tests/corpus/<case>/{left.*, right.*, options.json, expected.json}`, its output is conformant-equal to `expected.json`. That file MAY be pretty-printed and SHOULD leave out `provenance`. The harness passes the corpus file names (such as `left.txt`) as the input names. A document with an `approximate` warning is never a valid expected result. Each algorithm is defined by its reference implementation plus the rules in §7.
+Two documents are **conformant-equal** when their RFC 8785 bytes (§5) are identical once the top-level `provenance` key is removed. An engine or binding conforms when, for every case `tests/corpus/<case>/{left.*, right.*, options.json, expected.json}`, its output is conformant-equal to `expected.json`. That file MAY be pretty-printed and SHOULD leave out `provenance`. The harness passes the corpus file names (such as `left.txt`) as the input names. A document with an `approximate` warning is never a valid expected result. Each algorithm is defined by its reference implementation plus the rules in §7. A build without archive support (§19.7) conforms when it gives conformant-equal documents for every other case and refuses the cases §19.7 lists with an `unsupported` error.
 
 ## 4. Presence rules: null, absent and empty
 
@@ -42,9 +42,9 @@ The canonical form is **RFC 8785 JSON Canonicalization Scheme (JCS)**:
 
 ## 6. Top-level fields
 
-| Field | Type | 0.3.0, kinds `text`, `binary` and `tree` |
+| Field | Type | 0.4.0, kinds `text`, `binary` and `tree` |
 |---|---|---|
-| `schemaVersion` | string | **Required**: `"0.3.0"` |
+| `schemaVersion` | string | **Required**: `"0.4.0"` |
 | `id` | string | **Required** (§5) |
 | `kind` | enum: `text` `code` `structured` `table` `document` `image` `binary` `tree` | **Required**: `"text"`, `"binary"` or `"tree"`, chosen as in §16.2 |
 | `status` | enum: `identical` `different` `partial` `error` | **Required**. `partial` appears only for kind `tree` (§19.6). |
@@ -61,7 +61,7 @@ The canonical form is **RFC 8785 JSON Canonicalization Scheme (JCS)**:
 | `warnings` | Warning[] (§10) | **Required** |
 | `options` | Options (§9), fully resolved | **Required** |
 | `provenance` | object (§11) | **Required**; left out of `id` and conformance |
-| `extensions` | object | `{}` in 0.3.0 |
+| `extensions` | object | `{}` in 0.4.0 |
 
 **Status rules.** `error` if `warnings` contains any entry with `severity: "error"`. Otherwise, for kind `tree`, `partial` if some entry content was not read (§19.6). Otherwise `identical` if there are no change ops (§7.3) under the resolved options (kind `text`), `bytes` is `[]` (kind `binary`), or every entry is `unchanged` (kind `tree`). Otherwise `different`. `ignored` ops (§6.4) are not change ops. So two files that differ only in ignored whitespace, only in a BOM, only in text masked by `ignore.regex`, or (with `ignore.blankLines`) only in blank lines, are `identical`, and their `hunks` is `[]` (§7.4). Compare `left.sha256` with `right.sha256` to test byte equality.
 
@@ -72,7 +72,7 @@ When `status` is `error`: `hunks`, `moves` and `bytes` are `[]`, and `stats` and
 | Field | Type | Rule |
 |---|---|---|
 | `name` | string or `null` | The final path component given by the caller, or `null` when the input is bytes with no name. Never a full path. |
-| `mediaType` | string or `null` | The detected media type (§16.1), such as `"text/plain"`, `"text/csv"` or `"image/png"`, whatever the kind. Writers in 0.3.0 never write `null`. |
+| `mediaType` | string or `null` | The detected media type (§16.1), such as `"text/plain"`, `"text/csv"` or `"image/png"`, whatever the kind. Writers since 0.3.0 never write `null`. |
 | `size` | integer | Length of the raw input in bytes, including any BOM |
 | `sha256` | string | Lowercase hex SHA-256 of the raw input bytes |
 | `encoding` | string or `null` | Kind `text`: `"utf-8"` when the input decodes, `null` when it does not. Kind `binary`: the detected encoding of a text or empty input (`"utf-8"`, `"utf-16le"`, `"utf-16be"`, §16.1), `null` for a binary input. |
@@ -146,12 +146,12 @@ Span   = { side, line, start, end, op }
 - `ignored` (since 0.2.0) appears only with `ignore.blankLines: true`. It covers lines that were a change op but are all blank (§7.3 step 3). Its counts may differ, and either one (not both) may be 0. It is not a change op: it does not make the document `different`, it is not counted in `stats` (§6.3), it never starts a hunk (§7.4) and its lines are never part of a move (§6.5). Renderers SHOULD show it like the change it would have been, for example dimmed. Its `inline` is always `[]`.
 - An op always has both ranges. An empty range carries the insertion point (§6.2).
 - The ops of a hunk tile the hunk's ranges in order with no gaps: each op starts where the previous one ended, on both sides. `hunk.left.start` is the `leftRange.start` of the first op, and `hunk.left.count` is the sum of the ops' `leftRange.count`. The right side works the same way.
-- `inline` is `[]` unless `granularity` is not `line` (§9). When used, spans appear only on `replace` ops. `side` is `"left"` (with `op: "delete"`) or `"right"` (with `op: "insert"`). `line` is the absolute 1-based line number on that side. `start` and `end` are inline offsets (§6.2). Left spans come first, then right spans, each sorted by `(line, start)`.
+- `inline` is `[]` unless `granularity` is not `line` (§9). When used, spans appear only on `replace` ops, and never on a line that belongs to a move: an edited move carries the spans of its lines itself (`moves[].inline`, §6.5, since 0.4.0). `side` is `"left"` (with `op: "delete"`) or `"right"` (with `op: "insert"`). `line` is the absolute 1-based line number on that side. `start` and `end` are inline offsets (§6.2). Left spans come first, then right spans, each sorted by `(line, start)`.
 
 ### 6.5 Moves
 
 ```
-Move    = { id, kind, from: MoveEnd, to: MoveEnd, similarity, fromOps: OpRef[], toOps: OpRef[] }
+Move    = { id, kind, from: MoveEnd, to: MoveEnd, similarity, fromOps: OpRef[], toOps: OpRef[], inline: Span[] }
 MoveEnd = { side, range: Range }
 OpRef   = { hunk, op }
 ```
@@ -166,10 +166,12 @@ A move says that a block of deleted left lines reappears as a block of inserted 
 - `similarity` is the block similarity, computed with integers in basis points (1 bp = 0.0001) and written as the double nearest to `bp / 10000`, exactly like `stats.similarity` (§6.3, §5): `1` for every pure move, for example `0.875` for an edited one, never `1.0000`. An edited move can also have `1` when all its non-trivial lines pair with equal move keys but it is not pure, for example because its indentation delta changes or one side has an extra blank line ([moves spec](text-granularity-and-moves.md) §4.5); `kind` tells the two apart.
 - `fromOps` and `toOps` list every op the left and right range touch, in document order, each as `{hunk, op}`: `hunk` is the hunk `id` and `op` the 0-based index into that hunk's `ops`. Neither list is empty. Both depend on `options.context`, because context decides how ops are grouped into hunks.
 - Entries are sorted by `from.range.start`, then `to.range.start`.
+- `inline` (since 0.4.0) holds what changed inside an edited move, so a reader sees the renamed variable or the fixed typo of a block that also moved. It has the `Span` shape and order of an op's `inline` (§6.4): `side` `"left"` with `op: "delete"` for lines of `from.range`, `side` `"right"` with `op: "insert"` for lines of `to.range`, `line` the absolute 1-based line number, `start` and `end` offsets in `positionEncoding` units (§6.2), left spans first, then right spans, each sorted by `(line, start)`. Every span lies inside the move's own range on its side. The spans are those of `text.refine@1` for one `replace` op made of the two ranges, with the same `granularity`, ignore rules, regex masks, limits and `smart` noise cutoff, except that each line's indentation is left out ([moves spec](text-granularity-and-moves.md) §4.7). `inline` is `[]` when `granularity` is `line`, for every `pure` move, when the move exceeds the refinement limits (then the document has `refine-skipped-limit`, §10) and when the `smart` noise cutoff applies.
+- The spans of a moved line are only in its move: the ops never carry spans for lines of a move (§6.4). A renderer shows a moved line with `moves[].inline` of its move and every other changed line with the `inline` of its op.
 - Derived data is not stored. Renderers compute zebra stripes themselves, and the number of moved left lines is the sum of `from.range.count`. There is no move field in `stats`.
-- 0.2.0 has no per-line pairing for edited moves. A later minor version may add one as a new field.
+- There is no per-line pairing of the lines of an edited move; `inline` marks what changed between the two ranges as a whole. A later minor version may add a pairing as a new field.
 
-### 6.6 Reserved blocks (shapes are provisional; none is emitted in 0.3.0)
+### 6.6 Reserved blocks (shapes are provisional; none is emitted in 0.4.0)
 
 | Block | Planned shape |
 |---|---|
@@ -216,7 +218,7 @@ EntrySide = { type, size, sha256, target }
   - `sha256` is the lowercase hex SHA-256 of a file's content, or `null` for every other type and for a file whose content was not read.
   - `target` is the link text of a `symlink` or `hardlink`, exactly as stored and never resolved; `null` for every other type.
 - `childDocument` is the Diff Document (§6) of the two contents of a `modified` file entry, with every field except `provenance` (§19.5). It is `null` for every other entry and when the child was left out (`children-omitted`, §10). Its `id` is computed as usual (§5); its `left.name` and `right.name` are the last path components.
-- `childRef` is reserved for services that store child documents apart from their parent. It is always `null` in 0.3.0.
+- `childRef` is reserved for services that store child documents apart from their parent. It is always `null` in 0.4.0.
 
 ## 7. Text diff procedure (kind `text`)
 
@@ -266,10 +268,26 @@ Inline refinement (`text.refine@1`) and move keys (`text.moves@1`) apply the sam
 
 ### 7.3 Edit script and grouping
 
-1. Run the selected algorithm (§12) over the two key sequences. The result is a sequence of matched and unmatched lines.
+1. Run the selected algorithm (§12) over the two key sequences. The result is a sequence of matched and unmatched lines, which slider compaction (§7.3.1) then puts in canonical positions, for every algorithm.
 2. Build the **full op list**, which tiles both files completely. Each maximal run of matched lines becomes one `equal` op. Each maximal run of unmatched lines between two equal ops (or a file edge) becomes one **change op**: `replace` if it has lines on both sides, `delete` if it has left lines only, and `insert` if it has right lines only. So two change ops are never adjacent, however the algorithm interleaved its deletions and insertions.
 3. If `ignore.blankLines` is true, every change op whose lines are all blank (§7.2), on both sides, becomes an `ignored` op with the same ranges. Blankness is judged on the original content: regex masks and terminators do not matter, so `""` with LF versus `"  "` with CRLF is blank on both sides. A change op that holds any non-blank line stays a change op as a whole; it is not split. This matches git's `--ignore-blank-lines`. Like the change op it replaces, an `ignored` op is never adjacent to a change op or to another `ignored` op.
-4. No other post-processing (slider or indent heuristics) is applied in algorithm version `@1`.
+4. No other post-processing is applied in algorithm version `@1`.
+
+#### 7.3.1 Slider compaction
+
+A run of unmatched lines on one side is a slider when the line just above it has the same key as its last line (or the line just below it the same key as its first line): it can shift by one line and still describe the same change, as the blank line or closing brace between an inserted function and its neighbour can go at either end of the insertion. Each side is processed in turn, left first, then right (which sees the left result). For each run, top to bottom:
+
+1. Shift it up as far as it goes, then down as far as it goes. A run that comes to touch another run of the same side joins it, and a run that grew is shifted again, until its size stops changing. Note its highest position and the lowest position at which the other side has unmatched lines between the same two matched lines.
+2. If it cannot shift, leave it. Otherwise, if such a position on the other side exists, move it to the lowest one, so that a deletion and an insertion next to each other become one `replace` op. Otherwise move it to the position the **indent heuristic** picks among the lowest position and the ones above it, at most `min(size + 1, 100)` positions up (and not above its highest position).
+3. The indent heuristic (git's `--indent-heuristic`, the default since git 2.14, with the same weights) rates the two boundaries a position gives the run, one just above its first line and one just below its last line, and takes the position whose two ratings add up best; ties go to the lower position. **Indentation** is measured on the original content: U+0020 counts 1 column, U+0009 moves to the next multiple of 8, the first other character ends it, and it is capped at 200 (a whitespace-only line that reaches the cap counts as indented 200). A line with no other character is **blank** here. For a boundary just above line `s` (`s` = the line count for the end of the file):
+   - `indent`: the indentation of line `s` (none when it is blank or at the end of the file); `blanksAbove`: the blank lines directly above the boundary, and `indentAbove` the indentation of the nearest non-blank line above them (none at the file start); `blanksBelow` and `indentBelow` the same for the lines after line `s`. At most 20 blank lines are counted on either side; at 20, the nearest indentation counts as 0.
+   - `penalty`: +1 when nothing is above (`indentAbove` none and `blanksAbove` 0); +21 at the end of the file; with `after = 1 + blanksBelow` when `indent` is none and 0 otherwise, and `blanks = blanksAbove + after`, add `-30·blanks + 6·after`.
+   - `effective` = `indent`, or `indentBelow` when `indent` is none; it adds to the position's indent sum (none adds -1). When `effective` and `indentAbove` both exist: more indented than above adds +10 with `blanks > 0` and -4 without; equal adds 0; less indented adds +17 with `blanks > 0`, and without blanks +24 when `indentBelow` is more indented than `effective` and +23 otherwise.
+   - Position A is better than B when `60·sign(indentSum(A) - indentSum(B)) + penalty(A) - penalty(B) < 0`.
+4. Every shift trades an unmatched line for a matched line with the same key on the same side, so the number of unmatched lines on each side and their keys never change; only where the changes sit does. Without `ignore.blankLines`, `stats` other than `changeCount` and `hunkCount` therefore never change either. With it they can, because compaction runs before step 3 of §7.3 and changes which lines form one change op: a run of blank lines that slides next to, or joins, a change with a non-blank line, or is lined up with one on the other side, becomes part of that change op, so its lines are counted in `stats` and in the `similarity` denominator instead of being `ignored`; the reverse can happen too. git applies `--ignore-blank-lines` after its own compaction in the same way. Example (case `text/043`): left `""`, `""`, `a`, `  x`, `a`, `  x`, `a`, `""`; right `""`, `a`, `}`, `  x`, `a`, `""`. The algorithm deletes left line 2 (blank, so `ignored`) and replaces lines 4-5 with `}`; compaction slides the deletion of lines 4-5 up to lines 3-4, where it joins the blank one, so a `delete` of lines 2-4 and an `insert` of `}` remain, with `linesRemoved: 3` instead of 2 and no `ignored` op, as in git.
+5. Work is bounded: each shift, each line comparison (plus one unit per 64 bytes compared outside the trimmed common prefix and suffix) and each line the heuristic reads costs one unit, and the pass stops for good once `max(1000000, 64 × (left lines + right lines))` units are spent, leaving the remaining runs where the algorithm put them. No input of ordinary text comes near this limit, and the count is the same on every platform.
+
+With this step, `text.histogram@1` and `text.myers@1` give the same hunks as `git diff --histogram` and `git diff --diff-algorithm=myers` on typical source edits (the differences that remain come from the algorithms themselves and from VT and FF, which are whitespace in §7.2 but not in git).
 
 ### 7.4 Hunks
 
@@ -313,17 +331,17 @@ Each corpus case's `options.json`, and the options parameter of every API, is an
 }
 ```
 
-| Key | Values (default first) | 0.3.0 support |
+| Key | Values (default first) | 0.4.0 support |
 |---|---|---|
 | `algorithm` | `histogram`, `myers`, `patience` | Required |
-| `granularity` | `line`, `word`, `char`, `smart` | All required. `line` gives no inline spans. The other values fill `inline` on `replace` ops (§6.4) as defined in [text-granularity-and-moves.md](text-granularity-and-moves.md) §3, algorithm `text.refine@1` (`word`: UAX #29 word segments, `char`: extended grapheme clusters, `smart`: chosen per op). |
+| `granularity` | `line`, `word`, `char`, `smart` | All required. `line` gives no inline spans. The other values fill `inline` on `replace` ops (§6.4) and on edited moves (§6.5) as defined in [text-granularity-and-moves.md](text-granularity-and-moves.md) §3, algorithm `text.refine@1` (`word`: UAX #29 word segments, `char`: extended grapheme clusters, `smart`: chosen per op). |
 | `ignore.whitespace` | `none`, `trailing`, `change`, `all` | Required (§7.2) |
 | `ignore.case` | `false`, `true` | Required (§7.2) |
 | `ignore.blankLines` | `false`, `true` | Both required (since 0.2.0). `true` turns change ops whose lines are all blank into `ignored` ops (§7.3 step 3). |
 | `ignore.regex` | array of strings (default `[]`) | Required (since 0.2.0). Each pattern masks its matches in the comparison key (§7.2.1). The array is echoed in the given order. |
 | `context` | integer from 0 to 2^31 − 1 (default 3) | Required (§7.4) |
 | `positionEncoding` | `utf-8`, `utf-16`, `codepoint` | All required. It affects only the offsets of `inline` spans (§6.2), so with granularity `line` it only shows up in the echoed options. |
-| `detectMoves` | `false`, `true` | Both required. `true` fills `moves[]` (§6.5) using the detection of [text-granularity-and-moves.md](text-granularity-and-moves.md) §4, algorithm `text.moves@1` (pure and edited moves). It never changes `hunks` or `stats`; with a `granularity` other than `line`, moved lines get no inline spans. |
+| `detectMoves` | `false`, `true` | Both required. `true` fills `moves[]` (§6.5) using the detection of [text-granularity-and-moves.md](text-granularity-and-moves.md) §4, algorithm `text.moves@1` (pure and edited moves). It never changes `hunks` or `stats`; with a `granularity` other than `line`, moved lines get no inline spans on their ops, and an edited move carries its own in `moves[].inline`. |
 | `adapter` | `auto`, `text`, `binary`, `tree` | All required (since 0.3.0). Chooses the kind as in §16.2: `auto` gives kind `tree` when both inputs are archives, kind `text` when both inputs are UTF-8 text or empty, and kind `binary` otherwise; `text` always runs the text adapter (so an input that is not UTF-8 is an `invalid-utf8` error); `binary` always compares bytes; `tree` always reads both inputs as archives (an input that is not one is an `invalid-archive` error). A folder is always compared as a tree. |
 | `tree.followSymlinks` | `false`, `true` | Both required (since 0.3.0). Folders only (§19.2): `true` lists what a symbolic link points to instead of the link. Archive links are never followed. |
 | `tree.ignoreFiles` | `false`, `true` | Both required (since 0.3.0). Folders only: `true` leaves out what the `.gitignore` and `.ignore` files inside each folder exclude (§19.2). |
@@ -332,11 +350,11 @@ Each corpus case's `options.json`, and the options parameter of every API, is an
 | `tree.maxDepth` | integer from 0 to 16 (default 3) | Required (since 0.3.0). How many levels of archives inside a tree are read as trees (§19.5). |
 | `tree.childBudget` | integer from 0 to 2^31 − 1 (default 16777216) | Required (since 0.3.0). The total size in bytes of the canonical JSON of the child documents one top-level document may embed (§19.5). `0` embeds none. |
 
-The binary adapter has no options of its own in 0.3.0. For kind `binary`, `algorithm`, `granularity`, `ignore`, `context`, `positionEncoding`, `detectMoves` and `tree` are echoed but have no effect, except that an `ignore.regex` or `tree.exclude` error (§7.2.1, §19.2) still gives an error document: option errors do not depend on the inputs. For kind `text`, `tree` has no effect in the same way. For kind `tree`, the text and binary options apply to the child documents (§19.5).
+The binary adapter has no options of its own in 0.4.0. For kind `binary`, `algorithm`, `granularity`, `ignore`, `context`, `positionEncoding`, `detectMoves` and `tree` are echoed but have no effect, except that an `ignore.regex` or `tree.exclude` error (§7.2.1, §19.2) still gives an error document: option errors do not depend on the inputs. For kind `text`, `tree` has no effect in the same way. For kind `tree`, the text and binary options apply to the child documents (§19.5).
 
-- An options object with an unknown key, a wrong type or an unknown enum value is **invalid**. The API rejects it with an error and returns no document. Unknown keys are rejected, not ignored, because ignoring them would silently change the result. Typed APIs apply the same rules to options built in code: an `"unknown"` enum value (§2.3) or an out-of-range `context` is rejected the same way, so a document never echoes `"unknown"`.
+- An options object with an unknown key, a wrong type or an unknown enum value is **invalid**. The API rejects it with an error and returns no document. Unknown keys are rejected, not ignored, because ignoring them would silently change the result. Options JSON text that gives the same key twice in one object, at any depth, is invalid too (readers differ on which value wins); the reference engine's error message starts with `duplicate key`. Error messages that quote the input (a key, a path) write control and bidi-control characters as `\u{..}` escapes, so printing one never sends raw terminal escape sequences. Typed APIs apply the same rules to options built in code: an `"unknown"` enum value (§2.3) or an out-of-range `context` is rejected the same way, so a document never echoes `"unknown"`.
 - There is no separate option for move kinds or for whitespace in moves. `detectMoves` is the only switch; which move kinds it finds is fixed by the moves algorithm ID (§12), and move keys follow `ignore.whitespace` and `ignore.case` (moves spec §4.4).
-- A valid value that this engine version does not support produces a document with `status: "error"` and an `unsupported-option` error. No value is deferred in 0.3.0; the code stays for later options.
+- A valid value that this engine version does not support produces a document with `status: "error"` and an `unsupported-option` error. No value is deferred in 0.4.0; the code stays for later options.
 - `ignore.regex` must be an array of strings; anything else is invalid. Whether a string compiles is checked when the diff runs: a pattern that does not compile gives an `invalid-regex` error document, and one over a limit of §7.2.1 a `limit-exceeded` error document. Compiling depends on the regex dialect, not on the shape of the options, and the document still echoes the options, so the caller can see what failed. `tree.exclude` works the same way, with `invalid-glob` (§19.2).
 - `tree` must be an object whose members follow the table; an unknown key, `null`, or `maxDepth` or `childBudget` out of range is invalid.
 
@@ -377,9 +395,9 @@ Warning = { code, severity: "warning" | "error", side: "left" | "right" | null, 
 | `unsupported-option` | error | null | `An option value is not supported by this engine version.` |
 | `limit-exceeded` | error | null | `Input exceeds a configured size or complexity limit.` |
 
-`approximate` means a cost limit or a host-set deadline stopped the search early. The hunks are still a valid edit script. An engine MAY set it whenever it cannot rule out that a cost limit engaged; the reference engine sets it when more than 500 changed lines have a key that also occurs on the other side (`diffyman-algo` `line_diff::is_approximate`). Wall-clock deadlines are not deterministic, so 0.1.0 engines apply none by default.
+`approximate` means a cost limit or a host-set deadline stopped the search early. The hunks are still a valid edit script. An engine MAY set it whenever it cannot rule out that a cost limit engaged; the reference engine sets it when more than 500 changed lines have a key that also occurs on the other side (`diffyman-algo` `line_diff::is_approximate`), except for a pure insertion or deletion: when one side is empty once the common prefix and suffix are trimmed, no search runs and the result is exact. Wall-clock deadlines are not deterministic, so 0.1.0 engines apply none by default.
 
-`refine-skipped-limit` appears once, with `side: null`, when `granularity` is not `line` and at least one `replace` op got `inline: []` because it exceeds the refinement limits (moves spec §3.1, §3.4). It is not repeated per op and carries no count. Readers that need the affected ops look for `replace` ops with empty `inline`. The `smart` noise cutoff (moves spec §3.3) also leaves `inline` empty, so this is an upper bound, not an exact list.
+`refine-skipped-limit` appears once, with `side: null`, when `granularity` is not `line` and at least one `replace` op or edited move (§6.5, since 0.4.0) got `inline: []` because it exceeds the refinement limits (moves spec §3.1, §3.4). It is not repeated per op and carries no count. Readers that need the affected ops look for `replace` ops and edited moves with empty `inline`. The `smart` noise cutoff (moves spec §3.3) also leaves `inline` empty, so this is an upper bound, not an exact list.
 
 `moves-skipped-limit` appears when `detectMoves` is `true` and a work limit of the moves spec engaged. With the candidate guard (moves spec §4.3), detection is skipped and `moves` is `[]`. With the limits of the edited-move search and of long-line comparison (moves spec §4.5), detection is cut short: the pure moves and the edited moves found before the limit are kept, so `moves` may hold entries. Hunks and stats are unaffected either way.
 
@@ -450,8 +468,8 @@ The result is pretty-printed below for reading. The canonical form is JCS (§5),
 
 ```json
 {
-  "schemaVersion": "0.3.0",
-  "id": "sha256:3f3cc30959bd88671f71e392eb77fe668a9eef4400e34400af62a76dd22ac80b",
+  "schemaVersion": "0.4.0",
+  "id": "sha256:f221a785d0e51a6a0ab0887619d144522fd921910db3b2460b4865712f8de99e",
   "kind": "text",
   "status": "different",
   "left": {
@@ -628,9 +646,11 @@ A side of a tree is one of:
   - zip: starts with `50 4B 03 04` (a local file header) or `50 4B 05 06` (the end record of an empty archive);
   - tar: at least 512 bytes, with `ustar` at bytes 257 to 261 (POSIX and GNU tar);
   - gzip-compressed tar: starts with `1F 8B`, and the first 512 bytes it decompresses to are a tar header as above;
-  - zstd-compressed tar: starts with `28 B5 2F FD`, with the same rule.
+  - zstd-compressed tar: starts with `28 B5 2F FD`, or with a zstd skippable frame (magic `5? 2A 4D 18`, a 4-byte little-endian length, then that many bytes), with the same rule. Skippable frames before, between and after the frames are stepped over, and one whose length runs past the end of the input makes the stream broken.
 
 Other containers (bzip2, xz, 7z, a gzip stream that is not a tar) are not archives here and are compared as bytes.
+
+**Reading paths.** The reference engine's path readers (the CLI, and the Rust `diff_paths` function, which the Python binding uses for folders) read each file that is not a folder whole when it is a regular file, and a pipe, a device or standard input, whose size is not known, up to 4 GiB (2^32 bytes, the largest binary or archive input, §17 and §19.6). A file paired with a folder is always read as an archive, so it is read only up to 4 GiB as well, even when it is a regular file. A caller can set a read limit for every such input (for a file paired with a folder, a limit over 4 GiB still reads at most 4 GiB); a regular file over it is refused by its size before it is read. An input over the limit is an error and no document is produced (its size and digest are not known, so there is no file meta to report): the reference engine's message starts with `limit-exceeded:`. Files inside folders are listed by streaming their content and are never read whole.
 
 ### 19.2 Listing a side
 
@@ -660,7 +680,7 @@ Folders are walked in name order (names compared as bytes), so the result never 
 ### 19.3 Errors
 
 - A side that is neither a folder nor an archive (under `adapter: "tree"`, or a plain file paired with a folder), or an archive whose structure cannot be read (no central directory, a bad tar header, a broken compression layer), gives `invalid-archive` for that side. A broken entry inside a readable zip is `entry-unreadable`, not an error.
-- More than 100000 entries on one side (implied directories included), more than 16 MiB of path text on one side, a zip whose end records declare more than 100000 entries, or an archive input over 4 GiB, gives `limit-exceeded`.
+- More than 100000 entries on one side (implied directories included), more than 16 MiB of path text on one side, a zip whose end records declare more than 100000 entries, or an archive input over 4 GiB, gives `limit-exceeded`. The end records checked are the ones a zip reader can use: a zip32 end record (`50 4B 05 06`) that starts in the last 65621 bytes of the input, and a zip64 end record (`50 4B 06 06`) that a zip64 locator (`50 4B 06 07`) right before such a zip32 record names, starting at or after the locator's offset and ending, by its declared size, exactly at the locator. Signature bytes anywhere else, such as inside an entry's content, are data.
 
 An error document keeps the file meta of both sides (§6.1); `tree` and `stats` are `null`.
 
@@ -703,3 +723,22 @@ Every limit is deterministic and depends only on the inputs:
 The content of a file is **not read** when its entry has `sha256: null`: it is encrypted (`encrypted-entry`), could not be read (`entry-unreadable`), or a content limit stopped it (`tree-limit`). Such files are compared as in §19.4 rule 1, and get no child document. A tree whose warnings include `encrypted-entry`, `entry-unreadable` or `tree-limit`, and no error, has `status: "partial"`: the entries are valid, but equal content cannot be confirmed everywhere, or some entries are missing. `partial` takes precedence over `identical` and `different`, and the stats (§6.3.2) count the entries as listed. Child documents never change their parent's status.
 
 `provenance.algorithm` is `tree.entries@1` and `provenance.adapter.id` is `tree`. A change to these rules, a limit, or the pinned `zip`, `flate2`, `ruzstd` or `ignore` versions bumps it.
+
+### 19.7 Builds without archive support
+
+An engine build MAY leave out archive support to be smaller (the WASM package built without its `archives` feature, [ADR 0008](../adr/0008-wasm-target.md)). Such a build never returns a different document: for every input pair and options it accepts, its document is conformant-equal (§3) to that of a full build. It refuses, before any comparison, exactly these requests with an `unsupported` error and no document, as the API rejects invalid options (§9):
+
+1. `adapter` is `tree`;
+2. `tree.exclude` is not empty (the patterns cannot be checked without the tree adapter);
+3. `adapter` is `auto` and both inputs **start like an archive**: they begin with a zip local header or end-of-central-directory signature (`PK\x03\x04`, `PK\x05\x06`), hold `ustar` at byte offset 257 of a first 512-byte block, or begin with the magic number of a gzip stream (`1F 8B`), a zstd frame (`28 B5 2F FD`) or a zstd skippable frame (`5? 2A 4D 18`).
+
+Every input §19.1 reads as an archive starts like one, so rule 3 covers every pair a full build compares as a tree without decompressing anything. It also refuses gzip or zstd data that holds no tar, which a full build compares as bytes. Folders need a file system and are never an input of such a build. The reference engine's error message starts with `unsupported:`, and bindings that report errors as values give the code `unsupported` (the WASM binding throws an `Error` with `name` `DiffymanError` and `code` `"unsupported"`). This is not a document warning code: no document carries it.
+
+## 20. Changes from 0.3.0
+
+- New field `moves[].inline` (§6.5): the inline spans of an edited move, in the `Span` shape of §6.4, computed by `text.refine@1` over the move's two ranges without the lines' indentation ([moves spec](text-granularity-and-moves.md) §4.7, [ADR 0011](../adr/0011-inline-spans-in-edited-moves.md)). It is `[]` for pure moves, under granularity `line`, over the refinement limits and under the `smart` noise cutoff. Ops still carry no spans for moved lines.
+- `refine-skipped-limit` (§10) also covers edited moves over the refinement limits.
+- `text.refine@1` and `text.moves@1` had not been released, so both stay at `@1`. Hunks, ops, stats and which moves are found are unchanged.
+- Builds without archive support (§19.7) refuse the requests that need it with an `unsupported` API error instead of returning a document. No document field or code changes.
+
+The version bumps `y` (§2.1) although the shape only grows, as in 0.2.0 and 0.3.0: the same inputs and options now give a different document whenever `detectMoves` finds a move, because every move gains `inline`.

@@ -13,6 +13,13 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["archives"]
+# Zip, tar, tar.gz and tar.zst compared as trees (spec §19). Without it the
+# module is smaller and two archives are a typed `unsupported` error
+# (spec §19.7); see docs/adr/0008-wasm-target.md for the sizes.
+archives = ["diffyman/archives"]
+
 [dependencies]
 diffyman.workspace = true
 wasm-bindgen.workspace = true

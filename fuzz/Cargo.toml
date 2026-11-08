@@ -25,8 +25,12 @@ libfuzzer-sys = "=0.4.13"
 diffyman = { path = "../crates/diffyman-engine" }
 diffyman-model = { path = "../crates/diffyman-model" }
 diffyman-algo = { path = "../crates/diffyman-algo" }
-# Same pin and features as the root workspace.
+diffyman-adapter-tree = { path = "../crates/diffyman-adapter-tree" }
+# Same pins and features as the root workspace. flate2 and ruzstd also
+# compress, so the `tar` target can wrap its input as tar.gz and tar.zst.
 serde_json = { version = "=1.0.154", features = ["float_roundtrip"] }
+flate2 = { version = "=1.1.11", default-features = false, features = ["rust_backend"] }
+ruzstd = { version = "=0.9.1", default-features = false, features = ["std"] }
 
 [[bin]]
 name = "diff"
@@ -59,6 +63,20 @@ bench = false
 [[bin]]
 name = "moves"
 path = "fuzz_targets/moves.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar"
+path = "fuzz_targets/tar.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zip"
+path = "fuzz_targets/zip.rs"
 test = false
 doc = false
 bench = false

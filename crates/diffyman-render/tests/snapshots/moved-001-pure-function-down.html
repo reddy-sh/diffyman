@@ -115,12 +115,11 @@ footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhe
 <tr><td class="n">15</td><td class="m"></td><td class="c">  jobs = []</td><td class="n">6</td><td class="m"></td><td class="c">  jobs = []</td></tr>
 <tr><td class="n">16</td><td class="m"></td><td class="c">  for name in sorted(os.listdir(directory)):</td><td class="n">7</td><td class="m"></td><td class="c">  for name in sorted(os.listdir(directory)):</td></tr>
 </tbody>
-<tbody class="gap"><tr><td colspan="6">⋯ 17 unchanged lines not shown</td></tr></tbody>
-<tbody id="s-h2"><tr class="hh"><th colspan="6" scope="rowgroup">@@ -34,6 +25,15 @@<span class="sr"> hunk 2</span></th></tr>
-<tr><td class="n">34</td><td class="m"></td><td class="c">      break</td><td class="n">25</td><td class="m"></td><td class="c">      break</td></tr>
+<tbody class="gap"><tr><td colspan="6">⋯ 18 unchanged lines not shown</td></tr></tbody>
+<tbody id="s-h2"><tr class="hh"><th colspan="6" scope="rowgroup">@@ -35,5 +26,14 @@<span class="sr"> hunk 2</span></th></tr>
 <tr><td class="n">35</td><td class="m"></td><td class="c">    print(f&quot;[{index}] {job}&quot;)</td><td class="n">26</td><td class="m"></td><td class="c">    print(f&quot;[{index}] {job}&quot;)</td></tr>
 <tr><td class="n">36</td><td class="m"></td><td class="c">  return 0</td><td class="n">27</td><td class="m"></td><td class="c">  return 0</td></tr>
-<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">28</td><td class="m a">+<span class="sr"> added</span></td><td class="c a"></td></tr>
+<tr><td class="n">37</td><td class="m"></td><td class="c"></td><td class="n">28</td><td class="m"></td><td class="c"></td></tr>
 <tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">29</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv"><a class="mvl" id="s-m1-to" href="#s-m1-from">moved from left 5–12</a>def parse_config(path):</td></tr>
 <tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">30</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  with open(path, encoding=&quot;utf-8&quot;) as handle:</td></tr>
 <tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">31</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">    raw = json.load(handle)</td></tr>
@@ -129,7 +128,7 @@ footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhe
 <tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">34</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  raw.setdefault(&quot;workers&quot;, os.cpu_count())</td></tr>
 <tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">35</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  raw.setdefault(&quot;log_level&quot;, &quot;info&quot;)</td></tr>
 <tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">36</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  return raw</td></tr>
-<tr><td class="n">37</td><td class="m"></td><td class="c"></td><td class="n">37</td><td class="m"></td><td class="c"></td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">37</td><td class="m a">+<span class="sr"> added</span></td><td class="c a"></td></tr>
 <tr><td class="n">38</td><td class="m"></td><td class="c">if __name__ == &quot;__main__&quot;:</td><td class="n">38</td><td class="m"></td><td class="c">if __name__ == &quot;__main__&quot;:</td></tr>
 <tr><td class="n">39</td><td class="m"></td><td class="c">  sys.exit(main(sys.argv))</td><td class="n">39</td><td class="m"></td><td class="c">  sys.exit(main(sys.argv))</td></tr>
 </tbody>
@@ -157,12 +156,11 @@ footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhe
 <tr><td class="n">15</td><td class="n">6</td><td class="m"></td><td class="c">  jobs = []</td></tr>
 <tr><td class="n">16</td><td class="n">7</td><td class="m"></td><td class="c">  for name in sorted(os.listdir(directory)):</td></tr>
 </tbody>
-<tbody class="gap"><tr><td colspan="4">⋯ 17 unchanged lines not shown</td></tr></tbody>
-<tbody id="u-h2"><tr class="hh"><th colspan="4" scope="rowgroup">@@ -34,6 +25,15 @@<span class="sr"> hunk 2</span></th></tr>
-<tr><td class="n">34</td><td class="n">25</td><td class="m"></td><td class="c">      break</td></tr>
+<tbody class="gap"><tr><td colspan="4">⋯ 18 unchanged lines not shown</td></tr></tbody>
+<tbody id="u-h2"><tr class="hh"><th colspan="4" scope="rowgroup">@@ -35,5 +26,14 @@<span class="sr"> hunk 2</span></th></tr>
 <tr><td class="n">35</td><td class="n">26</td><td class="m"></td><td class="c">    print(f&quot;[{index}] {job}&quot;)</td></tr>
 <tr><td class="n">36</td><td class="n">27</td><td class="m"></td><td class="c">  return 0</td></tr>
-<tr><td class="n"></td><td class="n">28</td><td class="m a">+<span class="sr"> added</span></td><td class="c a"></td></tr>
+<tr><td class="n">37</td><td class="n">28</td><td class="m"></td><td class="c"></td></tr>
 <tr><td class="n"></td><td class="n">29</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv"><a class="mvl" id="u-m1-to" href="#u-m1-from">moved from left 5–12</a>def parse_config(path):</td></tr>
 <tr><td class="n"></td><td class="n">30</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  with open(path, encoding=&quot;utf-8&quot;) as handle:</td></tr>
 <tr><td class="n"></td><td class="n">31</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">    raw = json.load(handle)</td></tr>
@@ -171,7 +169,7 @@ footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhe
 <tr><td class="n"></td><td class="n">34</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  raw.setdefault(&quot;workers&quot;, os.cpu_count())</td></tr>
 <tr><td class="n"></td><td class="n">35</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  raw.setdefault(&quot;log_level&quot;, &quot;info&quot;)</td></tr>
 <tr><td class="n"></td><td class="n">36</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  return raw</td></tr>
-<tr><td class="n">37</td><td class="n">37</td><td class="m"></td><td class="c"></td></tr>
+<tr><td class="n"></td><td class="n">37</td><td class="m a">+<span class="sr"> added</span></td><td class="c a"></td></tr>
 <tr><td class="n">38</td><td class="n">38</td><td class="m"></td><td class="c">if __name__ == &quot;__main__&quot;:</td></tr>
 <tr><td class="n">39</td><td class="n">39</td><td class="m"></td><td class="c">  sys.exit(main(sys.argv))</td></tr>
 </tbody>
@@ -179,7 +177,7 @@ footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhe
 </section>
 </main>
 <footer>
-<p>Diff Document <code>sha256:f72b62e6a42007d97b57099d5dc7837ab4803b8674ef1a244efb1898adceef57</code>, schema 0.3.0.</p>
+<p>Diff Document <code>sha256:506d87a3a41bf9cf5cfea0ad87d64b223ba505bffa008e6b0390c48a43bc8a5f</code>, schema 0.4.0.</p>
 </footer>
 </body>
 </html>

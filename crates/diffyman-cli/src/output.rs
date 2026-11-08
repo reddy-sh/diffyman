@@ -23,7 +23,9 @@ pub enum Format {
     Unified,
     /// The canonical (RFC 8785) Diff Document.
     Json,
-    /// One self-contained HTML report (text documents only).
+    /// One self-contained HTML report: line views for text, changed byte
+    /// ranges with hex dumps for binary files, an entries table with each
+    /// modified entry's changes for folders and archives.
     Html,
     /// A verdict line and stats.
     Summary,
@@ -38,6 +40,17 @@ pub enum Shape {
     Json { pretty: bool },
     /// One JSON line per hunk, byte range or tree entry.
     Stream,
+}
+
+impl Shape {
+    /// True for the formats that show the inputs' content (text, unified,
+    /// html), which read the inputs again after the comparison.
+    pub fn shows_content(self) -> bool {
+        matches!(
+            self,
+            Shape::Rendered(Format::Text | Format::Unified | Format::Html)
+        )
+    }
 }
 
 /// When to color, like git's `--color`.
@@ -161,8 +174,9 @@ impl Write for Sink {
 
 /// The inputs behind a document, for the formats that show content.
 pub enum Inputs<'a> {
-    /// Two files (or archives): their bytes.
-    Files(&'a [u8], &'a [u8]),
+    /// Two files (or archives): the bytes the document was just computed
+    /// from, with the engine's decoded inputs for a text document.
+    Files(render::Computed<'a>),
     /// At least one folder: the folder roots, `None` for an archive side.
     Folders(Option<&'a Path>, Option<&'a Path>),
 }
@@ -190,20 +204,28 @@ pub fn emit(
         }
         Shape::Rendered(Format::Html) => {
             report_warnings(doc);
-            let Inputs::Files(left, right) = inputs else {
-                return Err(unsupported_html(doc));
+            let options = HtmlOptions::default();
+            let page = match inputs {
+                // Two files, or two archives: the archive entries' content is
+                // not available after the comparison (see `write_tree_patch`),
+                // so their child documents are shown by position.
+                Inputs::Files(computed) => render::html_computed(doc, computed, &options)?,
+                Inputs::Folders(left, right) => {
+                    let mut contents = |path: &[&str]| match (path, left, right) {
+                        ([entry], Some(l), Some(r)) => {
+                            Some((read_below(l, entry)?, read_below(r, entry)?))
+                        }
+                        _ => None,
+                    };
+                    render::html_with_contents(doc, &[], &[], &mut contents, &options)?
+                }
             };
-            if doc.kind != Kind::Text {
-                return Err(unsupported_html(doc));
-            }
-            let page = render::html(doc, left, right, &HtmlOptions::default())?;
             out.write_all(page.as_bytes())?;
             Ok(())
         }
         Shape::Rendered(format) => {
             report_warnings(doc);
-            // An identical document renders as nothing in both formats; skip
-            // the renderer's input check (a SHA-256 of both inputs).
+            // An identical document renders as nothing in both formats.
             if matches!(doc.status, Status::Error | Status::Identical) {
                 return Ok(());
             }
@@ -214,36 +236,20 @@ pub fn emit(
                 }
                 (Kind::Tree, _) if patch => write_tree_patch(out, doc, None, None, style.color),
                 (Kind::Tree, _) => write_name_status(out, doc).map_err(Failure::Io),
-                (_, Inputs::Files(left, right)) => {
+                (_, Inputs::Files(computed)) => {
                     let options = UnifiedOptions {
                         color: style.color,
                         escape_controls: !patch,
                         ..UnifiedOptions::default()
                     };
-                    out.write_all(render::unified(doc, left, right, &options)?.as_bytes())?;
+                    let text = render::unified_computed(doc, computed, &options)?;
+                    out.write_all(text.as_bytes())?;
                     Ok(())
                 }
                 (_, Inputs::Folders(..)) => Ok(()),
             }
         }
     }
-}
-
-fn kind_name(kind: Kind) -> &'static str {
-    match kind {
-        Kind::Text => "text",
-        Kind::Binary => "binary",
-        Kind::Tree => "tree",
-        _ => "this kind of",
-    }
-}
-
-fn unsupported_html(doc: &DiffDocument) -> Failure {
-    Failure::Message(format!(
-        "HTML output supports text documents only, and this is a {} document; \
-         use --format text, unified, summary or json",
-        kind_name(doc.kind)
-    ))
 }
 
 /// The document as canonical JSON (one line), or indented with `pretty`.
@@ -326,6 +332,13 @@ fn type_name(side: Option<&diffyman::model::EntrySide>) -> &'static str {
 /// of a modified text file when both sides are folders, and otherwise one
 /// line that `patch` and `git apply` skip (`Only in`, `Moved`, `Files ...
 /// differ`, `Binary files ... differ`).
+///
+/// An archive side gives no content: the engine holds an entry's bytes only
+/// while it computes that entry's child document. Reading them again would
+/// mean listing the archive again, which inflates and hashes every entry
+/// (as much work as the comparison itself, whatever the number of modified
+/// entries) and decompresses a compressed tar once more, on top of the
+/// content budget the document was computed within (spec §19.6).
 fn write_tree_patch(
     out: &mut Sink,
     doc: &DiffDocument,
@@ -390,6 +403,15 @@ fn below(root: &Path, path: &str) -> Option<PathBuf> {
         .then(|| root.join(relative))
 }
 
+/// The content of the file at `path` below the folder `root`, for a child
+/// document. Child documents exist only for files of at most 64 MiB (spec
+/// §19.5), so no more is read (a file replaced by a pipe since the walk
+/// stops there); the renderers check size and SHA-256 against the document.
+fn read_below(root: &Path, path: &str) -> Option<Vec<u8>> {
+    let max = Some(diffyman_adapter_tree::Limits::default().max_child_input);
+    crate::input::read(&below(root, path)?, max).ok()
+}
+
 /// The unified diff of one modified file entry with a text child document,
 /// read back from the two folders. `None` when there is no such child or
 /// the files no longer match the document.
@@ -403,10 +425,8 @@ fn entry_patch(entry: &TreeEntry, left: &Path, right: &Path, color: bool) -> Opt
     if !is_file(entry.left.as_ref()) || !is_file(entry.right.as_ref()) {
         return None;
     }
-    // Child documents exist only for files of at most 64 MiB (spec §19.5),
-    // and the renderer checks size and SHA-256 against the document.
-    let l = std::fs::read(below(left, &entry.path)?).ok()?;
-    let r = std::fs::read(below(right, &entry.path)?).ok()?;
+    let l = read_below(left, &entry.path)?;
+    let r = read_below(right, &entry.path)?;
     let options = UnifiedOptions {
         color,
         left_label: Some(format!("a/{}", entry.path)),

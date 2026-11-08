@@ -20,6 +20,10 @@
 //!   of the same pattern, whatever its text; the text on either side of a
 //!   match is segmented on its own. Matches count like text for the token
 //!   limit, the spaceless share and the noise cutoff.
+//! - An edited move ([`refine_moved`], moves spec §4.7) is refined like one
+//!   `replace` op of its two ranges, except that each line's indentation
+//!   (the whitespace before the first other character or regex match) gets
+//!   no token. Limits, modes and the noise cutoff are those of a `replace` op.
 
 use std::collections::{HashMap, HashSet};
 
@@ -171,6 +175,29 @@ struct ByteSpan {
 
 /// Refines one `replace` op.
 pub fn refine(left: &[SideLine<'_>], right: &[SideLine<'_>], options: &RefineOptions) -> Refined {
+    refine_lines(left, right, options, false)
+}
+
+/// Refines the two ranges of an edited move (moves spec §4.7) as one
+/// `replace` op, with the same modes, rules and limits as [`refine`], but
+/// without each line's indentation: the whitespace before the first other
+/// character or `ignore.regex` match, which the move key leaves out (§4.4
+/// step 2). So a block that moved into or out of a nested block gets no span
+/// for its new indentation. Offsets still count from the start of the line.
+pub fn refine_moved(
+    left: &[SideLine<'_>],
+    right: &[SideLine<'_>],
+    options: &RefineOptions,
+) -> Refined {
+    refine_lines(left, right, options, true)
+}
+
+fn refine_lines(
+    left: &[SideLine<'_>],
+    right: &[SideLine<'_>],
+    options: &RefineOptions,
+    skip_indent: bool,
+) -> Refined {
     if left.is_empty() || right.is_empty() {
         return Refined::Spans(Vec::new());
     }
@@ -197,8 +224,8 @@ pub fn refine(left: &[SideLine<'_>], right: &[SideLine<'_>], options: &RefineOpt
             }
         }
     };
-    let lt = tokenize(left, level, &options.masks);
-    let rt = tokenize(right, level, &options.masks);
+    let lt = tokenize(left, level, &options.masks, skip_indent);
+    let rt = tokenize(right, level, &options.masks, skip_indent);
     if lt.len() > REFINE_MAX_TOKENS || rt.len() > REFINE_MAX_TOKENS {
         return Refined::SkippedLimit;
     }
@@ -417,12 +444,24 @@ fn push_segments(
     }
 }
 
-fn tokenize(lines: &[SideLine<'_>], level: Level, masks: &[Regex]) -> Vec<Tok> {
+/// The tokens of one op side. With `skip_indent`, each line's indentation
+/// (its leading whitespace, up to the first regex match) gets no token.
+fn tokenize(lines: &[SideLine<'_>], level: Level, masks: &[Regex], skip_indent: bool) -> Vec<Tok> {
     let mut toks: Vec<Tok> = Vec::new();
     for (li, line) in lines.iter().enumerate() {
+        let matches = if masks.is_empty() {
+            Vec::new()
+        } else {
+            masked_ranges(masks, line.content)
+        };
         let mut pos = 0;
-        if !masks.is_empty() {
-            for (start, end, index) in masked_ranges(masks, line.content) {
+        if skip_indent {
+            let text_start =
+                line.content.len() - line.content.trim_start_matches(is_whitespace).len();
+            pos = matches.first().map_or(text_start, |m| text_start.min(m.0));
+        }
+        if !matches.is_empty() {
+            for (start, end, index) in matches {
                 push_segments(&mut toks, li, line.content, pos, start, level);
                 toks.push(Tok {
                     line: li,
@@ -897,5 +936,103 @@ mod tests {
             panic!()
         };
         assert_eq!((s[0].start, s[0].end), (2, 3));
+    }
+
+    /// Spans of `refine_moved` as (side, line, text).
+    fn moved_texts<'a>(
+        left: &[&'a str],
+        right: &[&'a str],
+        o: &RefineOptions,
+    ) -> Vec<(SpanSide, usize, &'a str)> {
+        let l: Vec<SideLine<'a>> = left.iter().map(|s| line(s)).collect();
+        let r: Vec<SideLine<'a>> = right.iter().map(|s| line(s)).collect();
+        let Refined::Spans(spans) = refine_moved(&l, &r, o) else {
+            panic!("skipped");
+        };
+        spans
+            .iter()
+            .map(|s| {
+                let src = if s.side == SpanSide::Left {
+                    left
+                } else {
+                    right
+                };
+                let text = &src[s.line]
+                    [usize::try_from(s.start).unwrap()..usize::try_from(s.end).unwrap()];
+                (s.side, s.line, text)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn moved_blocks_ignore_indentation() {
+        let left = ["let acc = 0;", "  acc += 1;", "\tdone(acc);"];
+        let right = ["    let hash = 0;", "      hash += 1;", "done(hash);"];
+        for g in [Granularity::Word, Granularity::Smart] {
+            let o = opts(g);
+            assert_eq!(
+                moved_texts(&left, &right, &o),
+                [
+                    (L, 0, "acc"),
+                    (L, 1, "acc"),
+                    (L, 2, "acc"),
+                    (R, 0, "hash"),
+                    (R, 1, "hash"),
+                    (R, 2, "hash")
+                ],
+                "{g:?}"
+            );
+            // A replace op of the same lines also marks the indentation.
+            assert!(
+                texts(&left, &right, &o)
+                    .iter()
+                    .any(|(_, _, t)| t.trim().is_empty())
+            );
+        }
+        // Inner whitespace still counts under `none`.
+        assert_eq!(
+            moved_texts(&["  a  b"], &["a b"], &opts(Granularity::Char)),
+            [(L, 0, "  "), (R, 0, " ")]
+        );
+        // Offsets count from the line start, in every encoding.
+        let mut o = opts(Granularity::Char);
+        o.position_encoding = PositionEncoding::Utf16;
+        let l = [line("é x")];
+        let r = [line("\u{3000}é y")];
+        let Refined::Spans(s) = refine_moved(&l, &r, &o) else {
+            panic!()
+        };
+        // U+3000 is not whitespace for line keys, so it is content here.
+        assert_eq!(
+            s.iter()
+                .map(|s| (s.side, s.start, s.end))
+                .collect::<Vec<_>>(),
+            [(L, 2, 3), (R, 0, 1), (R, 3, 4)]
+        );
+    }
+
+    #[test]
+    fn moved_blocks_keep_a_leading_regex_match() {
+        let mut o = opts(Granularity::Word);
+        // A pattern that matches indentation ends the indentation where the
+        // match starts, as in the move key.
+        o.masks = vec![Regex::new(r"^\s+#").unwrap()];
+        assert_eq!(
+            moved_texts(&["  # a b"], &["x a c"], &o),
+            [(L, 0, "  #"), (L, 0, "b"), (R, 0, "x"), (R, 0, "c")]
+        );
+        assert_eq!(
+            moved_texts(&["  # a b"], &["    # a c"], &o),
+            [(L, 0, "b"), (R, 0, "c")]
+        );
+    }
+
+    #[test]
+    fn moved_blocks_use_the_same_limits() {
+        let many: Vec<SideLine<'_>> = (0..=REFINE_MAX_LINES).map(|_| line("a")).collect();
+        assert_eq!(
+            refine_moved(&many, &[line("b")], &opts(Granularity::Word)),
+            Refined::SkippedLimit
+        );
     }
 }

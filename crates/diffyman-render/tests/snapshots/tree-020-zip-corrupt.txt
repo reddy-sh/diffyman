@@ -1,0 +1,4 @@
+left.zip -> right.zip: error: invalid-archive (left)
+  left:     application/zip, 80 bytes
+  right:    application/zip, 110 bytes
+  warnings: invalid-archive (left)

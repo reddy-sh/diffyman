@@ -16,11 +16,10 @@
  def load_jobs(directory):
    jobs = []
    for name in sorted(os.listdir(directory)):
-@@ -34,6 +25,15 @@
-       break
+@@ -35,5 +26,14 @@
      print(f"[{index}] {job}")
    return 0
-+
+ 
 +def parse_config(path):
 +  with open(path, encoding="utf-8") as handle:
 +    raw = json.load(handle)
@@ -29,6 +28,6 @@
 +  raw.setdefault("workers", os.cpu_count())
 +  raw.setdefault("log_level", "info")
 +  return raw
- 
++
  if __name__ == "__main__":
    sys.exit(main(sys.argv))

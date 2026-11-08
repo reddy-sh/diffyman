@@ -6,6 +6,8 @@
 //! and `id`, §6 output shapes, §7 text procedure, §10 warnings) and
 //! `docs/spec/text-granularity-and-moves.md` (§3 inline spans, §4 moves).
 
+pub mod tree;
+
 use diffyman::model::{
     self, DiffDocument, FileMeta, Hunk, Kind, LineTerminator, MoveKind, Op, OpKind, OpRef, Options,
     PositionEncoding, Severity, Side, Similarity, Span, Status, WhitespaceMode,
@@ -660,13 +662,31 @@ fn check_inline(
         return;
     }
     assert_eq!(op.op, OpKind::Replace, "{what}: spans on a {:?} op", op.op);
+    check_spans(doc, &op.inline, (sl, el), (sr, er), l, r, true, what);
+}
+
+/// Spans of an op or a move: sides and ops match, lines lie in the 0-based
+/// half-open line ranges given per side, offsets are on character
+/// boundaries, and spans are sorted without overlap. With `off_moves`, no
+/// span is on a moved line.
+#[allow(clippy::too_many_arguments)]
+fn check_spans(
+    doc: &DiffDocument,
+    spans: &[Span],
+    (sl, el): (usize, usize),
+    (sr, er): (usize, usize),
+    l: &Decoded<'_>,
+    r: &Decoded<'_>,
+    off_moves: bool,
+    what: &str,
+) {
     assert_ne!(
         doc.options.granularity,
         model::Granularity::Line,
         "{what}: spans with granularity line"
     );
     let mut prev: Option<&Span> = None;
-    for span in &op.inline {
+    for span in spans {
         let (decoded, lo, hi, kind) = match span.side {
             Side::Left => (l, sl, el, OpKind::Delete),
             Side::Right => (r, sr, er, OpKind::Insert),
@@ -676,7 +696,7 @@ fn check_inline(
         let line = usize::try_from(span.line).expect("line fits");
         assert!(
             line > lo && line <= hi,
-            "{what}: span line {line} outside the op"
+            "{what}: span line {line} outside its lines"
         );
         let content = decoded.content(line - 1);
         let enc = doc.position_encoding;
@@ -687,7 +707,7 @@ fn check_inline(
             "{what}: span {span:?} not on character boundaries of {content:?}"
         );
         assert!(span.start < span.end, "{what}: empty span {span:?}");
-        for m in &doc.moves {
+        for m in doc.moves.iter().filter(|_| off_moves) {
             let range = if span.side == Side::Left {
                 m.from.range
             } else {
@@ -765,6 +785,20 @@ fn check_moves(
                 m.similarity
             ),
             MoveKind::Unknown => panic!("{what}: unknown kind"),
+        }
+        // Spans only inside edited moves, within their two ranges (spec §6.5).
+        if !m.inline.is_empty() {
+            assert_eq!(m.kind, MoveKind::Edited, "{what}: spans on a pure move");
+            check_spans(
+                doc,
+                &m.inline,
+                (fl, fl_end),
+                (tr, tr_end),
+                l,
+                r,
+                false,
+                &what,
+            );
         }
         assert_eq!(
             m.from_ops,
@@ -879,6 +913,39 @@ mod tests {
     #[should_panic(expected = "equal lines differ")]
     fn equal_ops_over_different_lines_are_caught() {
         tampered(|d| d.hunks[0].ops[1].op = OpKind::Equal);
+    }
+
+    const EDITED_LEFT: &[u8] = b"fn intro() {}\n\nfn checksum(data) {\n  let acc = 0;\n  for byte in data {\n    acc = acc * 31 + byte;\n  }\n  return acc;\n}\n\nfn middle() {}\nfn more() {}\nfn other() {}\n";
+    const EDITED_RIGHT: &[u8] = b"fn intro() {}\n\nfn middle() {}\nfn more() {}\nfn other() {}\n\nfn checksum(data) {\n    let hash = 0;\n    for byte in data {\n      hash = hash * 31 + byte;\n    }\n    return hash;\n}\n";
+
+    fn edited_move_doc() -> DiffDocument {
+        let json = diffyman::diff(
+            EDITED_LEFT,
+            EDITED_RIGHT,
+            r#"{"detectMoves": true, "granularity": "smart", "positionEncoding": "utf-16"}"#,
+        )
+        .unwrap();
+        let doc = check_document(&json, EDITED_LEFT, EDITED_RIGHT);
+        assert!(!doc.moves[0].inline.is_empty());
+        doc
+    }
+
+    #[test]
+    fn edited_move_spans_pass_the_checks() {
+        edited_move_doc();
+    }
+
+    #[test]
+    #[should_panic(expected = "move m1: span line 1 outside its lines")]
+    fn move_spans_outside_the_move_are_caught() {
+        let mut doc = edited_move_doc();
+        doc.moves[0].inline[0].line = 1;
+        doc.id = model::compute_id(&doc).unwrap();
+        check_document(
+            &model::to_canonical_json(&doc).unwrap(),
+            EDITED_LEFT,
+            EDITED_RIGHT,
+        );
     }
 
     #[test]

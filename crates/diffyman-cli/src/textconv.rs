@@ -26,13 +26,19 @@ pub struct TextconvArgs {
     /// Read the input into memory instead of memory-mapping it.
     #[arg(long)]
     pub no_mmap: bool,
+    /// Largest input to read, in bytes or with a K, M, G or T suffix (powers
+    /// of 1024). A larger one is an error (exit code 2). Without it, regular
+    /// files have no limit and pipes, devices and standard input are read up
+    /// to 4G.
+    #[arg(long, value_name = "SIZE", value_parser = input::parse_size)]
+    pub max_input_size: Option<u64>,
 }
 
 /// Writes the converted text. Exit code 0, or an error for an input that is
 /// not UTF-8 or options that do not compile.
 pub fn run(args: &TextconvArgs) -> Result<u8, Failure> {
     let options = options::resolve(&args.ignore, &DiffFlags::default())?;
-    let bytes = input::open(&args.file, !args.no_mmap)?;
+    let bytes = input::open(&args.file, !args.no_mmap, args.max_input_size)?;
     let text = diffyman::decode_text(&bytes).ok_or_else(|| {
         format!(
             "{} is not UTF-8 text, so the text adapter does not compare it",

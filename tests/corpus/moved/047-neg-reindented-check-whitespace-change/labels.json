@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "The inputs of 040 under ignore.whitespace change. The error check now compares equal although it moved into the loop with a deeper indent, so the line diff keeps it in place, and the loop header with the Put call (which kept their indentation) end up deleted below it and inserted above it, like an edited move. The check is the block that changed scope, and it is below the move minimum: moves spec 4.5 (re-indented swaps) reports no move."
+}

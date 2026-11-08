@@ -81,12 +81,12 @@ footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhe
 <tr><th scope="row">SHA-256</th><td><code>3a29f94c14df7d70014844cc9f95563b2e77b4a1a972be18802bec499c987431</code></td><td><code>f5ff408efc57c0b77ba3d6a984ae3bcb6ac886e7fbb924c3942234b288c62d35</code></td></tr>
 </tbody>
 </table>
-<p>Options: algorithm histogram, granularity line, whitespace compared, case compared, blank lines compared, 0 patterns masked, moves detected, positions utf-8, context 3.</p>
+<p>Options: algorithm histogram, granularity smart, whitespace compared, case compared, blank lines compared, 0 patterns masked, moves detected, positions utf-8, context 3.</p>
 </details>
 <section aria-labelledby="moves-h">
 <h2 id="moves-h">Moved blocks</h2>
 <ol class="moves">
-<li>Left lines <a href="#s-m1-from">7–12</a> moved to right lines <a href="#s-m1-to">23–28</a> (edited)</li>
+<li>Left lines <a href="#s-m1-from">7–13</a> moved to right lines <a href="#s-m1-to">23–29</a> (edited)</li>
 </ol>
 </section>
 </header>
@@ -102,33 +102,31 @@ footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhe
 <tr><td class="n">4</td><td class="m"></td><td class="c">  return Math.min(Math.max(value, low), high);</td><td class="n">4</td><td class="m"></td><td class="c">  return Math.min(Math.max(value, low), high);</td></tr>
 <tr><td class="n">5</td><td class="m"></td><td class="c">}</td><td class="n">5</td><td class="m"></td><td class="c">}</td></tr>
 <tr><td class="n">6</td><td class="m"></td><td class="c"></td><td class="n">6</td><td class="m"></td><td class="c"></td></tr>
-<tr><td class="n">7</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv"><a class="mvl" id="s-m1-from" href="#s-m1-to">moved to right 23–28, edited</a>function checksum(data) {</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
-<tr><td class="n">8</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  let acc = 0;</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
+<tr><td class="n">7</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv"><a class="mvl" id="s-m1-from" href="#s-m1-to">moved to right 23–29, edited</a>function checksum(data) {</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
+<tr><td class="n">8</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  let <del>acc</del> = 0;</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
 <tr><td class="n">9</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  for (const byte of data) {</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
-<tr><td class="n">10</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">    acc = (acc * 31 + byte) &gt;&gt;&gt; 0;</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
+<tr><td class="n">10</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">    <del>acc</del> = (<del>acc</del> * 31 + byte) &gt;&gt;&gt; 0;</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
 <tr><td class="n">11</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  }</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
-<tr><td class="n">12</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  return acc.toString(16).padStart(8, &quot;0&quot;);</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
-<tr><td class="n">13</td><td class="m d">−<span class="sr"> removed</span></td><td class="c d">}</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
+<tr><td class="n">12</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  return a<del>cc</del>.toString(16).padStart(8, &quot;0&quot;);</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
+<tr><td class="n">13</td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">}</td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
 <tr><td class="n">14</td><td class="m d">−<span class="sr"> removed</span></td><td class="c d"></td><td class="n"></td><td class="m x"></td><td class="c x"></td></tr>
 <tr><td class="n">15</td><td class="m"></td><td class="c">function chunk(list, size) {</td><td class="n">7</td><td class="m"></td><td class="c">function chunk(list, size) {</td></tr>
 <tr><td class="n">16</td><td class="m"></td><td class="c">  const out = [];</td><td class="n">8</td><td class="m"></td><td class="c">  const out = [];</td></tr>
 <tr><td class="n">17</td><td class="m"></td><td class="c">  for (let i = 0; i &lt; list.length; i += size) {</td><td class="n">9</td><td class="m"></td><td class="c">  for (let i = 0; i &lt; list.length; i += size) {</td></tr>
 </tbody>
-<tbody class="gap"><tr><td colspan="6">⋯ 8 unchanged lines not shown</td></tr></tbody>
-<tbody id="s-h2"><tr class="hh"><th colspan="6" scope="rowgroup">@@ -26,6 +18,14 @@<span class="sr"> hunk 2</span></th></tr>
-<tr><td class="n">26</td><td class="m"></td><td class="c">    if (!seen.has(item[key])) seen.set(item[key], item);</td><td class="n">18</td><td class="m"></td><td class="c">    if (!seen.has(item[key])) seen.set(item[key], item);</td></tr>
-<tr><td class="n">27</td><td class="m"></td><td class="c">  }</td><td class="n">19</td><td class="m"></td><td class="c">  }</td></tr>
+<tbody class="gap"><tr><td colspan="6">⋯ 10 unchanged lines not shown</td></tr></tbody>
+<tbody id="s-h2"><tr class="hh"><th colspan="6" scope="rowgroup">@@ -28,4 +20,12 @@<span class="sr"> hunk 2</span></th></tr>
 <tr><td class="n">28</td><td class="m"></td><td class="c">  return [...seen.values()];</td><td class="n">20</td><td class="m"></td><td class="c">  return [...seen.values()];</td></tr>
-<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">21</td><td class="m a">+<span class="sr"> added</span></td><td class="c a">}</td></tr>
-<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">22</td><td class="m a">+<span class="sr"> added</span></td><td class="c a"></td></tr>
-<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">23</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv"><a class="mvl" id="s-m1-to" href="#s-m1-from">moved from left 7–12, edited</a>function checksum(data) {</td></tr>
-<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">24</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  let hash = 0;</td></tr>
+<tr><td class="n">29</td><td class="m"></td><td class="c">}</td><td class="n">21</td><td class="m"></td><td class="c">}</td></tr>
+<tr><td class="n">30</td><td class="m"></td><td class="c"></td><td class="n">22</td><td class="m"></td><td class="c"></td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">23</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv"><a class="mvl" id="s-m1-to" href="#s-m1-from">moved from left 7–13, edited</a>function checksum(data) {</td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">24</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  let <ins>hash</ins> = 0;</td></tr>
 <tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">25</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  for (const byte of data) {</td></tr>
-<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">26</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">    hash = (hash * 31 + byte) &gt;&gt;&gt; 0;</td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">26</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">    <ins>hash</ins> = (<ins>hash</ins> * 31 + byte) &gt;&gt;&gt; 0;</td></tr>
 <tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">27</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  }</td></tr>
-<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">28</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  return hash.toString(16).padStart(8, &quot;0&quot;);</td></tr>
-<tr><td class="n">29</td><td class="m"></td><td class="c">}</td><td class="n">29</td><td class="m"></td><td class="c">}</td></tr>
-<tr><td class="n">30</td><td class="m"></td><td class="c"></td><td class="n">30</td><td class="m"></td><td class="c"></td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">28</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  return <ins>h</ins>a<ins>sh</ins>.toString(16).padStart(8, &quot;0&quot;);</td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">29</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">}</td></tr>
+<tr><td class="n"></td><td class="m x"></td><td class="c x"></td><td class="n">30</td><td class="m a">+<span class="sr"> added</span></td><td class="c a"></td></tr>
 <tr><td class="n">31</td><td class="m"></td><td class="c">module.exports = { checksum, chunk, clamp, uniqueBy };</td><td class="n">31</td><td class="m"></td><td class="c">module.exports = { checksum, chunk, clamp, uniqueBy };</td></tr>
 </tbody>
 </table>
@@ -142,40 +140,38 @@ footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhe
 <tr><td class="n">4</td><td class="n">4</td><td class="m"></td><td class="c">  return Math.min(Math.max(value, low), high);</td></tr>
 <tr><td class="n">5</td><td class="n">5</td><td class="m"></td><td class="c">}</td></tr>
 <tr><td class="n">6</td><td class="n">6</td><td class="m"></td><td class="c"></td></tr>
-<tr><td class="n">7</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv"><a class="mvl" id="u-m1-from" href="#u-m1-to">moved to right 23–28, edited</a>function checksum(data) {</td></tr>
-<tr><td class="n">8</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  let acc = 0;</td></tr>
+<tr><td class="n">7</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv"><a class="mvl" id="u-m1-from" href="#u-m1-to">moved to right 23–29, edited</a>function checksum(data) {</td></tr>
+<tr><td class="n">8</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  let <del>acc</del> = 0;</td></tr>
 <tr><td class="n">9</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  for (const byte of data) {</td></tr>
-<tr><td class="n">10</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">    acc = (acc * 31 + byte) &gt;&gt;&gt; 0;</td></tr>
+<tr><td class="n">10</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">    <del>acc</del> = (<del>acc</del> * 31 + byte) &gt;&gt;&gt; 0;</td></tr>
 <tr><td class="n">11</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  }</td></tr>
-<tr><td class="n">12</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  return acc.toString(16).padStart(8, &quot;0&quot;);</td></tr>
-<tr><td class="n">13</td><td class="n"></td><td class="m d">−<span class="sr"> removed</span></td><td class="c d">}</td></tr>
+<tr><td class="n">12</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">  return a<del>cc</del>.toString(16).padStart(8, &quot;0&quot;);</td></tr>
+<tr><td class="n">13</td><td class="n"></td><td class="m d mv">⇄<span class="sr"> moved away</span></td><td class="c d mv">}</td></tr>
 <tr><td class="n">14</td><td class="n"></td><td class="m d">−<span class="sr"> removed</span></td><td class="c d"></td></tr>
 <tr><td class="n">15</td><td class="n">7</td><td class="m"></td><td class="c">function chunk(list, size) {</td></tr>
 <tr><td class="n">16</td><td class="n">8</td><td class="m"></td><td class="c">  const out = [];</td></tr>
 <tr><td class="n">17</td><td class="n">9</td><td class="m"></td><td class="c">  for (let i = 0; i &lt; list.length; i += size) {</td></tr>
 </tbody>
-<tbody class="gap"><tr><td colspan="4">⋯ 8 unchanged lines not shown</td></tr></tbody>
-<tbody id="u-h2"><tr class="hh"><th colspan="4" scope="rowgroup">@@ -26,6 +18,14 @@<span class="sr"> hunk 2</span></th></tr>
-<tr><td class="n">26</td><td class="n">18</td><td class="m"></td><td class="c">    if (!seen.has(item[key])) seen.set(item[key], item);</td></tr>
-<tr><td class="n">27</td><td class="n">19</td><td class="m"></td><td class="c">  }</td></tr>
+<tbody class="gap"><tr><td colspan="4">⋯ 10 unchanged lines not shown</td></tr></tbody>
+<tbody id="u-h2"><tr class="hh"><th colspan="4" scope="rowgroup">@@ -28,4 +20,12 @@<span class="sr"> hunk 2</span></th></tr>
 <tr><td class="n">28</td><td class="n">20</td><td class="m"></td><td class="c">  return [...seen.values()];</td></tr>
-<tr><td class="n"></td><td class="n">21</td><td class="m a">+<span class="sr"> added</span></td><td class="c a">}</td></tr>
-<tr><td class="n"></td><td class="n">22</td><td class="m a">+<span class="sr"> added</span></td><td class="c a"></td></tr>
-<tr><td class="n"></td><td class="n">23</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv"><a class="mvl" id="u-m1-to" href="#u-m1-from">moved from left 7–12, edited</a>function checksum(data) {</td></tr>
-<tr><td class="n"></td><td class="n">24</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  let hash = 0;</td></tr>
+<tr><td class="n">29</td><td class="n">21</td><td class="m"></td><td class="c">}</td></tr>
+<tr><td class="n">30</td><td class="n">22</td><td class="m"></td><td class="c"></td></tr>
+<tr><td class="n"></td><td class="n">23</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv"><a class="mvl" id="u-m1-to" href="#u-m1-from">moved from left 7–13, edited</a>function checksum(data) {</td></tr>
+<tr><td class="n"></td><td class="n">24</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  let <ins>hash</ins> = 0;</td></tr>
 <tr><td class="n"></td><td class="n">25</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  for (const byte of data) {</td></tr>
-<tr><td class="n"></td><td class="n">26</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">    hash = (hash * 31 + byte) &gt;&gt;&gt; 0;</td></tr>
+<tr><td class="n"></td><td class="n">26</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">    <ins>hash</ins> = (<ins>hash</ins> * 31 + byte) &gt;&gt;&gt; 0;</td></tr>
 <tr><td class="n"></td><td class="n">27</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  }</td></tr>
-<tr><td class="n"></td><td class="n">28</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  return hash.toString(16).padStart(8, &quot;0&quot;);</td></tr>
-<tr><td class="n">29</td><td class="n">29</td><td class="m"></td><td class="c">}</td></tr>
-<tr><td class="n">30</td><td class="n">30</td><td class="m"></td><td class="c"></td></tr>
+<tr><td class="n"></td><td class="n">28</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">  return <ins>h</ins>a<ins>sh</ins>.toString(16).padStart(8, &quot;0&quot;);</td></tr>
+<tr><td class="n"></td><td class="n">29</td><td class="m a mv">⇄<span class="sr"> moved here</span></td><td class="c a mv">}</td></tr>
+<tr><td class="n"></td><td class="n">30</td><td class="m a">+<span class="sr"> added</span></td><td class="c a"></td></tr>
 <tr><td class="n">31</td><td class="n">31</td><td class="m"></td><td class="c">module.exports = { checksum, chunk, clamp, uniqueBy };</td></tr>
 </tbody>
 </table>
 </section>
 </main>
 <footer>
-<p>Diff Document <code>sha256:f8e663ed2866abd919a80804435c79b34e3f09197f35ac52afd4f7680ed76e93</code>, schema 0.3.0.</p>
+<p>Diff Document <code>sha256:8a14f5fab39e1a60c8d40787d2b1f098d9d9fcb94a8fa3085ee4a6804c5dc98c</code>, schema 0.4.0.</p>
 </footer>
 </body>
 </html>

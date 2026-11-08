@@ -10,7 +10,7 @@
 //! assert!(json.contains(r#""status":"different""#));
 //! ```
 //!
-//! Behavior follows `docs/spec/diff-document.md` (schema `0.3.0`):
+//! Behavior follows `docs/spec/diff-document.md` (schema `0.4.0`):
 //!
 //! - Each input is detected as text or binary, with a media type
 //!   (`diffyman-detect`, spec §16). With `adapter: "auto"` (the default), two
@@ -33,14 +33,27 @@
 //!   `tree.exclude` pattern that does not compile, or is over a limit, gives a
 //!   document with an `invalid-regex`, `invalid-glob` or `limit-exceeded` error.
 //! - Timing appears only in `provenance`.
+//!
+//! Features: `archives` (archives as trees; on with `fs`, which is on by
+//! default) and `fs` (folders on disk). A build without `archives` gives the
+//! same document as any other build for every pair it compares, and refuses
+//! the pairs that need archive support with [`Error::Unsupported`] (spec
+//! §19.7): adapter `tree`, a non-empty `tree.exclude`, or, with adapter
+//! `auto`, two inputs that both start like an archive.
 
+mod context;
 mod options;
+#[cfg(feature = "fs")]
+mod read;
+#[cfg(feature = "archives")]
 mod tree;
 
 use std::collections::BTreeMap;
 
 use diffyman_adapter_binary as binary;
-pub use diffyman_algo::lines::{Line, LineCursor, LineIndex, Terminator, split_lines};
+pub use diffyman_algo::lines::{
+    IndexedText, Line, LineCursor, LineIndex, Terminator, TextInputs, split_lines,
+};
 use diffyman_detect::{self as detect, Class, Detection, Encoding};
 pub use diffyman_model as model;
 use diffyman_model::{
@@ -49,16 +62,27 @@ use diffyman_model::{
     Options, Platform, PositionEncoding, Provenance, Range, SCHEMA_VERSION, Side, Similarity, Span,
     Stats, Status, Timing, Warning, WarningCode, WhitespaceMode,
 };
-pub use options::{parse_options, parse_options_value, resolve_options, validate_options};
+pub use options::{
+    parse_options, parse_options_json, parse_options_value, resolve_options, validate_options,
+};
+#[cfg(feature = "fs")]
+pub use read::{MAX_STREAM_BYTES, read_path};
 use serde_json::Value;
 #[cfg(feature = "fs")]
-pub use tree::diff_paths;
+pub use tree::{diff_paths, diff_paths_with_limit};
 
+use context::Context;
 use diffyman_algo::key::{self, KeyBuilder, KeyOptions, TextLines};
 use diffyman_algo::line_diff::{self, LineAlgorithm};
 use diffyman_algo::moves;
 use diffyman_algo::ops::{self as algo_ops, LineOp};
 use diffyman_algo::refine::{self, RefineOptions, Refined, SideLine, SpanSide};
+
+/// The pinned archive libraries, in provenance when the build has them.
+#[cfg(feature = "archives")]
+const TREE_LIBRARIES: &[(&str, &str)] = &tree::LIBRARY_VERSIONS;
+#[cfg(not(feature = "archives"))]
+const TREE_LIBRARIES: &[(&str, &str)] = &[];
 
 /// Engine name recorded in provenance.
 pub const ENGINE_NAME: &str = "diffyman";
@@ -77,6 +101,76 @@ pub enum Error {
     /// An input path could not be read (`diff_paths` only, feature `fs`).
     #[error("{0}")]
     Io(String),
+    /// This build cannot compare these inputs with these options: it was
+    /// built without a feature they need (spec §19.7). No document is
+    /// produced; a build with the feature gives the document.
+    #[error("unsupported: {0}")]
+    Unsupported(String),
+}
+
+impl Error {
+    /// A stable code for the kind of error, for bindings that report errors
+    /// as values: `invalid-options`, `canonical`, `io` or `unsupported`.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Error::InvalidOptions(_) => "invalid-options",
+            Error::Canonical(_) => "canonical",
+            Error::Io(_) => "io",
+            Error::Unsupported(_) => "unsupported",
+        }
+    }
+}
+
+/// The features of this build that change which inputs it compares:
+/// `archives` (archives as trees) and `fs` (folders on disk).
+pub const FEATURES: &[&str] = &[
+    #[cfg(feature = "archives")]
+    "archives",
+    #[cfg(feature = "fs")]
+    "fs",
+];
+
+/// True when `bytes` start like an archive (spec §19.7): a zip signature, a
+/// tar header, or the magic number of a gzip stream, a zstd frame or a zstd
+/// skippable frame. Every input the tree adapter reads as an archive starts
+/// like this, so a build without archive support can refuse exactly what it
+/// cannot compare without decompressing anything; it also refuses gzip and
+/// zstd data that holds no tar.
+pub fn starts_like_archive(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"PK\x03\x04")
+        || bytes.starts_with(b"PK\x05\x06")
+        || (bytes.len() >= 512 && &bytes[257..262] == b"ustar")
+        || bytes.starts_with(&[0x1f, 0x8b])
+        || bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd])
+        || (bytes.len() >= 4 && bytes[0] & 0xf0 == 0x50 && bytes[1..4] == [0x2a, 0x4d, 0x18])
+}
+
+/// Without the `archives` feature: [`Error::Unsupported`] for the inputs and
+/// options a full build would read as archives (spec §19.7).
+#[cfg(not(feature = "archives"))]
+fn check_supported(left: &[u8], right: &[u8], options: &Options) -> Result<(), Error> {
+    let reason = if options.adapter == Adapter::Tree {
+        "adapter \"tree\" needs archive support"
+    } else if !options.tree.exclude.is_empty() {
+        "tree.exclude needs archive support"
+    } else if options.adapter == Adapter::Auto
+        && starts_like_archive(left)
+        && starts_like_archive(right)
+    {
+        "both inputs start like archives, and this build has no archive support"
+    } else {
+        return Ok(());
+    };
+    Err(Error::Unsupported(format!(
+        "{reason} (built without the `archives` feature)"
+    )))
+}
+
+/// With the `archives` feature every input is supported.
+#[cfg(feature = "archives")]
+#[allow(clippy::unnecessary_wraps)]
+fn check_supported(_left: &[u8], _right: &[u8], _options: &Options) -> Result<(), Error> {
+    Ok(())
 }
 
 /// One input: its bytes and an optional name.
@@ -173,10 +267,30 @@ pub fn diff_document_with(
     settings: &Settings,
 ) -> Result<DiffDocument, Error> {
     validate_options(options)?;
+    check_supported(left.bytes, right.bytes, options)?;
     let timer = Timer::start();
-    let mut ctx = tree::Context::new(options);
+    let mut ctx = Context::new(options);
     let doc = document(left, right, options, &mut ctx);
     finish_document(doc, options, settings, &timer)
+}
+
+/// Like [`diff_document_with`], and for a text document whose inputs both
+/// decode as UTF-8, also those inputs as the comparison read them (without
+/// their BOM, split into lines), so a renderer can show their lines without
+/// hashing, decoding and splitting the inputs again. `None` for other
+/// documents. The document is the one [`diff_document_with`] returns.
+pub fn diff_document_with_text<'a>(
+    left: Input<'a>,
+    right: Input<'a>,
+    options: &Options,
+    settings: &Settings,
+) -> Result<(DiffDocument, Option<TextInputs<'a>>), Error> {
+    validate_options(options)?;
+    check_supported(left.bytes, right.bytes, options)?;
+    let timer = Timer::start();
+    let mut ctx = Context::new(options);
+    let (doc, text) = document_with_text(left, right, options, &mut ctx);
+    Ok((finish_document(doc, options, settings, &timer)?, text))
 }
 
 /// Fills in provenance and `id`.
@@ -198,22 +312,40 @@ fn document(
     left: Input<'_>,
     right: Input<'_>,
     options: &Options,
-    ctx: &mut tree::Context,
+    ctx: &mut Context,
 ) -> DiffDocument {
-    let archives =
-        tree::archive_format(left.bytes).is_some() && tree::archive_format(right.bytes).is_some();
-    let below_depth = ctx.depth > options.tree.max_depth;
-    match options.adapter {
-        Adapter::Tree => return tree::archive_document(left, right, options, ctx),
-        Adapter::Auto if archives && !below_depth => {
-            return tree::archive_document(left, right, options, ctx);
+    document_with_text(left, right, options, ctx).0
+}
+
+/// [`document`], and both decoded inputs when it is a text document whose
+/// inputs both decode.
+fn document_with_text<'a>(
+    left: Input<'a>,
+    right: Input<'a>,
+    options: &Options,
+    ctx: &mut Context,
+) -> (DiffDocument, Option<TextInputs<'a>>) {
+    #[cfg(feature = "archives")]
+    let depth_limited = {
+        let archives = tree::archive_format(left.bytes).is_some()
+            && tree::archive_format(right.bytes).is_some();
+        let below_depth = ctx.depth > options.tree.max_depth;
+        match options.adapter {
+            Adapter::Tree => return (tree::archive_document(left, right, options, ctx), None),
+            Adapter::Auto if archives && !below_depth => {
+                return (tree::archive_document(left, right, options, ctx), None);
+            }
+            _ => {}
         }
-        _ => {}
-    }
-    let depth_limited = options.adapter == Adapter::Auto && archives;
+        options.adapter == Adapter::Auto && archives
+    };
+    // Without archive support, the pairs that would be trees were refused
+    // before this (`check_supported`), and there are no child documents.
+    #[cfg(not(feature = "archives"))]
+    let depth_limited = false;
     // Byte-identical inputs are detected and decoded once: same hash, same
-    // lines, same per-side warnings. Only the name (and so the media type
-    // from the extension) can differ.
+    // lines (shared), same per-side warnings. Only the name (and so the media
+    // type from the extension) can differ.
     let (l, r) = if left.bytes == right.bytes {
         let l = decode_side(left, options.adapter);
         let detection = l.detection.renamed(right.bytes, right.name);
@@ -224,8 +356,7 @@ fn document(
                 ..l.meta.clone()
             },
             detection,
-            text: l.text,
-            lines: None,
+            text: l.text.clone(),
             codes: l.codes.clone(),
         };
         (l, r)
@@ -246,7 +377,8 @@ fn document(
         warnings.push(Warning::new(WarningCode::DepthLimit, None));
     }
     if kind == Kind::Binary {
-        binary_document(left.bytes, right.bytes, &l, &r, options, warnings)
+        let doc = binary_document(left.bytes, right.bytes, &l, &r, options, warnings);
+        (doc, None)
     } else {
         text_document(l, r, ctx.key_builder.as_ref(), options, warnings)
     }
@@ -318,24 +450,24 @@ fn empty_document(kind: Kind, left: FileMeta, right: FileMeta, options: &Options
     }
 }
 
-/// `kind: "text"`: the line diff (spec §7).
-fn text_document(
-    l: DecodedSide<'_>,
-    r: DecodedSide<'_>,
+/// `kind: "text"`: the line diff (spec §7), and both decoded inputs when
+/// they decode.
+fn text_document<'a>(
+    l: DecodedSide<'a>,
+    r: DecodedSide<'a>,
     builder: Option<&KeyBuilder>,
     options: &Options,
     mut warnings: Vec<Warning>,
-) -> DiffDocument {
+) -> (DiffDocument, Option<TextInputs<'a>>) {
     for (side, codes) in [(Side::Left, &l.codes), (Side::Right, &r.codes)] {
         for code in codes {
             warnings.push(Warning::new(*code, Some(side)));
         }
     }
-    let left_lines = l.text.zip(l.lines.as_ref());
-    let right_lines = r.text.zip(r.lines.as_ref().or(l.lines.as_ref()));
+    let (left_lines, right_lines) = (l.text.as_ref(), r.text.as_ref());
     let too_big = [left_lines, right_lines]
         .iter()
-        .any(|s| s.is_some_and(|(_, lines)| lines.len() > line_diff::MAX_LINES))
+        .any(|s| s.is_some_and(|lines| lines.len() > line_diff::MAX_LINES))
         || !line_diff::within_size_limit(line_algorithm(options), l.meta.size, r.meta.size);
     if too_big {
         warnings.push(Warning::new(WarningCode::LimitExceeded, None));
@@ -343,15 +475,15 @@ fn text_document(
 
     let failed = has_error(&warnings);
     let (hunks, stats, moves) = match (left_lines, right_lines, builder) {
-        (Some((lt, ll)), Some((rt, rl)), Some(builder)) if !failed => {
+        (Some(lt), Some(rt), Some(builder)) if !failed => {
             let (hunks, stats, moves) = compare(
                 TextLines {
-                    text: lt,
-                    lines: ll,
+                    text: lt.text(),
+                    lines: lt.index(),
                 },
                 TextLines {
-                    text: rt,
-                    lines: rl,
+                    text: rt.text(),
+                    lines: rt.index(),
                 },
                 builder,
                 options,
@@ -371,7 +503,11 @@ fn text_document(
         doc.hunks = hunks;
         doc.moves = moves;
     }
-    doc
+    let text = match (l.text, r.text) {
+        (Some(left), Some(right)) => Some(TextInputs { left, right }),
+        _ => None,
+    };
+    (doc, text)
 }
 
 /// `kind: "binary"`: changed byte ranges (spec §17). Text-only meta and
@@ -464,15 +600,14 @@ pub fn decode_text(bytes: &[u8]) -> Option<&str> {
     std::str::from_utf8(body).ok()
 }
 
-/// One detected and decoded input. `text` and `lines` are `None` when the
-/// input is not decoded as text (not UTF-8, or not needed for the adapter),
-/// and `lines` also for the right side of byte-identical inputs (which shares
-/// the left side's lines).
+/// One detected and decoded input. `text` (the text after the BOM and its
+/// lines) is `None` when the input is not decoded as text (not UTF-8, or not
+/// needed for the adapter). The right side of byte-identical inputs shares
+/// the left side's lines.
 struct DecodedSide<'a> {
     meta: FileMeta,
     detection: Detection<'a>,
-    text: Option<&'a str>,
-    lines: Option<LineIndex>,
+    text: Option<IndexedText<'a>>,
     /// Warnings about this side, in the order found.
     codes: Vec<WarningCode>,
 }
@@ -547,14 +682,14 @@ fn decode_side(input: Input<'_>, adapter: Adapter) -> DecodedSide<'_> {
             meta,
             detection,
             text: None,
-            lines: None,
             codes,
         };
     };
     if bom {
         codes.push(WarningCode::BomStripped);
     }
-    let lines = LineIndex::new(text);
+    let indexed = IndexedText::new(text);
+    let lines = indexed.index();
     let style = match lines.terminators().as_slice() {
         [] => LineTerminator::None,
         [Terminator::Lf] => LineTerminator::Lf,
@@ -577,8 +712,7 @@ fn decode_side(input: Input<'_>, adapter: Adapter) -> DecodedSide<'_> {
     DecodedSide {
         meta,
         detection,
-        text: Some(text),
-        lines: Some(lines),
+        text: Some(indexed),
         codes,
     }
 }
@@ -643,17 +777,21 @@ fn compare(
     if key::is_approximate_core(builder, left, right, &core, &alignment) {
         warnings.push(Warning::new(WarningCode::Approximate, None));
     }
-    let (prefix, suffix) = (core.prefix, core.suffix);
-    drop(core);
-    let mut full = algo_ops::full_ops_trimmed(&alignment, prefix, suffix, left.len(), right.len());
-    drop(alignment);
+    // Sliders go to their canonical position (spec §7.3.1). This may
+    // shift runs into the trimmed prefix and suffix, so it works on the
+    // whole-file alignment.
+    let (compacted, _) = key::compact_core(builder, left, right, &core, &alignment);
+    drop((core, alignment));
+    let mut full = algo_ops::full_ops(&compacted);
+    drop(compacted);
     if options.ignore.blank_lines {
         algo_ops::ignore_blank_changes_by(&mut full, content_of(left), content_of(right));
     }
     let context = usize::try_from(options.context).unwrap_or(usize::MAX);
     let groups = algo_ops::group_hunks(&full, context);
 
-    // Moved-block detection runs before refinement: moved lines get no spans.
+    // Moved-block detection runs before refinement: moved lines get no spans
+    // on their ops (an edited move carries its own, below).
     // Lines of `ignored` ops are not changed lines, so they are never moved.
     // Without change ops there is nothing to move (and no limit to reach).
     let detected = if options.detect_moves && full.iter().any(|op| op.kind.is_change()) {
@@ -710,6 +848,14 @@ fn compare(
             }
         })
         .collect();
+    // Edited moves carry their own spans (spec §6.5); pure moves none.
+    let move_inline: Vec<Vec<Span>> = detected
+        .iter()
+        .map(|m| match &refine_opts {
+            Some(ro) => move_spans(m, left, right, ro, &mut skipped),
+            None => Vec::new(),
+        })
+        .collect();
     if skipped {
         warnings.push(Warning::new(WarningCode::RefineSkippedLimit, None));
     }
@@ -750,7 +896,7 @@ fn compare(
         bytes: None,
         tree: None,
     };
-    let moves = to_model_moves(&detected, &hunks);
+    let moves = to_model_moves(&detected, move_inline, &hunks);
     (hunks, stats, moves)
 }
 
@@ -782,8 +928,12 @@ struct FlatOp {
 }
 
 /// Maps detected moves onto `moves[]` (spec §6.5): 1-based ranges, ids in
-/// array order, and the ops each range touches.
-fn to_model_moves(detected: &[moves::DetectedMove], hunks: &[Hunk]) -> Vec<Move> {
+/// array order, the ops each range touches, and each move's inline spans.
+fn to_model_moves(
+    detected: &[moves::DetectedMove],
+    inline: Vec<Vec<Span>>,
+    hunks: &[Hunk],
+) -> Vec<Move> {
     let as_usize = |v: u64| usize::try_from(v).unwrap_or(usize::MAX);
     let flat: Vec<FlatOp> = hunks
         .iter()
@@ -822,8 +972,9 @@ fn to_model_moves(detected: &[moves::DetectedMove], hunks: &[Hunk]) -> Vec<Move>
     };
     detected
         .iter()
+        .zip(inline)
         .enumerate()
-        .map(|(i, m)| Move {
+        .map(|(i, (m, inline))| Move {
             id: format!("m{}", i + 1),
             kind: match m.kind {
                 moves::MoveKind::Pure => MoveKind::Pure,
@@ -846,6 +997,7 @@ fn to_model_moves(detected: &[moves::DetectedMove], hunks: &[Hunk]) -> Vec<Move>
             similarity: Similarity::from_basis_points(m.similarity_bp),
             from_ops: touching((m.left_start, m.left_len), |f| f.left),
             to_ops: touching((m.right_start, m.right_len), |f| f.right),
+            inline,
         })
         .collect()
 }
@@ -892,30 +1044,74 @@ fn inline_spans(
     options: &RefineOptions,
     skipped: &mut bool,
 ) -> Vec<Span> {
-    /// The op side's unmoved lines and their absolute 0-based line numbers.
-    fn side_lines<'t>(
-        side: TextLines<'t>,
-        moved: &[bool],
-        start: usize,
-        len: usize,
-    ) -> (Vec<SideLine<'t>>, Vec<usize>) {
-        (start..start + len)
-            .filter(|i| !Moved::is_moved(moved, *i))
-            .map(|i| {
-                let l = side.line(i);
-                (
-                    SideLine {
-                        content: l.content(side.text),
-                        terminator: l.terminator,
-                    },
-                    i,
-                )
-            })
-            .unzip()
+    let (l, l_index) = side_lines(left, op.left_start, op.left_len, |i| {
+        !Moved::is_moved(&moved.left, i)
+    });
+    let (r, r_index) = side_lines(right, op.right_start, op.right_len, |i| {
+        !Moved::is_moved(&moved.right, i)
+    });
+    model_spans(refine::refine(&l, &r, options), &l_index, &r_index, skipped)
+}
+
+/// Inline spans of an edited move (spec §6.5, moves spec §4.7): its two
+/// ranges refined like one `replace` op, without the lines' indentation.
+/// Pure moves get none. A move over the line limit is not read at all.
+fn move_spans(
+    m: &moves::DetectedMove,
+    left: TextLines<'_>,
+    right: TextLines<'_>,
+    options: &RefineOptions,
+    skipped: &mut bool,
+) -> Vec<Span> {
+    if m.kind != moves::MoveKind::Edited {
+        return Vec::new();
     }
-    let (l, l_index) = side_lines(left, &moved.left, op.left_start, op.left_len);
-    let (r, r_index) = side_lines(right, &moved.right, op.right_start, op.right_len);
-    match refine::refine(&l, &r, options) {
+    if m.left_len > refine::REFINE_MAX_LINES || m.right_len > refine::REFINE_MAX_LINES {
+        *skipped = true;
+        return Vec::new();
+    }
+    let (l, l_index) = side_lines(left, m.left_start, m.left_len, |_| true);
+    let (r, r_index) = side_lines(right, m.right_start, m.right_len, |_| true);
+    model_spans(
+        refine::refine_moved(&l, &r, options),
+        &l_index,
+        &r_index,
+        skipped,
+    )
+}
+
+/// The lines `start .. start + len` of `side` that `keep` accepts, with their
+/// absolute 0-based line numbers.
+fn side_lines(
+    side: TextLines<'_>,
+    start: usize,
+    len: usize,
+    keep: impl Fn(usize) -> bool,
+) -> (Vec<SideLine<'_>>, Vec<usize>) {
+    (start..start + len)
+        .filter(|i| keep(*i))
+        .map(|i| {
+            let l = side.line(i);
+            (
+                SideLine {
+                    content: l.content(side.text),
+                    terminator: l.terminator,
+                },
+                i,
+            )
+        })
+        .unzip()
+}
+
+/// Maps refined spans onto model spans with absolute 1-based line numbers;
+/// `l_index` and `r_index` give the line number of each refined line.
+fn model_spans(
+    refined: Refined,
+    l_index: &[usize],
+    r_index: &[usize],
+    skipped: &mut bool,
+) -> Vec<Span> {
+    match refined {
         Refined::SkippedLimit => {
             *skipped = true;
             Vec::new()
@@ -944,7 +1140,7 @@ fn provenance(kind: Kind, options: &Options, settings: &Settings, total_micros: 
     let libraries: serde_json::Map<String, Value> = diffyman_algo::LIBRARY_VERSIONS
         .iter()
         .chain(&binary::LIBRARY_VERSIONS)
-        .chain(&tree::LIBRARY_VERSIONS)
+        .chain(TREE_LIBRARIES)
         .chain(&[("infer", detect::INFER_VERSION)])
         .map(|(name, version)| ((*name).to_owned(), Value::String((*version).to_owned())))
         .collect();
@@ -977,6 +1173,7 @@ fn provenance(kind: Kind, options: &Options, settings: &Settings, total_micros: 
         },
         algorithm: match kind {
             Kind::Text => line_algorithm(options).id().to_owned(),
+            #[cfg(feature = "archives")]
             Kind::Tree => tree::TREE_ID.to_owned(),
             _ => binary::BINARY_ID.to_owned(),
         },

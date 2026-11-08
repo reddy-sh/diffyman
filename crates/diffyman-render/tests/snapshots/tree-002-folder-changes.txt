@@ -1,0 +1,4 @@
+left -> right: different, 6 changed entries (2 added, 1 removed, 3 modified), 40% similar
+  left:     folder, 7 entries, 3138 bytes
+  right:    folder, 8 entries, 3137 bytes
+  entries:  2 added, 1 removed, 3 modified, 0 moved, 0 type changes, 3 unchanged

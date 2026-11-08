@@ -20,7 +20,8 @@ diffyman-model.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-diffyman.workspace = true
+# `fs` for the folder cases of the corpus (`diff_paths`).
+diffyman = { workspace = true, features = ["fs"] }
 serde_json.workspace = true
 
 [lints]

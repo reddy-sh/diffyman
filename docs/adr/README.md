@@ -16,6 +16,7 @@ This folder records the decisions that shape diffyman: what we chose, why, and w
 | [0008](0008-wasm-target.md) | WASM target: opt-level 3, name section removed, no wasm-opt | Accepted | 2026-11-07 |
 | [0009](0009-type-detection-and-binary-diff.md) | Type detection and a byte-level binary diff | Accepted | 2026-11-08 |
 | [0010](0010-folders-and-archives.md) | Folders and archives as trees, read in memory with hard limits | Accepted | 2026-11-08 |
+| [0011](0011-inline-spans-in-edited-moves.md) | Inline spans inside edited moves | Accepted | 2026-11-08 |
 
 ## Numbering rules
 

@@ -4,7 +4,7 @@ use diffyman_model::{DiffDocument, Kind, OpKind, Severity, Status, WarningCode};
 
 use crate::RenderError;
 use crate::layout::{self, RHunk};
-use crate::source::{self, SideText, Term};
+use crate::source::{self, Computed, Given, SideText, Term};
 use crate::text;
 
 /// Options for [`unified`].
@@ -91,8 +91,27 @@ pub fn unified(
     right: &[u8],
     options: &UnifiedOptions,
 ) -> Result<String, RenderError> {
+    render(doc, Given::Bytes(left, right), options)
+}
+
+/// [`unified`] for a document the caller has just computed from `inputs`:
+/// the same output, without hashing, decoding and splitting the inputs again
+/// (see [`Computed`]).
+pub fn unified_computed(
+    doc: &DiffDocument,
+    inputs: &Computed<'_>,
+    options: &UnifiedOptions,
+) -> Result<String, RenderError> {
+    render(doc, Given::Computed(*inputs), options)
+}
+
+fn render(
+    doc: &DiffDocument,
+    given: Given<'_>,
+    options: &UnifiedOptions,
+) -> Result<String, RenderError> {
     if doc.kind == Kind::Binary {
-        source::check_inputs(doc, left, right)?;
+        source::check_inputs(doc, given)?;
     }
     let left_label = label(
         options.left_label.as_deref(),
@@ -115,7 +134,7 @@ pub fn unified(
             )),
         };
     }
-    let src = source::load(doc, left, right)?;
+    let src = source::load(doc, given)?;
     if doc.status == Status::Error {
         let errors: Vec<&str> = doc
             .warnings

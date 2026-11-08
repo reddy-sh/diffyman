@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="generator" content="diffyman">
+<title>Diff: left.txt → right.png</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1f2328;--mute:#59636e;--bd:#d1d9e0;--hh:#eef3f8;--gap:#f6f8fa;--a-bg:#e1efff;--a-hi:#a8cdf5;--a-fg:#0b4f8a;--d-bg:#ffead9;--d-hi:#f4bd8f;--d-fg:#8f3f00;--mv:#7b3aa6;--mv-bg:#f4eafb;--i-bg:#f0f1f3;--inv-bg:#fff1a8;--inv-fg:#5a4500;--link:#0b5cad}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--mute:#9198a1;--bd:#3d444d;--hh:#161d27;--gap:#151b23;--a-bg:#0c2d4d;--a-hi:#1d5d99;--a-fg:#a8cdf5;--d-bg:#3a230f;--d-hi:#7c4517;--d-fg:#f4bd8f;--mv:#d2a8ef;--mv-bg:#2a1c36;--i-bg:#1b1f24;--inv-bg:#5a4500;--inv-fg:#fff1a8;--link:#79b8ff}}
+*{box-sizing:border-box}
+body{margin:0;padding:1rem 1.25rem 2rem;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--link)}
+h1{font-size:1.35rem;margin:0 0 .25rem;overflow-wrap:anywhere}
+h2{font-size:1.05rem;margin:1rem 0 .4rem}
+code,.diff{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.files{margin:0;color:var(--mute);overflow-wrap:anywhere}
+.notice{border:1px solid var(--bd);border-left:4px solid var(--mv);padding:.4rem .75rem;background:var(--gap)}
+.legend{display:flex;flex-wrap:wrap;gap:.25rem 1.25rem;list-style:none;padding:0;margin:.5rem 0;font-size:.9rem}
+.key{display:inline-block;min-width:1.7em;text-align:center;font-weight:700;border:1px solid var(--bd);border-radius:3px}
+.key.d{background:var(--d-bg);color:var(--d-fg)}.key.a{background:var(--a-bg);color:var(--a-fg)}.key.mv{background:var(--mv-bg);color:var(--mv)}.key.i{background:var(--i-bg);color:var(--mute)}
+details{margin:.5rem 0}summary{cursor:pointer}
+table.meta{border-collapse:collapse;font-size:.85rem;margin:.5rem 0}
+.meta th,.meta td{border:1px solid var(--bd);padding:.15rem .5rem;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+.warnings{padding-left:1.25rem}.sev-error strong{color:var(--d-fg)}
+.empty{font-size:1.05rem;padding:1rem;border:1px solid var(--bd);background:var(--gap)}
+.vt{position:absolute;opacity:0;width:1px;height:1px}
+.vt+label{display:inline-block;padding:.2rem .8rem;border:1px solid var(--bd);border-radius:4px;margin:0 .3rem .6rem 0;cursor:pointer}
+.vt:checked+label{background:var(--hh);border-color:var(--fg);font-weight:600}
+.vt:focus-visible+label{outline:2px solid var(--link);outline-offset:2px}
+#view-split:checked~.inline,#view-inline:checked~.split{display:none}
+table.diff{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;line-height:1.45;border:1px solid var(--bd)}
+.cm{width:1.6em}
+.diff thead th{background:var(--hh);text-align:left;font-weight:600;padding:.25rem .5rem;border-bottom:1px solid var(--bd);overflow-wrap:anywhere}
+.diff td{padding:0 .4rem;vertical-align:top}
+.diff .n{color:var(--mute);text-align:right;-webkit-user-select:none;user-select:none}
+.diff .m{padding:0;text-align:center;font-weight:700;-webkit-user-select:none;user-select:none}
+.diff .c{white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext;tab-size:4}
+.diff .hh th{background:var(--hh);color:var(--mute);text-align:left;font-weight:400;padding:.2rem .5rem;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd)}
+.diff .gap td{background:var(--gap);color:var(--mute);text-align:center;font-style:italic;padding:.1rem}
+.diff .cut td{background:var(--inv-bg);color:var(--inv-fg);text-align:center;padding:.4rem}
+.d{background:var(--d-bg)}.m.d{color:var(--d-fg)}
+.a{background:var(--a-bg)}.m.a{color:var(--a-fg)}
+.i{background:var(--i-bg);color:var(--mute)}
+.x{background:var(--gap)}
+.mv{background:var(--mv-bg)}.m.mv{color:var(--mv)}.c.mv{box-shadow:inset 3px 0 0 var(--mv)}
+del{background:var(--d-hi);color:inherit;text-decoration:line-through 1px}
+ins{background:var(--a-hi);color:inherit;text-decoration:underline 2px;text-underline-offset:2px}
+.inv{display:inline-block;font:600 .7em/1.2 system-ui,sans-serif;padding:0 .2em;margin:0 .05em;border:1px solid var(--inv-fg);border-radius:3px;background:var(--inv-bg);color:var(--inv-fg);vertical-align:.1em;text-decoration:none;unicode-bidi:isolate}
+.tab{border-bottom:1px dotted var(--mute)}
+.tw{outline:1px dashed var(--mute);outline-offset:-1px}
+.eol{margin-left:.35em;font:.75em system-ui,sans-serif;color:var(--mute);-webkit-user-select:none;user-select:none}
+.cl{font:italic .8em system-ui,sans-serif;color:var(--mute)}
+.mvl{float:right;margin-left:.5em;padding:0 .35em;font:.75em/1.6 system-ui,sans-serif;border:1px solid var(--mv);border-radius:3px;color:var(--mv);text-decoration:none;-webkit-user-select:none;user-select:none}
+.mvl:focus-visible,.mvl:hover{text-decoration:underline}
+footer{margin-top:1.5rem;color:var(--mute);font-size:.85rem;overflow-wrap:anywhere}
+@media print{.vt,.vt+label{display:none}.view{display:block!important}}
+table.ranges,table.entries{width:100%;border-collapse:collapse;font-size:13px;line-height:1.45;border:1px solid var(--bd);margin:.25rem 0 .75rem}
+.ranges th,.entries th{background:var(--hh);text-align:left;font-weight:600;padding:.25rem .5rem;border-bottom:1px solid var(--bd)}
+.ranges td,.entries td{padding:.2rem .5rem;vertical-align:top;border-top:1px solid var(--bd);overflow-wrap:anywhere}
+.ranges .n{color:var(--mute);text-align:right;width:3em}
+.ranges .op,.entries .st{white-space:nowrap}
+.loc{display:block;font-size:.85rem;color:var(--mute)}
+code.hex{display:block;white-space:pre;overflow-x:auto;font-size:12px;line-height:1.4;margin-top:.2rem}
+.ho{color:var(--mute)}
+.key.r{background:var(--mv-bg);color:var(--mv)}
+tr.cut td{background:var(--inv-bg);color:var(--inv-fg);text-align:center;padding:.4rem}
+</style>
+</head>
+<body>
+<header>
+<h1>Diff: left.txt → right.png</h1>
+<p class="files">left.txt <span aria-hidden="true">→</span><span class="sr">compared with</span> right.png</p>
+<p class="status st-different"><strong>Different.</strong> 1 changed range: 1108 bytes added, 34 removed, 0 unchanged; 0% similar.</p>
+<ul class="legend" aria-label="Legend"><li><span class="key d">−</span> deleted bytes</li><li><span class="key a">+</span> inserted bytes</li><li><span class="key r">±</span> replaced bytes</li><li><del>4f</del> <ins>50</ins> changed bytes in a hex dump</li><li><code>.</code> a byte outside printable ASCII in the text column</li></ul>
+<details>
+<summary>Files and options</summary>
+<table class="meta">
+<thead><tr><td></td><th scope="col">Left</th><th scope="col">Right</th></tr></thead>
+<tbody>
+<tr><th scope="row">Name</th><td>left.txt</td><td>right.png</td></tr>
+<tr><th scope="row">Media type</th><td><code>text/plain</code></td><td><code>image/png</code></td></tr>
+<tr><th scope="row">Size</th><td>34 bytes</td><td>1108 bytes</td></tr>
+<tr><th scope="row">Encoding</th><td>utf-8</td><td>binary</td></tr>
+<tr><th scope="row">SHA-256</th><td><code>449d74b69ca524d21ebaa6b459630f12fdc66843e3626f45fd6f07d5445e48ad</code></td><td><code>3e11999aeb2dfc62609ca9ab87c31e8f1332f416b527d5dfef927c44d1a2e839</code></td></tr>
+</tbody>
+</table>
+<p>Options: adapter auto.</p>
+</details>
+<section aria-labelledby="warnings-h">
+<h2 id="warnings-h">Warnings</h2>
+<ul class="warnings">
+<li class="sev-warning"><strong>Warning</strong> <code>binary-fallback</code>: One input is not UTF-8 text, so both inputs were compared as bytes.</li>
+</ul>
+</section>
+</header>
+<main>
+<h2>Changed byte ranges</h2>
+<table class="ranges">
+<thead><tr><th scope="col">#</th><th scope="col">Change</th><th scope="col">Left</th><th scope="col">Right</th></tr></thead>
+<tbody>
+<tr><td class="n">1</td><td class="op"><span class="key r" aria-hidden="true">±</span> replaced</td><td><span class="loc">34 bytes at offset 0x0 (0)</span><code class="hex"><span class="ho">00000000</span>  <del>50 61 63 6b 69 6e 67 20  6c 69 73 74 0a 2d 20 74</del>  |<del>Packing list.- t</del>|
+<span class="ho">00000010</span>  <del>65 6e 74 0a 2d 20 73 74  6f 76 65 0a 2d 20 6d 61</del>  |<del>ent.- stove.- ma</del>|
+<span class="ho">00000020</span>  <del>70 0a</del>                                             |<del>p.</del>              |</code></td><td><span class="loc">1108 bytes at offset 0x0 (0)</span><code class="hex"><span class="ho">00000000</span>  <ins>89 50 4e 47 0d 0a 1a 0a  00 00 00 0d 49 48 44 52</ins>  |<ins>.PNG........IHDR</ins>|
+<span class="ho">00000010</span>  <ins>00 00 00 10 00 00 00 10  08 06 00 00 00 1f f3 ff</ins>  |<ins>................</ins>|
+<span class="ho">00000020</span>  <ins>61 00 00 04 1b 49 44 41  54 78 01 01 10 04 ef fb</ins>  |<ins>a....IDATx......</ins>|
+<span class="ho">00000030</span>  <ins>00 40 0c 6e 55 90 e5 eb  14 9a 32 8a 37 96 09 54</ins>  |<ins>.@.nU.....2.7..T</ins>|
+<span class="ho">00000040</span>  <ins>e6 ab 06 cd 7b c8 92 a0  d9 6c 45 5a 55 7c 60 13</ins>  |<ins>....{....lEZU|`.</ins>|
+<span class="ho">00000050</span>  <ins>72 2a 47 5e ea 24 64 8f  99 df 24 41 0f 48 ff 1d</ins>  |<ins>r*G^.$d...$A.H..</ins>|
+<span class="ho">00000060</span>  <ins>41 9a 6b 03 e3 be 0d ed  75 8b 3f d5 0c 19 d9 a2</ins>  |<ins>A.k.....u.?.....</ins>|
+<span class="ho">00000070</span>  <ins>89 00 1b ae 2a 7a f7 e3  6a c5 b8 fc fc c7 a6 16</ins>  |<ins>....*z..j.......</ins>|
+<span class="ho">00000080</span>  <ins>ac 12 03 be ed 49 2e 05  ff 88 ef 59 f9 9b 3f 0d</ins>  |<ins>.....I.....Y..?.</ins>|
+<span class="ho">00000090</span>  <ins>96 94 f6 ff 8e 09 74 d8  cd 33 f0 56 07 de 4f aa</ins>  |<ins>......t..3.V..O.</ins>|
+<span class="ho">000000a0</span>  <ins>7d 3b 51 95 a8 ce 67 b9  cd ca b5 d0 38 ca a3 1e</ins>  |<ins>};Q...g.....8...</ins>|
+<span class="ho">000000b0</span>  <ins>12 10 00 b4 ed 4e 88 fc  61 30 81 0d 13 34 d7 9c</ins>  |<ins>.....N..a0...4..</ins>|
+<span class="ho">000000c0</span>  <ins>a8 26 4e a0 98 e3 85 44  7c 38 99 50 39 95 9b 6c</ins>  |<ins>.&amp;N....D|8.P9..l</ins>|
+<span class="ho">000000d0</span>  <ins>ce 95 80 2d 4b 44 7d 89  fe fa 9a bf 0f 1d 56 cf</ins>  |<ins>...-KD}.......V.</ins>|
+<span class="ho">000000e0</span>  <ins>fe 10 23 13 0a 0d bf f1  ea 13 75 0f a7 c0 1e 86</ins>  |<ins>..#.......u.....</ins>|
+<span class="ho">000000f0</span>  <ins>d8 97 23 00 c3 0e 0d cd  37 69 a4 d5 0c a4 31 f1</ins>  |<ins>..#.....7i....1.</ins>|</code><span class="cl">… 852 more bytes of this range not shown</span></td></tr>
+</tbody>
+</table>
+</main>
+<footer>
+<p>Diff Document <code>sha256:85bd66019f0f95afccb83afd23f5017878acda6cc2b1bd744e2fb0ca59a8477f</code>, schema 0.4.0.</p>
+</footer>
+</body>
+</html>

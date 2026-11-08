@@ -1,0 +1,5 @@
+left.zip -> right.zip: partial, 1 changed entry (1 modified), 66.67% similar
+  left:     application/zip, 3 entries, 395 bytes
+  right:    application/zip, 3 entries, 395 bytes
+  entries:  0 added, 0 removed, 1 modified, 0 moved, 0 type changes, 2 unchanged
+  warnings: encrypted-entry (left), encrypted-entry (right)

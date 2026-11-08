@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 7,
+        "count": 7
+      },
+      "right": {
+        "start": 10,
+        "count": 7
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "logEvent() moved into createLogger() (two more spaces of indentation), its local variable was renamed from message to summary, and its timestamp changed. The timestamp is masked by ignore.regex. Word-level spans in UTF-16 offsets mark only the renamed variable: not the new indentation and not the masked timestamp."
+}

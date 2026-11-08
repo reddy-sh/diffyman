@@ -9,6 +9,7 @@ use diffyman::{Error, Input, Settings};
 use pyo3::create_exception;
 use pyo3::exceptions::{PyOSError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 
 create_exception!(
     diffyman,
@@ -51,28 +52,53 @@ fn diff(
 /// A folder on either side gives a tree document (folders and archives, spec
 /// §19); two files are diffed like [`diff`], named by their final path
 /// components. The GIL is released while the diff runs.
+///
+/// `limit` is the read limit in bytes for every input that is read whole (as
+/// the CLI's `--max-input-size`); `None` keeps the default rule of
+/// [`diffyman::read_path`].
 #[pyfunction]
-#[pyo3(signature = (left, right, options_json = ""))]
+#[pyo3(signature = (left, right, options_json = "", limit = None))]
 fn diff_paths(
     py: Python<'_>,
     left: std::path::PathBuf,
     right: std::path::PathBuf,
     options_json: &str,
+    limit: Option<u64>,
 ) -> PyResult<String> {
     let settings = Settings {
         binding: "python".to_owned(),
     };
     let result = py.detach(move || {
         let options = diffyman::parse_options(options_json)?;
-        let doc = diffyman::diff_paths(&left, &right, &options, &settings)?;
+        let doc = diffyman::diff_paths_with_limit(&left, &right, &options, &settings, limit)?;
         Ok::<_, Error>(diffyman::model::to_canonical_json(&doc)?)
     });
     result.map_err(|e| to_py_error(&e))
 }
 
+/// Reads one file with the engine's bounded reader (spec §19.1, reading
+/// paths): a regular file whole, a pipe or device up to
+/// [`diffyman::MAX_STREAM_BYTES`], and with `limit` set never more than
+/// `limit` bytes. Over the limit raises `OSError` (`limit-exceeded: ...`).
+/// The GIL is released while the file is read.
+#[pyfunction]
+#[pyo3(signature = (path, limit = None))]
+fn read_path(
+    py: Python<'_>,
+    path: std::path::PathBuf,
+    limit: Option<u64>,
+) -> PyResult<Py<PyBytes>> {
+    let data = py
+        .detach(move || diffyman::read_path(&path, limit))
+        .map_err(|e| to_py_error(&e))?;
+    Ok(PyBytes::new(py, &data).unbind())
+}
+
 fn to_py_error(e: &Error) -> PyErr {
     match e {
-        Error::InvalidOptions(_) => DiffymanError::new_err(e.to_string()),
+        // `Unsupported` needs a build without archive support; this binding
+        // always has it.
+        Error::InvalidOptions(_) | Error::Unsupported(_) => DiffymanError::new_err(e.to_string()),
         Error::Io(_) => PyOSError::new_err(e.to_string()),
         Error::Canonical(_) => PyRuntimeError::new_err(e.to_string()),
     }
@@ -89,7 +115,9 @@ fn input<'a>(bytes: &'a [u8], name: Option<&'a str>) -> Input<'a> {
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(diff, m)?)?;
     m.add_function(wrap_pyfunction!(diff_paths, m)?)?;
+    m.add_function(wrap_pyfunction!(read_path, m)?)?;
     m.add("DiffymanError", m.py().get_type::<DiffymanError>())?;
+    m.add("MAX_STREAM_BYTES", diffyman::MAX_STREAM_BYTES)?;
     m.add("ENGINE_VERSION", diffyman::ENGINE_VERSION)?;
     m.add("SCHEMA_VERSION", diffyman::model::SCHEMA_VERSION)?;
     Ok(())

@@ -13,7 +13,9 @@
 //! | `text.patience@1` | `similar` 3.2.1, `Algorithm::Patience`, inputs up to [`PATIENCE_MAX_INPUT_BYTES`] per side |
 //!
 //! The common prefix and suffix of the two token sequences are trimmed before
-//! the algorithm runs. No slider or indent post-processing is applied.
+//! the algorithm runs. [`align`] returns the algorithm's own alignment; the
+//! engine then moves sliders to their canonical positions with
+//! [`crate::slider`] (spec §7.3.1), which is part of every line diff ID.
 //!
 //! # Histogram work budget
 //!
@@ -42,7 +44,9 @@
 //! changed lines whose key also occurs on the other side. [`is_approximate`]
 //! flags a result where that count is over [`EXACT_MAX_EDITS`]: below it the
 //! limit provably did not engage. Above it the result may or may not be
-//! minimal, so the flag is conservative.
+//! minimal, so the flag is conservative. A pure insertion or deletion (one
+//! side empty once the common prefix and suffix are trimmed) runs no search
+//! and is never flagged.
 //!
 //! The Histogram budget does not set the warning by itself. Histogram never
 //! promises a minimal result, and past the budget the remaining regions get
@@ -271,7 +275,16 @@ pub const EXACT_MAX_EDITS: usize = 500;
 /// True when a cost limit may have cut the search for `alignment` short (the
 /// Diff Document's `approximate` warning). `left` and `right` are the token
 /// sequences passed to [`align`]. See the module docs for the rule.
+///
+/// When one side is empty once the common prefix and suffix are trimmed (a
+/// pure insertion or deletion), [`align`] runs no search at all, so the
+/// result is exact however many lines changed.
 pub fn is_approximate(left: &[u32], right: &[u32], alignment: &Alignment) -> bool {
+    let prefix = common_prefix(left, right);
+    let suffix = common_suffix(&left[prefix..], &right[prefix..]);
+    if left.len() - prefix == suffix || right.len() - prefix == suffix {
+        return false;
+    }
     let size = left
         .iter()
         .chain(right)
@@ -566,6 +579,42 @@ mod tests {
         let l: Vec<u32> = (0..2000).collect();
         let r: Vec<u32> = (2000..4000).collect();
         assert!(!is_approximate(&l, &r, &run(LineAlgorithm::Myers, &l, &r)));
+    }
+
+    /// A pure insertion or deletion runs no search, so it is exact even when
+    /// every inserted line repeats a line of the other side.
+    #[test]
+    fn pure_insertions_and_deletions_are_exact() {
+        let base: Vec<u32> = (0..10).collect();
+        // 600 copies of line 3 in the middle, at the start and at the end.
+        let copies = vec![3u32; 600];
+        let middle = [&base[..5], &copies, &base[5..]].concat();
+        let start = [&copies[..], &base].concat();
+        let end = [&base[..], &copies].concat();
+        for grown in [middle, start, end] {
+            for alg in ALL {
+                let inserted = run(alg, &base, &grown);
+                assert_eq!(inserted.added.iter().filter(|a| **a).count(), 600);
+                assert!(!is_approximate(&base, &grown, &inserted), "{alg:?}");
+                let deleted = run(alg, &grown, &base);
+                assert!(!is_approximate(&grown, &base, &deleted), "{alg:?}");
+            }
+        }
+        // Against an empty side, too.
+        for alg in ALL {
+            assert!(!is_approximate(&[], &copies, &run(alg, &[], &copies)));
+            assert!(!is_approximate(&copies, &[], &run(alg, &copies, &[])));
+        }
+        // The same lines with one changed line inside still count.
+        let mut replaced = [&base[..5], &copies, &base[5..]].concat();
+        replaced[5 + 600] = 99;
+        for alg in ALL {
+            assert!(is_approximate(
+                &base,
+                &replaced,
+                &run(alg, &base, &replaced)
+            ));
+        }
     }
 
     #[test]

@@ -143,6 +143,12 @@ def gzip_member(data: bytes) -> bytes:
     return header + deflate(data) + trailer
 
 
+def zstd_skippable(nibble: int, data: bytes) -> bytes:
+    """A zstd skippable frame (magic 0x184D2A50 + nibble), as zstd tools
+    write for metadata."""
+    return struct.pack("<II", 0x184D2A50 | nibble, len(data)) + data
+
+
 def zstd_raw(data: bytes) -> bytes:
     """One zstd frame of raw blocks: single segment, 4-byte content size."""
     out = bytearray(b"\x28\xb5\x2f\xfd\xa0") + struct.pack("<I", len(data))
@@ -166,9 +172,15 @@ def zentry(name: str | bytes, data: bytes = b"", *, deflated: bool = False, flag
     }
 
 
+def zip64_end_record(count: int, cd_size: int, cd_offset: int) -> bytes:
+    """A zip64 end-of-central-directory record that declares `count` entries."""
+    return b"PK\x06\x06" + struct.pack("<QHHIIQQQQ", 44, 45, 45, 0, 0, count, count, cd_size, cd_offset)
+
+
 def zip_bytes(entries: list[dict], *, zip64_count: int | None = None) -> bytes:
-    """A zip archive written field by field. `zip64_count` inserts a zip64
-    end record that claims that many entries (a forged count)."""
+    """A zip archive written field by field. `zip64_count` ends it the zip64
+    way: a zip64 end record that claims that many entries (a forged count),
+    its locator, and a zip32 end record whose fields defer to it."""
     out = bytearray()
     central = bytearray()
     for e in entries:
@@ -192,7 +204,11 @@ def zip_bytes(entries: list[dict], *, zip64_count: int | None = None) -> bytes:
     start = len(out)
     out += central
     if zip64_count is not None:
-        out += b"PK\x06\x06" + struct.pack("<QHHIIQQQQ", 44, 45, 45, 0, 0, zip64_count, zip64_count, len(central), start)
+        record_at = len(out)
+        out += zip64_end_record(zip64_count, len(central), start)
+        out += b"PK\x06\x07" + struct.pack("<IQI", 0, record_at, 1)
+        out += b"PK\x05\x06" + struct.pack("<HHHHIIH", 0, 0, 0xFFFF, 0xFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0)
+        return bytes(out)
     count = len(entries)
     out += b"PK\x05\x06" + struct.pack("<HHHHIIH", 0, 0, count, count, len(central), start, 0)
     return bytes(out)
@@ -656,8 +672,9 @@ case(
     ("left.zip", zip_bytes([zentry("a.txt", lines("a"))], zip64_count=1 << 40)),
     ("right.zip", zip_bytes([zentry("a.txt", lines("a"))])),
     opts(),
-    "A zip64 end record that claims 2^40 entries. A correct result refuses it before reading the "
-    "central directory: an error document with `limit-exceeded`.",
+    "A zip that ends the zip64 way (zip64 end record, locator, and a zip32 end record whose "
+    "fields defer to it), with a zip64 end record that claims 2^40 entries. A correct result "
+    "refuses it before reading the central directory: an error document with `limit-exceeded`.",
 )
 case(
     "023-folder-vs-plain-file",
@@ -717,6 +734,36 @@ case(
     "`c.txt` overlap it, so on the left they have `sha256: null` and their declared size, they "
     "are `modified` without a child document, the left side has `tree-limit`, and the status is "
     "`partial` (spec 19.6).",
+)
+_record = zip64_end_record(1 << 40, 0, 0)
+case(
+    "028-zip-end-record-in-content",
+    ("left.zip", zip_bytes([zentry("record.bin", _record), zentry("notes.txt", lines("v1"))])),
+    ("right.zip", zip_bytes([zentry("record.bin", _record), zentry("notes.txt", lines("v2"))])),
+    opts(),
+    "Both zips store, as the content of `record.bin`, the bytes of a zip64 end record that claims "
+    "2^40 entries. No locator at the end of the archive names it, so it is data, not an end "
+    "record (spec 19.3). A correct result lists both entries: `record.bin` is `unchanged` and "
+    "`notes.txt` is `modified` with a text child.",
+)
+_zst_content = [("file", "a.txt", lines("alpha")), ("file", "dir/b.txt", lines("beta"))]
+_zst_tar = tar_bytes(_zst_content)
+case(
+    "029-tarzst-skippable-frames",
+    (
+        "left.tar.zst",
+        zstd_skippable(0, b"metadata written before the first frame")
+        + zstd_raw(_zst_tar[:1024])
+        + zstd_skippable(0xF, b"")
+        + zstd_raw(_zst_tar[1024:])
+        + zstd_skippable(7, b"trailing metadata"),
+    ),
+    ("right.tar", _zst_tar),
+    opts(),
+    "A zstd-compressed tar that starts with a skippable frame and has more of them between and "
+    "after its two frames, against the same tar uncompressed. A correct result recognizes the "
+    "left input as a tar.zst from what follows the skippable frames (spec 19.1) and is "
+    "`identical`, entry for entry.",
 )
 
 
