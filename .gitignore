@@ -1,0 +1,28 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / WASM
+node_modules/
+/bindings/wasm/pkg/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Java
+/bindings/java/target/
+*.class
+
+# Local secrets and config
+.env
+.env.local
+*.local.json
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
