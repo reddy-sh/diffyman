@@ -1,32 +1,61 @@
-//! Line diff behind versioned algorithm IDs (Diff Document spec §7.3, §12).
+//! Line diff behind versioned algorithm IDs (Diff Document spec §7.3, §12;
+//! ADR 0006).
 //!
 //! The result is an [`Alignment`]: which left lines are removed and which
 //! right lines are added. The remaining lines match up in order.
 //!
 //! Each algorithm ID is defined by this code plus its pinned library:
 //!
-//! | ID | Library |
+//! | ID | Engine |
 //! |---|---|
-//! | `text.histogram@1` | `imara-diff` 0.2.0, `Algorithm::Histogram` |
-//! | `text.myers@1` | `imara-diff` 0.2.0, `Algorithm::Myers` (with its heuristics) |
-//! | `text.patience@1` | `similar` 3.2.1, `Algorithm::Patience` |
+//! | `text.histogram@1` | Histogram copied from `gix-imara-diff` 0.3.3 with a work budget ([`HISTOGRAM_WORK_PER_LINE`]), falling back to its Myers |
+//! | `text.myers@1` | `gix-imara-diff` 0.3.3, `Algorithm::Myers` (with its heuristics) |
+//! | `text.patience@1` | `similar` 3.2.1, `Algorithm::Patience`, inputs up to [`PATIENCE_MAX_INPUT_BYTES`] per side |
 //!
 //! The common prefix and suffix of the two token sequences are trimmed before
-//! the library runs. No slider or indent post-processing is applied.
+//! the algorithm runs. No slider or indent post-processing is applied.
 //!
-//! Both libraries bound their Myers search with a cost limit (Myers directly,
-//! histogram through its Myers fallback, patience between its anchors). The
-//! limit only engages after 256 search rounds on a sub-problem, and those
-//! rounds find every edit script of up to 511 edits. A sub-problem's minimal
-//! edit count is at most the number of changed lines whose key also occurs on
-//! the other side. [`is_approximate`] flags a result where that count is over
-//! [`EXACT_MAX_EDITS`]: below it the limit provably did not engage. Above it
-//! the result may or may not be minimal, so the flag is conservative.
+//! # Histogram work budget
+//!
+//! Histogram is quadratic on some inputs (for example, unique lines with every
+//! adjacent pair swapped: each step finds a one-line anchor at the edge of the
+//! region and rebuilds the histogram for almost all of it). The copy in
+//! `histogram.rs` counts its work in abstract units: one per token added to the
+//! histogram, one per scanned right-side position, and one per occurrence
+//! visited plus one per step of extending a match. No clock is involved, so the
+//! count is the same on every platform and binding. The budget is
+//! `max(HISTOGRAM_WORK_MIN, HISTOGRAM_WORK_PER_LINE * (n + m))`, where `n` and
+//! `m` are the line counts left after trimming. Once the counter is past the
+//! budget, every region not yet diffed is diffed with Myers instead (the same
+//! Myers that Histogram already uses for very repetitive regions). Below the
+//! budget the output is identical to unguarded `gix-imara-diff` Histogram.
+//!
+//! # The `approximate` warning
+//!
+//! [`is_approximate`] reports whether a *cost limit inside Myers* may have cut
+//! a search short, which is the one way these algorithms can return a result
+//! that is not minimal by their own definition. Both libraries bound their
+//! Myers search (Myers directly, Histogram through its Myers fallback,
+//! Patience between its anchors). The limit only engages after 256 search
+//! rounds on a sub-problem, and those rounds find every edit script of up to
+//! 511 edits. A sub-problem's minimal edit count is at most the number of
+//! changed lines whose key also occurs on the other side. [`is_approximate`]
+//! flags a result where that count is over [`EXACT_MAX_EDITS`]: below it the
+//! limit provably did not engage. Above it the result may or may not be
+//! minimal, so the flag is conservative.
+//!
+//! The Histogram budget does not set the warning by itself. Histogram never
+//! promises a minimal result, and past the budget the remaining regions get
+//! Myers, whose own cost limit the same edit-count rule covers. So the rule
+//! above stays exact for all three IDs. (The swapped-pairs input above is
+//! flagged anyway, because its changed lines all occur on the other side.)
 
 use std::convert::Infallible;
 
-use imara_diff::{Algorithm as ImaraAlgorithm, Diff, Token};
+use gix_imara_diff::{Algorithm as ImaraAlgorithm, Diff, Token};
 use similar::algorithms::DiffHook;
+
+mod histogram;
 
 /// A line diff algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -54,6 +83,41 @@ impl LineAlgorithm {
 /// Largest number of lines per side the line diff accepts.
 pub const MAX_LINES: usize = (i32::MAX - 1) as usize;
 
+/// Largest input per side, in bytes, that `text.patience@1` accepts (256 MiB).
+/// `similar` uses several times the input size in memory, so larger inputs
+/// fail with `limit-exceeded` instead of switching algorithms (ADR 0006).
+pub const PATIENCE_MAX_INPUT_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Histogram work units allowed per line left after trimming (both sides
+/// counted). Each level of anchor nesting costs about 2 units per line, so 128
+/// allows 64 levels: more than balanced nesting needs even at [`MAX_LINES`]
+/// (31 levels). The spike corpus peaks at 26 units per line on a 1 GB log pair
+/// and 32 on its low-frequency case (ADR 0006, implementation notes).
+pub const HISTOGRAM_WORK_PER_LINE: u64 = 128;
+
+/// Smallest Histogram budget, so small inputs never fall back.
+pub const HISTOGRAM_WORK_MIN: u64 = 4_000_000;
+
+/// The Histogram work budget for trimmed inputs of `left_lines` and
+/// `right_lines` lines.
+pub fn histogram_budget(left_lines: usize, right_lines: usize) -> u64 {
+    let lines = (left_lines as u64).saturating_add(right_lines as u64);
+    HISTOGRAM_WORK_PER_LINE
+        .saturating_mul(lines)
+        .max(HISTOGRAM_WORK_MIN)
+}
+
+/// True when inputs of these sizes (bytes per side) are within `algorithm`'s
+/// size limit. Only `text.patience@1` has one ([`PATIENCE_MAX_INPUT_BYTES`]).
+pub fn within_size_limit(algorithm: LineAlgorithm, left_bytes: u64, right_bytes: u64) -> bool {
+    match algorithm {
+        LineAlgorithm::Patience => {
+            left_bytes <= PATIENCE_MAX_INPUT_BYTES && right_bytes <= PATIENCE_MAX_INPUT_BYTES
+        }
+        LineAlgorithm::Histogram | LineAlgorithm::Myers => true,
+    }
+}
+
 /// Matched and unmatched lines of a diff.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Alignment {
@@ -68,6 +132,18 @@ impl Alignment {
     pub fn is_consistent(&self) -> bool {
         self.removed.iter().filter(|r| !**r).count() == self.added.iter().filter(|a| !**a).count()
     }
+}
+
+/// Audit data about one [`align_with_report`] run. Deterministic, but not part
+/// of the Diff Document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AlignReport {
+    /// Histogram work units spent (0 for other algorithms).
+    pub histogram_work: u64,
+    /// The Histogram budget that applied (0 for other algorithms).
+    pub histogram_budget: u64,
+    /// True when the budget ran out and the rest was diffed with Myers.
+    pub histogram_fell_back: bool,
 }
 
 fn common_prefix(a: &[u32], b: &[u32]) -> usize {
@@ -89,6 +165,44 @@ fn common_suffix(a: &[u32], b: &[u32]) -> usize {
 ///
 /// If either side has more than [`MAX_LINES`] tokens.
 pub fn align(algorithm: LineAlgorithm, left: &[u32], right: &[u32], num_tokens: u32) -> Alignment {
+    align_with_report(algorithm, left, right, num_tokens).0
+}
+
+/// Like [`align`], and also returns what the Histogram budget did.
+pub fn align_with_report(
+    algorithm: LineAlgorithm,
+    left: &[u32],
+    right: &[u32],
+    num_tokens: u32,
+) -> (Alignment, AlignReport) {
+    align_inner(algorithm, left, right, num_tokens, None)
+}
+
+/// `text.histogram@1` with an explicit work budget instead of
+/// [`histogram_budget`]. For tests and benchmarks: a different budget gives a
+/// result outside any algorithm ID. `u64::MAX` gives unguarded Histogram.
+pub fn align_histogram_with_budget(
+    left: &[u32],
+    right: &[u32],
+    num_tokens: u32,
+    budget: u64,
+) -> (Alignment, AlignReport) {
+    align_inner(
+        LineAlgorithm::Histogram,
+        left,
+        right,
+        num_tokens,
+        Some(budget),
+    )
+}
+
+fn align_inner(
+    algorithm: LineAlgorithm,
+    left: &[u32],
+    right: &[u32],
+    num_tokens: u32,
+    budget: Option<u64>,
+) -> (Alignment, AlignReport) {
     assert!(
         left.len() <= MAX_LINES && right.len() <= MAX_LINES,
         "too many lines"
@@ -97,43 +211,57 @@ pub fn align(algorithm: LineAlgorithm, left: &[u32], right: &[u32], num_tokens: 
         removed: vec![false; left.len()],
         added: vec![false; right.len()],
     };
+    let mut report = AlignReport::default();
     let prefix = common_prefix(left, right);
     let suffix = common_suffix(&left[prefix..], &right[prefix..]);
     let l = &left[prefix..left.len() - suffix];
     let r = &right[prefix..right.len() - suffix];
+    let removed = &mut alignment.removed[prefix..prefix + l.len()];
+    let added = &mut alignment.added[prefix..prefix + r.len()];
     if l.is_empty() || r.is_empty() {
-        alignment.removed[prefix..prefix + l.len()].fill(true);
-        alignment.added[prefix..prefix + r.len()].fill(true);
-        return alignment;
+        removed.fill(true);
+        added.fill(true);
+        return (alignment, report);
     }
     match algorithm {
-        LineAlgorithm::Histogram | LineAlgorithm::Myers => {
-            let imara = if algorithm == LineAlgorithm::Histogram {
-                ImaraAlgorithm::Histogram
-            } else {
-                ImaraAlgorithm::Myers
+        LineAlgorithm::Histogram => {
+            let budget = budget.unwrap_or_else(|| histogram_budget(l.len(), r.len()));
+            let lt = tokens(l);
+            let rt = tokens(r);
+            let outcome = histogram::diff(&lt, &rt, removed, added, num_tokens, budget);
+            report = AlignReport {
+                histogram_work: outcome.work,
+                histogram_budget: budget,
+                histogram_fell_back: outcome.fell_back,
             };
-            let lt: Vec<Token> = l.iter().copied().map(Token::from).collect();
-            let rt: Vec<Token> = r.iter().copied().map(Token::from).collect();
+        }
+        LineAlgorithm::Myers => {
+            let lt = tokens(l);
+            let rt = tokens(r);
             let mut diff = Diff::default();
-            diff.compute_with(imara, &lt, &rt, num_tokens);
-            for i in 0..l.len() {
-                alignment.removed[prefix + i] = diff.is_removed(index_u32(i));
-            }
-            for j in 0..r.len() {
-                alignment.added[prefix + j] = diff.is_added(index_u32(j));
-            }
+            diff.compute_with(ImaraAlgorithm::Myers, &lt, &rt, num_tokens);
+            copy_flags(&diff, removed, added);
         }
         LineAlgorithm::Patience => {
-            let mut hook = FlagHook {
-                removed: &mut alignment.removed[prefix..prefix + l.len()],
-                added: &mut alignment.added[prefix..prefix + r.len()],
-            };
+            let mut hook = FlagHook { removed, added };
             let Ok(()) =
                 similar::algorithms::diff_slices(similar::Algorithm::Patience, &mut hook, l, r);
         }
     }
-    alignment
+    (alignment, report)
+}
+
+fn tokens(side: &[u32]) -> Vec<Token> {
+    side.iter().copied().map(Token::from).collect()
+}
+
+fn copy_flags(diff: &Diff, removed: &mut [bool], added: &mut [bool]) {
+    for (i, flag) in removed.iter_mut().enumerate() {
+        *flag = diff.is_removed(index_u32(i));
+    }
+    for (j, flag) in added.iter_mut().enumerate() {
+        *flag = diff.is_added(index_u32(j));
+    }
 }
 
 /// Most changed lines (whose key also occurs on the other side) for which the
@@ -142,20 +270,31 @@ pub const EXACT_MAX_EDITS: usize = 500;
 
 /// True when a cost limit may have cut the search for `alignment` short (the
 /// Diff Document's `approximate` warning). `left` and `right` are the token
-/// sequences passed to [`align`].
+/// sequences passed to [`align`]. See the module docs for the rule.
 pub fn is_approximate(left: &[u32], right: &[u32], alignment: &Alignment) -> bool {
-    let presence =
-        |side: &[u32]| -> std::collections::HashSet<u32> { side.iter().copied().collect() };
+    let size = left
+        .iter()
+        .chain(right)
+        .copied()
+        .max()
+        .map_or(0, |m| m as usize + 1);
+    let presence = |side: &[u32]| -> Vec<bool> {
+        let mut seen = vec![false; size];
+        for &t in side {
+            seen[t as usize] = true;
+        }
+        seen
+    };
     let (in_left, in_right) = (presence(left), presence(right));
     let removed = left
         .iter()
         .zip(&alignment.removed)
-        .filter(|(t, r)| **r && in_right.contains(t))
+        .filter(|(t, r)| **r && in_right[**t as usize])
         .count();
     let added = right
         .iter()
         .zip(&alignment.added)
-        .filter(|(t, a)| **a && in_left.contains(t))
+        .filter(|(t, a)| **a && in_left[**t as usize])
         .count();
     removed + added > EXACT_MAX_EDITS
 }
@@ -274,6 +413,31 @@ mod tests {
         assert_eq!(LineAlgorithm::Patience.id(), "text.patience@1");
     }
 
+    #[test]
+    fn budget_is_size_proportional_with_a_floor() {
+        assert_eq!(histogram_budget(0, 0), HISTOGRAM_WORK_MIN);
+        assert_eq!(histogram_budget(10, 10), HISTOGRAM_WORK_MIN);
+        assert_eq!(
+            histogram_budget(1_000_000, 3_000_000),
+            HISTOGRAM_WORK_PER_LINE * 4_000_000
+        );
+        assert_eq!(histogram_budget(usize::MAX, usize::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn patience_size_limit() {
+        let max = PATIENCE_MAX_INPUT_BYTES;
+        assert!(within_size_limit(LineAlgorithm::Patience, max, max));
+        assert!(!within_size_limit(LineAlgorithm::Patience, max + 1, 0));
+        assert!(!within_size_limit(LineAlgorithm::Patience, 0, max + 1));
+        assert!(within_size_limit(
+            LineAlgorithm::Histogram,
+            u64::MAX,
+            u64::MAX
+        ));
+        assert!(within_size_limit(LineAlgorithm::Myers, u64::MAX, u64::MAX));
+    }
+
     /// Small deterministic generator (xorshift64*), so the tests need no crate.
     struct Rng(u64);
 
@@ -305,25 +469,22 @@ mod tests {
         (left, right)
     }
 
-    /// Exact (`MyersMinimal`) imara-diff result on the same trimmed input.
-    fn minimal(l: &[u32], r: &[u32], n: u32) -> Alignment {
+    /// `gix-imara-diff` with `algorithm` on the same trimmed input.
+    fn reference(algorithm: ImaraAlgorithm, l: &[u32], r: &[u32], n: u32) -> Alignment {
         let prefix = common_prefix(l, r);
         let suffix = common_suffix(&l[prefix..], &r[prefix..]);
         let (lm, rm) = (&l[prefix..l.len() - suffix], &r[prefix..r.len() - suffix]);
-        let lt: Vec<Token> = lm.iter().copied().map(Token::from).collect();
-        let rt: Vec<Token> = rm.iter().copied().map(Token::from).collect();
         let mut diff = Diff::default();
-        diff.compute_with(ImaraAlgorithm::MyersMinimal, &lt, &rt, n);
+        diff.compute_with(algorithm, &tokens(lm), &tokens(rm), n);
         let mut a = Alignment {
             removed: vec![false; l.len()],
             added: vec![false; r.len()],
         };
-        for i in 0..lm.len() {
-            a.removed[prefix + i] = diff.is_removed(index_u32(i));
-        }
-        for j in 0..rm.len() {
-            a.added[prefix + j] = diff.is_added(index_u32(j));
-        }
+        copy_flags(
+            &diff,
+            &mut a.removed[prefix..prefix + lm.len()],
+            &mut a.added[prefix..prefix + rm.len()],
+        );
         a
     }
 
@@ -338,11 +499,54 @@ mod tests {
             let (l, r) = edited(&mut rng, n, alphabet, edits);
             let a = run(LineAlgorithm::Myers, &l, &r);
             if !is_approximate(&l, &r, &a) {
-                assert_eq!(a, minimal(&l, &r, alphabet), "round {round}");
+                assert_eq!(
+                    a,
+                    reference(ImaraAlgorithm::MyersMinimal, &l, &r, alphabet),
+                    "round {round}"
+                );
                 exact_checked += 1;
             }
         }
         assert!(exact_checked > 10);
+    }
+
+    #[test]
+    fn histogram_copy_matches_upstream_below_budget() {
+        let mut rng = Rng(0xD1FF_7A11);
+        for round in 0..80 {
+            let n = 50 + 37 * (round % 20);
+            let alphabet = [3, 16, 90, 2000][round % 4];
+            let edits = 1 + 7 * (round % 13);
+            let (l, r) = edited(&mut rng, n, alphabet, edits);
+            let (a, report) = align_with_report(LineAlgorithm::Histogram, &l, &r, alphabet);
+            assert!(!report.histogram_fell_back, "round {round}");
+            assert_eq!(
+                a,
+                reference(ImaraAlgorithm::Histogram, &l, &r, alphabet),
+                "round {round}"
+            );
+        }
+    }
+
+    #[test]
+    fn zero_budget_is_myers() {
+        let mut rng = Rng(42);
+        for round in 0..40 {
+            let alphabet = [5, 60, 600][round % 3];
+            let (l, r) = edited(&mut rng, 300, alphabet, 10 + 5 * round);
+            let (a, report) = align_histogram_with_budget(&l, &r, alphabet, 0);
+            if a.removed.iter().chain(&a.added).any(|x| *x) {
+                assert!(report.histogram_fell_back, "round {round}");
+            }
+            assert_eq!(a, run(LineAlgorithm::Myers, &l, &r), "round {round}");
+            if !is_approximate(&l, &r, &a) {
+                assert_eq!(
+                    a,
+                    reference(ImaraAlgorithm::MyersMinimal, &l, &r, alphabet),
+                    "round {round}"
+                );
+            }
+        }
     }
 
     #[test]

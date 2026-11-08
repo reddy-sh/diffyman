@@ -1,0 +1,17 @@
+# Shopping
+apples
+bread
+butter
+cheese
+
+
+dates
+eggs
+figs
+grapes
+honey
+ice cream
+
+jam
+
+kale

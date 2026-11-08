@@ -1,6 +1,6 @@
 //! Inline refinement of `replace` ops (`docs/spec/text-granularity-and-moves.md`
-//! §3), algorithm ID `text.refine@1`. Provisional: the Diff Document 0.1.0
-//! corpus uses granularity `line` only.
+//! §3), algorithm ID `text.refine@1`. The golden text cases pin its output
+//! for `word`, `char` and `smart`.
 //!
 //! Where the spec text is ambiguous, this code is the reference:
 //!

@@ -50,7 +50,7 @@ pub fn engine_version() -> String {
     diffyman::ENGINE_VERSION.to_owned()
 }
 
-/// The Diff Document schema version this build writes, such as `0.1.0`.
+/// The Diff Document schema version this build writes, such as `0.2.0`.
 #[wasm_bindgen(js_name = schemaVersion)]
 pub fn schema_version() -> String {
     diffyman::model::SCHEMA_VERSION.to_owned()
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn versions() {
-        assert_eq!(schema_version(), "0.1.0");
+        assert_eq!(schema_version(), "0.2.0");
         assert!(!engine_version().is_empty());
     }
 }

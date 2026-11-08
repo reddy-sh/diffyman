@@ -142,7 +142,9 @@ fn run_diff(
         } else {
             canonical
         };
-        write_stdout(&format!("{text}\n"));
+        // Two writes, so a large document is not copied to add the newline.
+        write_stdout(&text);
+        write_stdout("\n");
     } else {
         report_warnings(&doc);
         if doc.status != Status::Error {
@@ -203,6 +205,8 @@ fn render_unified(doc: &DiffDocument, left: &[u8], right: &[u8]) -> String {
                     push_line(&mut out, ' ', lt, line);
                 }
             } else {
+                // Change ops, and `ignored` ops inside a hunk: like git's
+                // --ignore-blank-lines, ignored lines near a change still show.
                 for line in left_lines {
                     push_line(&mut out, '-', lt, line);
                 }
@@ -266,6 +270,23 @@ mod tests {
         assert_eq!(header_range(1, 0), "0,0");
         assert_eq!(header_range(3, 1), "3");
         assert_eq!(header_range(1, 3), "1,3");
+    }
+
+    #[test]
+    fn ignored_blank_lines_render_only_inside_hunks() {
+        let left = b"a\n\nb\nc\nd\ne\nf\ng\n\n";
+        let right = b"a\nb\nC\nd\ne\nf\ng\n";
+        let options =
+            diffyman::parse_options(r#"{"context": 2, "ignore": {"blankLines": true}}"#).unwrap();
+        let doc = diffyman::diff_document(Input::new(left), Input::new(right), &options).unwrap();
+        assert_eq!(doc.status, Status::Different);
+        let text = render_unified(&doc, left, right);
+        // The blank line after `a` is within the context of the change; the
+        // one at the end is not and produces no hunk.
+        assert_eq!(
+            text,
+            "--- left\n+++ right\n@@ -1,6 +1,5 @@\n a\n-\n b\n-c\n+C\n d\n e\n"
+        );
     }
 
     #[test]

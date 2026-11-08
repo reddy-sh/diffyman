@@ -16,12 +16,15 @@ pub enum OpKind {
     Delete,
     /// Lines on both sides.
     Replace,
+    /// A change whose lines are all blank, under `ignore.blankLines`. Counts
+    /// may differ and either may be 0. Not a change op.
+    Ignored,
 }
 
 impl OpKind {
     /// True for `insert`, `delete` and `replace`.
     pub fn is_change(self) -> bool {
-        self != OpKind::Equal
+        matches!(self, OpKind::Insert | OpKind::Delete | OpKind::Replace)
     }
 }
 
@@ -122,12 +125,8 @@ fn push_change(ops: &mut Vec<LineOp>, ls: usize, ll: usize, rs: usize, rl: usize
     ops.push(LineOp::change(ls, ll, rs, rl));
 }
 
-/// True for a change op whose lines are all blank (empty or whitespace only).
-///
-/// This is the building block for `ignore.blankLines`. The Diff Document
-/// 0.1.0 defers that option (a blank-only change has different line counts on
-/// each side, so it cannot be shown as an `equal` op), so the engine rejects
-/// it for now.
+/// True for a change op whose lines are all blank (empty or whitespace only),
+/// on both sides. The terminators do not matter.
 pub fn is_blank_change(op: &LineOp, left: &[&str], right: &[&str]) -> bool {
     op.kind.is_change()
         && left[op.left_start..op.left_start + op.left_len]
@@ -136,12 +135,33 @@ pub fn is_blank_change(op: &LineOp, left: &[&str], right: &[&str]) -> bool {
             .all(|line| crate::key::is_blank(line))
 }
 
-/// Groups the full op list into hunks with `context` lines of context.
+/// `ignore.blankLines` (Diff Document spec §7.3 step 3): turns every change op
+/// whose lines are all blank into an [`OpKind::Ignored`] op. `left` and
+/// `right` are the line contents without terminators.
+pub fn ignore_blank_changes(ops: &mut [LineOp], left: &[&str], right: &[&str]) {
+    for op in ops.iter_mut() {
+        if is_blank_change(op, left, right) {
+            op.kind = OpKind::Ignored;
+        }
+    }
+}
+
+/// Groups the full op list into hunks with `context` lines of context
+/// (Diff Document spec §7.4).
 ///
-/// Two consecutive change ops share a hunk when the equal op between them has
-/// at most `2 * context` lines (it is then included whole). Leading and
-/// trailing equal ops are clipped to `context` lines; empty ops are dropped.
+/// Only `equal` lines count as context; `ignored` ops are kept whole and do
+/// not count. Two consecutive change ops share a hunk when the ops between
+/// them hold at most `2 * context` equal lines (they are then included whole).
+/// Before the first and after the last change op of a hunk, ops are taken
+/// outward until `context` equal lines are reached: equal ops are clipped,
+/// ignored ops are taken whole, and empty ops are dropped.
 pub fn group_hunks(ops: &[LineOp], context: usize) -> Vec<Vec<LineOp>> {
+    let equal_lines = |run: &[LineOp]| -> usize {
+        run.iter()
+            .filter(|op| op.kind == OpKind::Equal)
+            .map(|op| op.left_len)
+            .sum()
+    };
     let changes: Vec<usize> = ops
         .iter()
         .enumerate()
@@ -150,46 +170,60 @@ pub fn group_hunks(ops: &[LineOp], context: usize) -> Vec<Vec<LineOp>> {
         .collect();
     let mut groups: Vec<(usize, usize)> = Vec::new();
     for &c in &changes {
-        if let Some(last) = groups.last_mut() {
-            let between = &ops[last.1 + 1..c];
-            let gap: usize = between.iter().map(|op| op.left_len).sum();
-            if gap <= context.saturating_mul(2) {
-                last.1 = c;
-                continue;
-            }
+        if let Some(last) = groups.last_mut()
+            && equal_lines(&ops[last.1 + 1..c]) <= context.saturating_mul(2)
+        {
+            last.1 = c;
+            continue;
         }
         groups.push((c, c));
     }
     let mut hunks = Vec::with_capacity(groups.len());
     for (first, last) in groups {
         let mut hunk = Vec::new();
-        if first > 0 {
-            let eq = ops[first - 1];
-            let take = context.min(eq.left_len);
-            if take > 0 {
+        // Leading context, collected backwards.
+        let mut budget = context;
+        let mut i = first;
+        while i > 0 && budget > 0 && !ops[i - 1].kind.is_change() {
+            i -= 1;
+            let op = ops[i];
+            if op.kind == OpKind::Equal {
+                let take = budget.min(op.left_len);
+                budget -= take;
                 hunk.push(LineOp {
                     kind: OpKind::Equal,
-                    left_start: eq.left_start + eq.left_len - take,
+                    left_start: op.left_start + op.left_len - take,
                     left_len: take,
-                    right_start: eq.right_start + eq.right_len - take,
+                    right_start: op.right_start + op.right_len - take,
                     right_len: take,
                 });
+            } else {
+                hunk.push(op);
             }
         }
+        hunk.reverse();
         hunk.extend_from_slice(&ops[first..=last]);
-        if last + 1 < ops.len() {
-            let eq = ops[last + 1];
-            let take = context.min(eq.left_len);
-            if take > 0 {
+        // Trailing context.
+        let mut budget = context;
+        let mut i = last + 1;
+        while i < ops.len() && budget > 0 && !ops[i].kind.is_change() {
+            let op = ops[i];
+            i += 1;
+            if op.kind == OpKind::Equal {
+                let take = budget.min(op.left_len);
+                budget -= take;
                 hunk.push(LineOp {
                     kind: OpKind::Equal,
-                    left_start: eq.left_start,
+                    left_start: op.left_start,
                     left_len: take,
-                    right_start: eq.right_start,
+                    right_start: op.right_start,
                     right_len: take,
                 });
+            } else {
+                hunk.push(op);
             }
         }
+        hunk.retain(|op| op.left_len + op.right_len > 0);
         hunks.push(hunk);
     }
     hunks
@@ -277,6 +311,103 @@ mod tests {
             ops.iter().filter(|o| o.kind.is_change()).count()
         );
         assert!(hunks.iter().all(|h| h.len() == 1 && h[0].kind.is_change()));
+    }
+
+    fn op(kind: OpKind, ls: usize, ll: usize, rs: usize, rl: usize) -> LineOp {
+        LineOp {
+            kind,
+            left_start: ls,
+            left_len: ll,
+            right_start: rs,
+            right_len: rl,
+        }
+    }
+
+    #[test]
+    fn ignored_ops_are_context_that_does_not_count() {
+        use OpKind::{Equal, Ignored, Insert, Replace};
+        // equal 2, ignored (+1 right), equal 1, replace, equal 1, ignored
+        // (-2 left), equal 3, insert.
+        let ops = [
+            op(Equal, 0, 2, 0, 2),
+            op(Ignored, 2, 0, 2, 1),
+            op(Equal, 2, 1, 3, 1),
+            op(Replace, 3, 1, 4, 1),
+            op(Equal, 4, 1, 5, 1),
+            op(Ignored, 5, 2, 6, 0),
+            op(Equal, 7, 3, 6, 3),
+            op(Insert, 10, 0, 9, 1),
+        ];
+        // Context 2: four equal lines lie between the two changes (the ignored
+        // lines do not count), so they share a hunk. The leading context takes
+        // one equal line, the ignored op whole, and one more equal line.
+        let hunks = group_hunks(&ops, 2);
+        assert_eq!(hunks.len(), 1);
+        assert_eq!(
+            kinds(&hunks[0]),
+            [
+                Equal, Ignored, Equal, Replace, Equal, Ignored, Equal, Insert
+            ]
+        );
+        assert_eq!(hunks[0][0], op(Equal, 1, 1, 1, 1));
+        // Context 1: the gap of 4 equal lines is above 2, so two hunks. The
+        // leading context stops at one equal line, before the ignored op.
+        let hunks = group_hunks(&ops, 1);
+        assert_eq!(hunks.len(), 2);
+        assert_eq!(kinds(&hunks[0]), [Equal, Replace, Equal]);
+        assert_eq!(kinds(&hunks[1]), [Equal, Insert]);
+        // Context 0: change ops only.
+        let hunks = group_hunks(&ops, 0);
+        assert!(hunks.iter().all(|h| h.len() == 1 && h[0].kind.is_change()));
+        // Context 3: the trailing context of the replace takes the ignored op
+        // whole and then two lines of the next equal op.
+        let hunks = group_hunks(&ops[..7], 3);
+        assert_eq!(
+            hunks[0][3..],
+            [
+                op(Replace, 3, 1, 4, 1),
+                op(Equal, 4, 1, 5, 1),
+                op(Ignored, 5, 2, 6, 0),
+                op(Equal, 7, 2, 6, 2)
+            ]
+        );
+        // Only ignored ops: no hunks.
+        let only = [
+            op(Equal, 0, 1, 0, 1),
+            op(Ignored, 1, 1, 1, 0),
+            op(Equal, 2, 1, 1, 1),
+        ];
+        assert!(group_hunks(&only, 3).is_empty());
+    }
+
+    #[test]
+    fn blank_changes_become_ignored() {
+        let left = ["a", "", "b", "", "c"];
+        let right = ["a", " ", "\t", "b", "x", "c"];
+        let mut ops = full_ops(&alignment(&[0, 1, 0, 1, 0], &[0, 1, 1, 0, 1, 0]));
+        assert_eq!(
+            kinds(&ops),
+            [
+                OpKind::Equal,
+                OpKind::Replace,
+                OpKind::Equal,
+                OpKind::Replace,
+                OpKind::Equal
+            ]
+        );
+        ignore_blank_changes(&mut ops, &left, &right);
+        // L2 -> R2-3 is blank on both sides; L4 -> R5 replaces a blank line with text.
+        assert_eq!(
+            kinds(&ops),
+            [
+                OpKind::Equal,
+                OpKind::Ignored,
+                OpKind::Equal,
+                OpKind::Replace,
+                OpKind::Equal
+            ]
+        );
+        assert!(!OpKind::Ignored.is_change());
     }
 
     #[test]

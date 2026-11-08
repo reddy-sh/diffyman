@@ -4,18 +4,20 @@ description = "Line diff, inline refinement and ignore rules for diffyman"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+# The Histogram files under src/line_diff/histogram are Apache-2.0 only (see the NOTICE there).
+license = "(MIT OR Apache-2.0) AND Apache-2.0"
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
 
 [dependencies]
-imara-diff.workspace = true
+gix-imara-diff.workspace = true
 similar.workspace = true
 unicode-segmentation.workspace = true
 icu_casemap.workspace = true
 icu_properties.workspace = true
 regex.workspace = true
+regex-automata.workspace = true
 
 [lints]
 workspace = true

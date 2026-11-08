@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 5,
+        "count": 7
+      },
+      "right": {
+        "start": 13,
+        "count": 7
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "Compact() moved to the end of the file and its middle line gained an argument. The two lines above the edit and the four below it are each long enough to be a pure move on their own; the edited line joins them into one edited move."
+}

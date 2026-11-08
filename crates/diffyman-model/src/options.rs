@@ -20,8 +20,8 @@ pub enum Algorithm {
     Myers,
     /// `text.patience@1`.
     Patience,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
@@ -45,14 +45,14 @@ pub enum Granularity {
     /// No inline spans (default).
     #[default]
     Line,
-    /// UAX #29 word segments (provisional).
+    /// UAX #29 word segments.
     Word,
-    /// Extended grapheme clusters (provisional).
+    /// Extended grapheme clusters.
     Char,
-    /// Chosen per op (provisional).
+    /// Chosen per op.
     Smart,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
@@ -70,29 +70,34 @@ pub enum WhitespaceMode {
     Change,
     /// Ignore all whitespace.
     All,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
 
-/// Resolved ignore rules.
+/// Resolved ignore rules. `Default` gives the spec defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default = "IgnoreOptions::unset")]
 pub struct IgnoreOptions {
     /// Whitespace mode.
     pub whitespace: WhitespaceMode,
     /// Unicode simple case folding.
     pub case: bool,
-    /// Ignore blank lines (deferred to 0.2.0).
+    /// Ignore changes whose lines are all blank: they become `ignored` ops.
     pub blank_lines: bool,
-    /// Regex masks (deferred to 0.2.0).
+    /// Patterns whose matches are masked before comparison, in priority order.
     pub regex: Vec<String>,
 }
 
-/// Fully resolved options, echoed in every document.
+/// Fully resolved options, echoed in every document. `Default` gives the spec
+/// defaults.
+///
+/// When read from a document, a missing key takes the value of
+/// [`Options::unset`] (spec §2.2), not the option default: the document does
+/// not say which value was used.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default = "Options::unset")]
 pub struct Options {
     /// Line diff algorithm.
     pub algorithm: Algorithm,
@@ -104,7 +109,7 @@ pub struct Options {
     pub context: u32,
     /// Unit of inline offsets.
     pub position_encoding: PositionEncoding,
-    /// Moved-block detection (deferred).
+    /// Moved-block detection (`text.moves@1`, pure and edited moves).
     pub detect_moves: bool,
 }
 
@@ -117,6 +122,35 @@ impl Default for Options {
             context: 3,
             position_encoding: PositionEncoding::Utf8,
             detect_moves: false,
+        }
+    }
+}
+
+impl Options {
+    /// What a reader fills in for keys missing from a document's `options`:
+    /// every enum `Unknown`, `context` 0, booleans `false`, `regex` empty.
+    /// Not a valid input to the engine.
+    pub fn unset() -> Options {
+        Options {
+            algorithm: Algorithm::Unknown,
+            granularity: Granularity::Unknown,
+            ignore: IgnoreOptions::unset(),
+            context: 0,
+            position_encoding: PositionEncoding::Unknown,
+            detect_moves: false,
+        }
+    }
+}
+
+impl IgnoreOptions {
+    /// What a reader fills in for keys missing from a document's
+    /// `options.ignore` (see [`Options::unset`]).
+    pub fn unset() -> IgnoreOptions {
+        IgnoreOptions {
+            whitespace: WhitespaceMode::Unknown,
+            case: false,
+            blank_lines: false,
+            regex: Vec::new(),
         }
     }
 }
@@ -136,11 +170,15 @@ pub struct IgnoreOptionsInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub case: Option<bool>,
-    /// Ignore blank lines (default `false`; `true` is deferred to 0.2.0).
+    /// Ignore changes whose lines are all blank (default `false`). They become
+    /// `ignored` ops, which are not changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub blank_lines: Option<bool>,
-    /// Regex masks (default `[]`; non-empty is deferred to 0.2.0).
+    /// Regular expressions (Rust `regex` syntax) whose matches are masked
+    /// before lines are compared (default `[]`). At most 16 patterns of at
+    /// most 1024 characters each; a pattern that does not compile gives an
+    /// `invalid-regex` error, one over a limit gives `limit-exceeded`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Vec<String>")]
     pub regex: Option<Vec<String>>,
@@ -170,7 +208,7 @@ pub struct OptionsInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PositionEncoding")]
     pub position_encoding: Option<PositionEncoding>,
-    /// Moved-block detection (default `false`; `true` is deferred).
+    /// Moved-block detection (default `false`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub detect_moves: Option<bool>,

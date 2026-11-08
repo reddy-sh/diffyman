@@ -1,0 +1,24 @@
+Histogram diff, modified copy
+
+The files `../histogram.rs`, `lcs.rs` and `list_pool.rs` are copied from
+gix-imara-diff 0.3.3 (https://crates.io/crates/gix-imara-diff, source in
+https://github.com/GitoxideLabs/gitoxide), which is gitoxide's maintained copy
+of imara-diff (https://github.com/pascalkuthe/imara-diff, upstream commit
+32d1e45d3df061e6ccba6db7fdce92db29e345d8).
+
+Authors of gix-imara-diff: Pascal Kuthe and Sebastian Thiel, with the
+imara-diff and gitoxide contributors.
+
+These three files are licensed under the Apache License, Version 2.0 only.
+A copy of the license is in LICENSE-APACHE at the root of this repository,
+and at http://www.apache.org/licenses/LICENSE-2.0.
+
+Changes made for diffyman:
+- A deterministic work counter and budget. Past the budget, the regions still
+  to be diffed use Myers instead of Histogram.
+- The left-part recursion is an explicit stack with the same visiting order.
+- The Myers fallback goes through the public `Diff::compute_with` API.
+- Import paths, and comments marking each change.
+
+When no budget is hit, the output is identical to gix-imara-diff 0.3.3
+`Algorithm::Histogram` on the same tokens.

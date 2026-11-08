@@ -1,0 +1,3 @@
+# 031-utf16-word-cjk-emoji
+
+Runs `granularity: "word"` with `positionEncoding: "utf-16"` on Japanese text and emoji. All three lines change, so there is one `replace` of L1-3/R1-3 with spans. UAX #29 makes each ideograph and hiragana its own word segment and keeps an emoji with its skin-tone modifier together. A correct result has spans, in UTF-16 code units: L1/R1 `[3, 5)` (the sushi and ramen emoji, two units each); L2/R2 `[8, 12)` (thumbs up plus a skin tone, four units); L3/R3 `[0, 2)` (`東京` / `大阪`, one merged span of two segments) and `[8, 10)` (the tower and castle emoji). Left spans have `op: "delete"`, right spans `op: "insert"`.

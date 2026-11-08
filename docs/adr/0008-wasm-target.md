@@ -5,7 +5,7 @@
 
 ## Context
 
-The plan ships a browser and edge build (`@diffyman/wasm`) from the same Rust core (ADR 0001, ADR 0007),
+diffyman ships a browser and edge build (`@diffyman/wasm`) from the same Rust core (ADR 0001, ADR 0007),
 and later a `wasm32-wasip1` build for Go and Java without native code. Spike B proved the WASM binding
 returns the same document as the CLI. Spike C ([results](../spikes/C-wasm-build.md)) measured size,
 speed and browsers, and checked the planned crates on `wasm32-unknown-unknown`:
@@ -41,7 +41,7 @@ speed and browsers, and checked the planned crates on `wasm32-unknown-unknown`:
 5. **regex keeps `unicode` everywhere**, so a pattern means the same thing on every surface. Whether
    the WASM build drops regex's `perf` features, or leaves regex out until `ignore.regex` ships, is
    decided with that feature, using the spike's numbers.
-6. **Size budget.** The plan's release gate stays (under 8 MiB raw). CI records raw, gzip and brotli
+6. **Size budget.** The release gate stays: under 8 MiB raw. CI records raw, gzip and brotli
    size of the release package; the baseline is 1,506 / 525 / 372 KB.
 7. **Large inputs.** Browsers run the engine in a Worker with async `init()`. GB-scale work stays in
    the CLI and the local API service.
@@ -59,6 +59,15 @@ Rejected:
   move with the `wasm-bindgen` crate.
 - Packages carry no function names, so browser stack traces show indices. Debug builds keep names.
 - CI needs clang and `llvm-ar` on Linux once tree-sitter joins the WASM build.
-- Revisit when regex ships for `ignore.regex`, when structural (tree-sitter) or format crates join the
+- Revisit when structural (tree-sitter) or format crates join the
   WASM build and push the size budget, when Safari numbers come in, or when wasm threads or memory64
   are needed for large files.
+
+## Update (2026-11-07): `ignore.regex` shipped
+
+Schema 0.2.0 supports `ignore.regex`, so regex stays in the WASM build with the same features as
+native builds (decision 5): `unicode` for identical matches, `perf` because it changes speed only.
+Pattern limits are counted in NFA units, which do not depend on pointer width, so 32-bit WASM accepts
+and rejects exactly the patterns native builds do (corpus case `text/040-regex-limit-exceeded`).
+The wasm-pack `--release` package (name section kept) now measures 1,791 / 577 / 412 KB raw, gzip and
+brotli, up from 1,705 / 550 / 391 KB at Spike C, which also predates moved-block detection.

@@ -1,0 +1,3 @@
+Invoice 2026-118
+Customer: Café Lumière
+Total: 412.50 EUR

@@ -1,0 +1,3 @@
+# 021-invalid-utf8
+
+The right file holds two Latin-1 bytes (0xE9 and 0xE8 for `é` and `è`), so it is not valid UTF-8; the left file is valid UTF-8 with no final newline. 0.1.0 has no binary fallback (spec 7.1), so a correct result is `status: "error"` with `hunks: []`, `moves: []` and `stats: null`. The right side keeps its `size`, `sha256` and `bom: false`, and its `encoding`, `lineTerminator`, `finalNewline` and `lineCount` are `null` (spec 8). The left side still decodes, so its meta is filled in (`lineCount: 3`, `finalNewline: false`). `warnings` is exactly `no-newline-at-eof` (left) then `invalid-utf8` (right, severity `error`).

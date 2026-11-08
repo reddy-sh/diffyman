@@ -1,8 +1,16 @@
-//! Diff Document types (`docs/spec/diff-document.md`, schema `0.1.0`).
+//! Diff Document types (`docs/spec/diff-document.md`, schema `0.2.0`).
 //!
-//! Every field the spec defines is always serialized, `null` included (spec §4).
-//! Enums are open (spec §2.3): an unknown value read from a newer document maps
-//! to the `Unknown` variant, which writers never emit.
+//! Writing: every field the spec defines is always serialized, `null` included
+//! (spec §4).
+//!
+//! Reading (spec §2.2, §2.3):
+//!
+//! - Unknown fields are ignored.
+//! - A missing known field reads as `null` where the field is nullable, `[]` or
+//!   `{}` for arrays and objects, `Unknown` for enums, and the empty value of
+//!   the type (`""`, `0`, `false`) otherwise.
+//! - An unknown enum value maps to the `Unknown` variant. `Unknown` exists for
+//!   reading only: serializing it is an error, so writers never emit it.
 
 use std::collections::BTreeMap;
 
@@ -13,17 +21,17 @@ use serde_json::Value;
 use crate::options::Options;
 
 /// The schema version written by this crate.
-pub const SCHEMA_VERSION: &str = "0.1.0";
+pub const SCHEMA_VERSION: &str = "0.2.0";
 
 /// The Diff Document: diffyman's only result format.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct DiffDocument {
-    /// Semver string, `"0.1.0"` for this crate.
+    /// Semver string, `"0.2.0"` for this crate.
     pub schema_version: String,
     /// `"sha256:"` plus the hex SHA-256 of the canonical document without `id` and `provenance`.
     pub id: String,
-    /// Document kind; `text` in 0.1.0.
+    /// Document kind; `text` in 0.2.0.
     pub kind: Kind,
     /// Overall result.
     pub status: Status,
@@ -37,17 +45,17 @@ pub struct DiffDocument {
     pub stats: Option<Stats>,
     /// Changed regions with context.
     pub hunks: Vec<Hunk>,
-    /// Moved blocks (reserved; always `[]` in 0.1.0).
+    /// Moved blocks (spec §6.5); `[]` unless `options.detectMoves` is true.
     pub moves: Vec<Move>,
-    /// Structural changes (reserved; always `[]` in 0.1.0).
+    /// Structural changes (reserved; always `[]` in 0.2.0).
     pub structural: Vec<Value>,
-    /// Table diff (reserved; always `null` in 0.1.0).
+    /// Table diff (reserved; always `null` in 0.2.0).
     pub table: Option<Value>,
-    /// Page regions (reserved; always `[]` in 0.1.0).
+    /// Page regions (reserved; always `[]` in 0.2.0).
     pub regions: Vec<Value>,
-    /// Byte ranges (reserved; always `[]` in 0.1.0).
+    /// Byte ranges (reserved; always `[]` in 0.2.0).
     pub bytes: Vec<Value>,
-    /// Folder or archive tree (reserved; always `null` in 0.1.0).
+    /// Folder or archive tree (reserved; always `null` in 0.2.0).
     pub tree: Option<Value>,
     /// Warnings and errors, sorted by side then code.
     pub warnings: Vec<Warning>,
@@ -55,12 +63,40 @@ pub struct DiffDocument {
     pub options: Options,
     /// Audit data; excluded from `id` and from conformance.
     pub provenance: Provenance,
-    /// Plugin data under `x-<vendor>` keys; `{}` in 0.1.0.
+    /// Plugin data under `x-<vendor>` keys; `{}` in 0.2.0.
     pub extensions: BTreeMap<String, Value>,
 }
 
+/// The value a reader fills in for fields missing from a document (spec §2.2).
+/// It is not a valid document to write.
+impl Default for DiffDocument {
+    fn default() -> DiffDocument {
+        DiffDocument {
+            schema_version: String::new(),
+            id: String::new(),
+            kind: Kind::Unknown,
+            status: Status::Unknown,
+            left: FileMeta::default(),
+            right: FileMeta::default(),
+            position_encoding: PositionEncoding::Unknown,
+            stats: None,
+            hunks: Vec::new(),
+            moves: Vec::new(),
+            structural: Vec::new(),
+            table: None,
+            regions: Vec::new(),
+            bytes: Vec::new(),
+            tree: None,
+            warnings: Vec::new(),
+            options: Options::unset(),
+            provenance: Provenance::default(),
+            extensions: BTreeMap::new(),
+        }
+    }
+}
+
 /// Document kind (open enum).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum Kind {
     /// Plain text and code.
@@ -79,17 +115,18 @@ pub enum Kind {
     Binary,
     /// Reserved.
     Tree,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[default]
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
 
 /// Overall status (open enum).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum Status {
-    /// No change ops under the resolved options.
+    /// No change ops under the resolved options (`ignored` ops are not changes).
     Identical,
     /// At least one change op.
     Different,
@@ -97,13 +134,17 @@ pub enum Status {
     Partial,
     /// At least one warning has severity `error`.
     Error,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[default]
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
 
 /// Unit of inline offsets (open enum).
+///
+/// `Default` is the option default `utf-8`; a missing document field reads as
+/// `Unknown` instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub enum PositionEncoding {
     /// UTF-8 bytes (default).
@@ -116,14 +157,14 @@ pub enum PositionEncoding {
     /// Unicode scalar values.
     #[serde(rename = "codepoint")]
     Codepoint,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
 
 /// Line terminator style of a file (open enum).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum LineTerminator {
     /// Every terminated line ends with LF.
@@ -136,15 +177,16 @@ pub enum LineTerminator {
     Mixed,
     /// No line has a terminator.
     None,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[default]
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
 
 /// Metadata for one input (spec §6.1).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
 pub struct FileMeta {
     /// Final path component given by the caller, or `null`.
     pub name: Option<String>,
@@ -167,8 +209,8 @@ pub struct FileMeta {
 }
 
 /// Whole-file counts (spec §6.3).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Stats {
     /// Line count of the left side.
     pub lines_left: u64,
@@ -255,7 +297,8 @@ impl JsonSchema for Similarity {
 }
 
 /// A 1-based, half-open line range `{start, count}` (spec §6.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct Range {
     /// First line (1-based); for an empty range, the line the insertion point precedes.
     pub start: u64,
@@ -264,7 +307,8 @@ pub struct Range {
 }
 
 /// A group of ops with context (spec §6.4).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct Hunk {
     /// `"h1"`, `"h2"`, ... in document order.
     pub id: String,
@@ -277,7 +321,7 @@ pub struct Hunk {
 }
 
 /// Op kind (open enum).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum OpKind {
     /// Lines that match.
@@ -288,22 +332,26 @@ pub enum OpKind {
     Delete,
     /// Lines on both sides that do not match.
     Replace,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A change whose lines are all blank, ignored under `ignore.blankLines`
+    /// (since 0.2.0). Not a change op; the counts may differ and either may be 0.
+    Ignored,
+    /// A value this version does not know, or a missing field (read only).
+    #[default]
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
 
 impl OpKind {
-    /// True for `insert`, `delete` and `replace`.
+    /// True for `insert`, `delete` and `replace` (not for `equal` or `ignored`).
     pub fn is_change(self) -> bool {
         matches!(self, OpKind::Insert | OpKind::Delete | OpKind::Replace)
     }
 }
 
 /// One op of a hunk.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Op {
     /// Op kind.
     pub op: OpKind,
@@ -317,7 +365,18 @@ pub struct Op {
 
 /// A side of the comparison (open enum).
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 #[serde(rename_all = "camelCase")]
 pub enum Side {
@@ -325,14 +384,16 @@ pub enum Side {
     Left,
     /// The right input.
     Right,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[default]
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
 
 /// An inline change inside one line (spec §6.4).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct Span {
     /// `left` (with `op: delete`) or `right` (with `op: insert`).
     pub side: Side,
@@ -346,77 +407,90 @@ pub struct Span {
     pub op: OpKind,
 }
 
-/// Move kind (provisional, `docs/spec/text-granularity-and-moves.md` §4.7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// Move kind (open enum, spec §6.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum MoveKind {
-    /// Lines match pairwise.
+    /// The lines match pairwise.
     Pure,
-    /// Lines match with edits.
+    /// The lines match with small edits.
     Edited,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[default]
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
 
-/// One end of a moved block.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// One end of a moved block (spec §6.5).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct MoveEnd {
     /// `left` for `from`, `right` for `to`.
     pub side: Side,
-    /// Lines of the block.
+    /// Lines of the block; `count` is at least 1.
     pub range: Range,
 }
 
-/// Reference to one op: hunk id and 0-based op index.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// Reference to one op: hunk id and 0-based op index (spec §6.5).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct OpRef {
     /// Hunk id, such as `"h2"`.
     pub hunk: String,
-    /// 0-based op index inside the hunk.
+    /// 0-based index of the op inside the hunk's `ops`.
     pub op: u64,
 }
 
-/// A moved block (reserved and provisional; never emitted in 0.1.0).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+/// A moved block (spec §6.5). Emitted only when `options.detectMoves` is true.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Move {
-    /// `"m1"`, `"m2"`, ... in order.
+    /// `"m1"`, `"m2"`, ... in the order of `moves[]`.
     pub id: String,
-    /// Source block on the left.
-    pub from: MoveEnd,
-    /// Destination block on the right.
-    pub to: MoveEnd,
     /// `pure` or `edited`.
     pub kind: MoveKind,
-    /// Block similarity; 1 for pure moves.
+    /// Source block, on the left.
+    pub from: MoveEnd,
+    /// Destination block, on the right.
+    pub to: MoveEnd,
+    /// Block similarity; exactly 1 for pure moves.
     pub similarity: Similarity,
-    /// Ops the left range touches.
+    /// Every op the left range touches, in order.
     pub from_ops: Vec<OpRef>,
-    /// Ops the right range touches.
+    /// Every op the right range touches, in order.
     pub to_ops: Vec<OpRef>,
-    /// Reference to inline edits; `null` for pure moves.
-    pub edits_ref: Option<String>,
 }
 
 /// Warning severity (open enum).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum Severity {
     /// The document is still valid.
     Warning,
     /// The document has `status: "error"`.
     Error,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[default]
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
 
-/// Stable warning and error codes (spec §10).
+/// Stable warning and error codes (spec §10, the authoritative table).
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum WarningCode {
@@ -428,23 +502,45 @@ pub enum WarningCode {
     NoNewlineAtEof,
     /// The search was cut short.
     Approximate,
-    /// Inline refinement skipped for ops over the size limits (provisional; non-`line` granularity only).
+    /// Inline refinement skipped for `replace` ops over the size limits
+    /// (granularity other than `line` only).
     RefineSkippedLimit,
+    /// Moved-block detection skipped because too many lines changed
+    /// (`detectMoves: true` only).
+    MovesSkippedLimit,
     /// Input is not valid UTF-8.
     #[serde(rename = "invalid-utf8")]
     InvalidUtf8,
+    /// An `ignore.regex` pattern does not compile (since 0.2.0).
+    InvalidRegex,
     /// An option value is not supported by this engine version.
     UnsupportedOption,
     /// Input exceeds a size or complexity limit.
     LimitExceeded,
-    /// A value this version does not know.
-    #[serde(other)]
+    /// A value this version does not know, or a missing field (read only).
+    #[default]
+    #[serde(other, skip_serializing)]
     #[schemars(skip)]
     Unknown,
 }
 
 impl WarningCode {
-    /// The kebab-case code string.
+    /// Every code this version writes, in the order of the spec §10 table.
+    pub const ALL: [WarningCode; 10] = [
+        WarningCode::BomStripped,
+        WarningCode::MixedLineEndings,
+        WarningCode::NoNewlineAtEof,
+        WarningCode::Approximate,
+        WarningCode::RefineSkippedLimit,
+        WarningCode::MovesSkippedLimit,
+        WarningCode::InvalidUtf8,
+        WarningCode::InvalidRegex,
+        WarningCode::UnsupportedOption,
+        WarningCode::LimitExceeded,
+    ];
+
+    /// The kebab-case code string (`"unknown"` for [`WarningCode::Unknown`],
+    /// which is never written).
     pub fn as_str(self) -> &'static str {
         match self {
             WarningCode::BomStripped => "bom-stripped",
@@ -452,7 +548,9 @@ impl WarningCode {
             WarningCode::NoNewlineAtEof => "no-newline-at-eof",
             WarningCode::Approximate => "approximate",
             WarningCode::RefineSkippedLimit => "refine-skipped-limit",
+            WarningCode::MovesSkippedLimit => "moves-skipped-limit",
             WarningCode::InvalidUtf8 => "invalid-utf8",
+            WarningCode::InvalidRegex => "invalid-regex",
             WarningCode::UnsupportedOption => "unsupported-option",
             WarningCode::LimitExceeded => "limit-exceeded",
             WarningCode::Unknown => "unknown",
@@ -471,7 +569,13 @@ impl WarningCode {
             WarningCode::RefineSkippedLimit => {
                 "Inline highlighting was skipped for changes that exceed size limits."
             }
+            WarningCode::MovesSkippedLimit => {
+                "Moved-block detection was skipped because too many lines changed."
+            }
             WarningCode::InvalidUtf8 => "Input is not valid UTF-8.",
+            WarningCode::InvalidRegex => {
+                "An ignore.regex pattern is not a valid regular expression."
+            }
             WarningCode::UnsupportedOption => {
                 "An option value is not supported by this engine version."
             }
@@ -484,6 +588,7 @@ impl WarningCode {
     pub fn severity(self) -> Severity {
         match self {
             WarningCode::InvalidUtf8
+            | WarningCode::InvalidRegex
             | WarningCode::UnsupportedOption
             | WarningCode::LimitExceeded => Severity::Error,
             WarningCode::Unknown => Severity::Unknown,
@@ -493,7 +598,8 @@ impl WarningCode {
 }
 
 /// A warning or error entry (spec §10).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct Warning {
     /// Stable code; consumers act on this, never on the message.
     pub code: WarningCode,
@@ -529,7 +635,8 @@ impl Warning {
 }
 
 /// Audit data (spec §11). Excluded from `id` and from conformance.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct Provenance {
     /// Engine name and version.
     pub engine: NameVersion,
@@ -549,7 +656,8 @@ pub struct Provenance {
 }
 
 /// A name and a version.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct NameVersion {
     /// Name.
     pub name: String,
@@ -558,7 +666,8 @@ pub struct NameVersion {
 }
 
 /// Adapter identity.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct AdapterInfo {
     /// Adapter id, such as `text`.
     pub id: String,
@@ -567,7 +676,8 @@ pub struct AdapterInfo {
 }
 
 /// Platform identity.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
 pub struct Platform {
     /// Operating system, as Rust's `std::env::consts::OS`, or `unknown` where
     /// that is empty (`wasm32-unknown-unknown`).
@@ -577,8 +687,8 @@ pub struct Platform {
 }
 
 /// Timing values.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Timing {
     /// Wall-clock time of the whole diff in microseconds.
     pub total_micros: u64,

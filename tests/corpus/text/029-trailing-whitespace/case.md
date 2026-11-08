@@ -1,0 +1,3 @@
+# 029-trailing-whitespace
+
+Runs `ignore.whitespace: "trailing"`. These must compare equal: L1 gains trailing spaces, L2 a trailing tab, L3 is three spaces versus an empty line, and L7 has no final newline on the left only (the terminator is not part of the key in this mode). These must still differ: L4 widens an inner space, L5 drops a trailing U+00A0 NO-BREAK SPACE (not whitespace under spec 7.2), and L6 gains leading spaces. A correct result has one hunk: equal L1-3, one `replace` of L4-6/R4-6, equal L7; `linesUnchanged: 4`, `status: "different"`, and a `no-newline-at-eof` warning for the left side.

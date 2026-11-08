@@ -29,8 +29,10 @@ BOM = b"\xef\xbb\xbf"
 def opts(
     *,
     algorithm: str = "histogram",
+    granularity: str = "line",
     whitespace: str = "none",
     case: bool = False,
+    blank_lines: bool = False,
     regex: list[str] | None = None,
     context: int = 3,
     position: str = "utf-8",
@@ -38,17 +40,16 @@ def opts(
     """Return a fully spelled-out options object (diff-document.md section 9).
 
     Every key is written even when it equals the default, so a case keeps its
-    meaning if a default ever changes. granularity stays "line" and
-    detectMoves stays false: other values are provisional or deferred in
-    schema 0.1.0.
+    meaning if a default ever changes. detectMoves stays false: the moved/
+    cases cover it.
     """
     return {
         "algorithm": algorithm,
-        "granularity": "line",
+        "granularity": granularity,
         "ignore": {
             "whitespace": whitespace,
             "case": case,
-            "blankLines": False,
+            "blankLines": blank_lines,
             "regex": list(regex or []),
         },
         "context": context,
@@ -78,9 +79,31 @@ def nfc(text: str) -> str:
 CASES: list[dict] = []
 
 
-def case(slug: str, ext: str, left: bytes, right: bytes, options: dict, about: str) -> None:
+def case(
+    slug: str,
+    ext: str,
+    left: bytes,
+    right: bytes,
+    options: dict,
+    about: str,
+    *,
+    max_bytes: int = MAX_FILE_BYTES,
+    valid_utf8: bool = True,
+) -> None:
+    """Register a case. ``max_bytes`` raises the per-file size limit for the
+    one case that needs a very long line; ``valid_utf8=False`` marks the cases
+    whose inputs are deliberately not UTF-8."""
     CASES.append(
-        {"slug": slug, "ext": ext, "left": left, "right": right, "options": options, "about": about}
+        {
+            "slug": slug,
+            "ext": ext,
+            "left": left,
+            "right": right,
+            "options": options,
+            "about": about,
+            "max_bytes": max_bytes,
+            "valid_utf8": valid_utf8,
+        }
     )
 
 
@@ -602,12 +625,11 @@ case(
     opts(regex=[r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"]),
     "Two runs of the same job log; every timestamp differs, and so do the pids, one "
     "latency value and the batch 3 outcome. `ignore.regex` holds one pattern that masks "
-    "the leading ISO 8601 timestamp. Non-empty `ignore.regex` is deferred to schema "
-    "0.2.0 (spec section 9), so the correct 0.1.0 result is `status: \"error\"` with one "
-    "`unsupported-option` error (`side: null`), `hunks: []`, `stats: null`, both file "
-    "metas filled in, and the regex echoed in `options`. Once masking ships, the "
-    "expected result becomes `replace` ops for the pid lines (L1-2), the latency line "
-    "(L4) and the batch 3 line (L7) only.",
+    "the leading ISO 8601 timestamp (spec 7.2.1), so lines that differ only in their "
+    "timestamp compare equal. A correct result is `different` with one hunk covering "
+    "L1-10: `replace` L1-2 (the pids), equal L3, `replace` L4 (the latency), equal L5-6, "
+    "`replace` L7 (the batch 3 outcome) and equal L8-10; `linesUnchanged: 6`, "
+    "`similarity: 0.6`, and the pattern echoed in `options`.",
 )
 
 # 019 -------------------------------------------------------------------------
@@ -675,13 +697,514 @@ case(
     "lines of context before the first change), `linesUnchanged: 6`.",
 )
 
+# 021 -------------------------------------------------------------------------
+case(
+    "021-invalid-utf8",
+    "txt",
+    lf("Invoice 2026-118", "Customer: Harbour Bakery", "Total: 412.50 EUR")[:-1],
+    # "Café Lumière" written in Latin-1: 0xE9 and 0xE8 are not valid UTF-8 here.
+    b"Invoice 2026-118\nCustomer: Caf\xe9 Lumi\xe8re\nTotal: 412.50 EUR\n",
+    opts(),
+    "The right file holds two Latin-1 bytes (0xE9 and 0xE8 for `é` and `è`), so it is "
+    "not valid UTF-8; the left file is valid UTF-8 with no final newline. 0.1.0 has no "
+    "binary fallback (spec 7.1), so a correct result is `status: \"error\"` with "
+    "`hunks: []`, `moves: []` and `stats: null`. The right side keeps its `size`, "
+    "`sha256` and `bom: false`, and its `encoding`, `lineTerminator`, `finalNewline` and "
+    "`lineCount` are `null` (spec 8). The left side still decodes, so its meta is filled "
+    "in (`lineCount: 3`, `finalNewline: false`). `warnings` is exactly "
+    "`no-newline-at-eof` (left) then `invalid-utf8` (right, severity `error`).",
+    valid_utf8=False,
+)
+
+# 022 -------------------------------------------------------------------------
+_utf16_text = "Shopping list\nmilk\neggs\nrye bread\n"
+case(
+    "022-utf16-bom",
+    "txt",
+    _utf16_text.encode("utf-8"),
+    b"\xff\xfe" + _utf16_text.encode("utf-16-le"),
+    opts(),
+    "The right file is the left file's text saved as UTF-16LE with its byte order mark "
+    "(FF FE). Only EF BB BF is treated as a BOM, and a UTF-16 BOM fails the UTF-8 check "
+    "(spec 7.1), so a correct result is `status: \"error\"` with one `invalid-utf8` "
+    "error for the right side and no `bom-stripped` warning. The right side reports "
+    "`bom: false`, `size: 70` and `null` for `encoding`, `lineTerminator`, "
+    "`finalNewline` and `lineCount`; the left side decodes normally (`lineCount: 4`). "
+    "`hunks` and `moves` are `[]` and `stats` is `null`.",
+    valid_utf8=False,
+)
+
+# 023 -------------------------------------------------------------------------
+case(
+    "023-mixed-line-endings",
+    "cfg",
+    b"[remote origin]\n"
+    b"url = https://example.org/tools/repo.git\n"
+    b"fetch = +refs/heads/*\r"
+    b"[branch main]\r\n"
+    b"remote = origin\r\n"
+    b"merge = refs/heads/main\n",
+    b"[remote origin]\n"
+    b"url = https://example.org/tools/mirror.git\n"
+    b"fetch = +refs/heads/*\r"
+    b"[branch main]\r\n"
+    b"remote = origin\n"
+    b"merge = refs/heads/main\n",
+    opts(),
+    "Both files mix LF, a lone CR (after line 3) and CRLF in one file. The right side "
+    "changes the URL on line 2 and ends line 5 with LF instead of CRLF. Each terminator "
+    "ends a line, so both sides have `lineCount: 6`, `lineTerminator: \"mixed\"` and a "
+    "`mixed-line-endings` warning. Under `ignore.whitespace: \"none\"` the terminator "
+    "kind is part of the key, so a correct result has one hunk covering L1-6: equal L1, "
+    "`replace` L2, equal L3-4, `replace` L5 (same content, CRLF versus LF), equal L6; "
+    "`linesUnchanged: 4` and `similarity: 0.6667`.",
+)
+
+# 024 -------------------------------------------------------------------------
+_mac_left = ["Tide table, Port Ellen", "06:12 high 3.4 m", "12:31 low 0.8 m", "18:40 high 3.6 m", "", "Times are local."]
+_mac_right = ["Tide table, Port Ellen", "06:12 high 3.4 m", "12:29 low 0.7 m", "18:40 high 3.6 m", "", "Times are local."]
+case(
+    "024-lone-cr",
+    "txt",
+    "".join(line + "\r" for line in _mac_left).encode("utf-8"),
+    "".join(line + "\r" for line in _mac_right).encode("utf-8"),
+    opts(),
+    "Both files use only a lone CR as the terminator (classic Mac OS style), including "
+    "after the empty line 5 and the last line. A lone CR ends a line (spec 7.2), so "
+    "both sides have `lineCount: 6`, `lineTerminator: \"cr\"`, `finalNewline: true` and "
+    "no warnings. Line 3 changes. A correct result has one hunk: equal L1-2, `replace` "
+    "L3/R3, equal L4-6; `linesUnchanged: 5` and `similarity: 0.8333`. A splitter that "
+    "treats CR as content would see one line per side instead.",
+)
+
+# 025 -------------------------------------------------------------------------
+_cr_lines = ["alpha = 1", "beta = 2", "gamma = 3", "delta = 4", "epsilon = 5", "zeta = 6"]
+_lf_lines = ["alpha = 1", "beta = 2", "gamma = 3", "delta = 40", "epsilon = 5", "zeta = 6"]
+case(
+    "025-lone-cr-vs-lf",
+    "txt",
+    "".join(line + "\r" for line in _cr_lines).encode("utf-8"),
+    lf(*_lf_lines),
+    opts(whitespace="trailing"),
+    "The left file ends every line with a lone CR, the right file with LF, and line 4 "
+    "has a real change. Runs `ignore.whitespace: \"trailing\"`, where the terminator is "
+    "not part of the key. CR is a terminator, not content (and not whitespace under "
+    "spec 7.2), so lines 1-3 and 5-6 compare equal. A correct result has one hunk: "
+    "equal L1-3, `replace` L4/R4, equal L5-6; `linesUnchanged: 5`. The left side "
+    "reports `lineTerminator: \"cr\"`, the right `\"lf\"`, both `lineCount: 6`, and "
+    "there is no `mixed-line-endings` warning.",
+)
+
+# 026 -------------------------------------------------------------------------
+_blank_left = lf(
+    "Chapter 1",
+    "",
+    "The ferry left at dawn.",
+    "Gulls followed it out of the harbour.",
+    "",
+    "By noon the island was in sight.",
+    "",
+    "",
+    "Nobody spoke on the last mile.",
+)
+_blank_right = lf(
+    "Chapter 1",
+    "",
+    "",
+    "The ferry left at dawn.",
+    "Gulls followed it out of the harbour.",
+    "",
+    "By noon the island was in sight.",
+    "",
+    "Nobody spoke on the last mile.",
+    "",
+)
+case(
+    "026-blank-line-changes",
+    "txt",
+    _blank_left,
+    _blank_right,
+    opts(context=1),
+    "Only blank lines change: the right side adds a second blank line after the "
+    "heading, drops one of the two blank lines before the last paragraph, and appends a "
+    "blank line at the end. `ignore.blankLines` is `false`, so every blank-line change "
+    "is a real change at line granularity (case 036 runs the same inputs with `true`). "
+    "A correct result "
+    "with `context: 1` has two hunks. h1: equal L2/R2, an `insert` of R3 "
+    "(`leftRange {start: 3, count: 0}`), equal L3/R4. h2: equal L7/R8, a `delete` of "
+    "L8, equal L9/R9, and an `insert` appending R10 (`leftRange {start: 10, count: "
+    "0}`). Stats show `linesAdded: 2`, `linesRemoved: 1`, `linesUnchanged: 8` and "
+    "`similarity: 0.8421`. Which blank line of an equal pair is reported is the "
+    "histogram choice; no slider heuristic is applied (spec 7.3).",
+)
+
+# 027 -------------------------------------------------------------------------
+case(
+    "027-only-newline",
+    "txt",
+    b"\n",
+    b"",
+    opts(),
+    "The left file is a single LF byte; the right file is empty. `\"\\n\"` is one empty "
+    "line (spec 7.2), so the left side has `size: 1`, `lineCount: 1`, `finalNewline: "
+    "true` and `lineTerminator: \"lf\"`, while the right side has `lineCount: 0`, "
+    "`finalNewline: false` and `lineTerminator: \"none\"`. A correct result is "
+    "`different` with one hunk holding one `delete` with `leftRange {start: 1, count: "
+    "1}` and `rightRange {start: 1, count: 0}`, `linesRemoved: 1`, `similarity: 0` and "
+    "no warnings.",
+)
+
+# 028 -------------------------------------------------------------------------
+_long_words = [f"w{n:05d}" for n in range(1, 28572)]
+_long_left = " ".join(_long_words)
+_long_right = " ".join("CHANGED" if w == "w14286" else w for w in _long_words)
+assert len(_long_left) == 199_996
+case(
+    "028-long-line",
+    "txt",
+    lf("# generated word list", _long_left, "# end"),
+    lf("# generated word list", _long_right, "# end"),
+    opts(granularity="word"),
+    "Line 2 is one 199,996-byte line of 28,571 numbered words; the right side changes "
+    "the word in the middle. A correct result has one hunk: equal L1, `replace` L2/R2, "
+    "equal L3, `linesUnchanged: 2`, `similarity: 0.6667`. The case runs "
+    "`granularity: \"word\"`, and each side of the `replace` is far above "
+    "`REFINE_MAX_BYTES` (16384, moves spec 3.4), so the op gets `inline: []` and "
+    "`warnings` holds exactly one `refine-skipped-limit` entry with `side: null`.",
+    max_bytes=256 * 1024,
+)
+
+# 029 -------------------------------------------------------------------------
+case(
+    "029-trailing-whitespace",
+    "yaml",
+    lf(
+        "name: sensor-12",
+        "zone: north",
+        "   ",
+        "mode: active",
+        "label: ok\u00a0",
+        "note: keep",
+        "end",
+    )[:-1],
+    lf(
+        "name: sensor-12   ",
+        "zone: north\t",
+        "",
+        "mode:  active",
+        "label: ok",
+        "  note: keep",
+        "end",
+    ),
+    opts(whitespace="trailing"),
+    "Runs `ignore.whitespace: \"trailing\"`. These must compare equal: L1 gains trailing "
+    "spaces, L2 a trailing tab, L3 is three spaces versus an empty line, and L7 has no "
+    "final newline on the left only (the terminator is not part of the key in this "
+    "mode). These must still differ: L4 widens an inner space, L5 drops a trailing "
+    "U+00A0 NO-BREAK SPACE (not whitespace under spec 7.2), and L6 gains leading "
+    "spaces. A correct result has one hunk: equal L1-3, one `replace` of L4-6/R4-6, "
+    "equal L7; `linesUnchanged: 4`, `status: \"different\"`, and a `no-newline-at-eof` "
+    "warning for the left side.",
+)
+
+# 030 -------------------------------------------------------------------------
+case(
+    "030-tabs-whitespace-change",
+    "txt",
+    lf(
+        "PATH\t=\t/usr/bin",
+        "\tindent with tab",
+        "cols:\ta\t\tb",
+        "trail\t",
+        "ab",
+        "x",
+        "same",
+    ),
+    lf(
+        "PATH = /usr/bin",
+        "    indent with tab",
+        "cols: a b",
+        "trail",
+        "a\tb",
+        "\tx",
+        "same",
+    ),
+    opts(whitespace="change"),
+    "Runs `ignore.whitespace: \"change\"` on tab-heavy lines. Every run of tabs and "
+    "spaces collapses to one space and trailing whitespace is dropped, so L1 (tabs "
+    "around `=`), L2 (tab versus four spaces of indent), L3 (one and two tabs versus "
+    "single spaces) and L4 (trailing tab) compare equal. L5 gains a tab where there was "
+    "no whitespace and L6 gains a leading tab, so both must differ. A correct result "
+    "has one hunk: equal L2-4, one `replace` of L5-6/R5-6, equal L7; `linesUnchanged: "
+    "5`, `similarity: 0.7143`.",
+)
+
+# 031 -------------------------------------------------------------------------
+case(
+    "031-utf16-word-cjk-emoji",
+    "txt",
+    lf(
+        "今日は\U0001F363を食べた",
+        "status: \U0001F44D\U0001F3FD great",
+        "東京 2026 \U0001F5FC trip",
+    ),
+    lf(
+        "今日は\U0001F35Cを食べた",
+        "status: \U0001F44D\U0001F3FF great",
+        "大阪 2026 \U0001F3EF trip",
+    ),
+    opts(granularity="word", position="utf-16"),
+    "Runs `granularity: \"word\"` with `positionEncoding: \"utf-16\"` on Japanese text "
+    "and emoji. All three lines change, so there is one `replace` of L1-3/R1-3 with "
+    "spans. UAX #29 makes each ideograph and hiragana its own word segment and keeps an "
+    "emoji with its skin-tone modifier together. A correct result has spans, in UTF-16 "
+    "code units: L1/R1 `[3, 5)` (the sushi and ramen emoji, two units each); L2/R2 "
+    "`[8, 12)` (thumbs up plus a skin tone, four units); L3/R3 `[0, 2)` (`東京` / "
+    "`大阪`, one merged span of two segments) and `[8, 10)` (the tower and castle "
+    "emoji). Left spans have `op: \"delete\"`, right spans `op: \"insert\"`.",
+)
+
+# 032 -------------------------------------------------------------------------
+case(
+    "032-codepoint-char-combining",
+    "txt",
+    lf(
+        "cafe\u0301 noir",
+        "ma\u00f1ana",
+        "x\u0323\u0307 = 1",
+    ),
+    lf(
+        "cafe\u0300 noir",
+        "man\u0303ana",
+        "x\u0307 = 1",
+    ),
+    opts(granularity="char", position="codepoint"),
+    "Runs `granularity: \"char\"` with `positionEncoding: \"codepoint\"` on combining "
+    "marks. Tokens are extended grapheme clusters, so a span never splits a base letter "
+    "from its marks. L1 swaps U+0301 for U+0300 after `e`: spans `[3, 5)` on both "
+    "sides. L2 is precomposed U+00F1 on the left and `n` plus U+0303 on the right, "
+    "which look the same but differ (no normalization, spec 7.1): left `[2, 3)`, right "
+    "`[2, 4)`. L3 drops U+0323 from a stacked cluster: left `[0, 3)`, right `[0, 2)`. "
+    "A correct result has one `replace` of L1-3/R1-3 holding exactly these six spans.",
+)
+
+# 033 -------------------------------------------------------------------------
+case(
+    "033-smart-prose",
+    "txt",
+    lf(
+        "Harbour notes",
+        "The colour of the harbour changes with the weather.",
+        "We walked to the old lighthouse after lunch.",
+        "Then we went home.",
+    ),
+    lf(
+        "Harbour notes",
+        "The color of the harbor changes with the weather.",
+        "We walked to the new lighthouse after dinner.",
+        "Then we went home.",
+    ),
+    opts(granularity="smart"),
+    "Runs `granularity: \"smart\"` on prose with four word changes in one `replace` of "
+    "L2-3/R2-3. `colour`/`color` and `harbour`/`harbor` are one-word swaps of at least "
+    "4 graphemes that are similar enough for the sub-word pass (moves spec 3.3 step "
+    "3), so only the `u` is marked: left spans `[8, 9)` and `[23, 24)` on L2, and no "
+    "right span on R2. `old`/`new` is under 4 graphemes and `lunch`/`dinner` is not "
+    "similar enough, so they keep whole-word spans: left `[17, 20)` and `[38, 43)` on "
+    "L3, right `[17, 20)` and `[38, 44)` on R3. Offsets are UTF-8 bytes. Most text is "
+    "equal, so the noise cutoff does not apply.",
+)
+
+# 034 -------------------------------------------------------------------------
+case(
+    "034-smart-noise",
+    "txt",
+    lf(
+        "Daily log",
+        "Invoice paid by bank transfer on Friday.",
+        "Signed off.",
+    ),
+    lf(
+        "Daily log",
+        "Remember to water the tomatoes twice a day.",
+        "Signed off.",
+    ),
+    opts(granularity="smart"),
+    "Runs `granularity: \"smart\"` where line 2 is replaced by an unrelated sentence. "
+    "No word is shared, so almost every non-whitespace grapheme lies in a span and the "
+    "smart noise cutoff (moves spec 3.3 step 4, 25 %) applies. A correct result has one "
+    "hunk: equal L1, `replace` L2/R2 with `inline: []`, equal L3. The cutoff is not a "
+    "size limit, so there is no `refine-skipped-limit` warning and `warnings` is "
+    "empty.",
+)
+
+# 035 -------------------------------------------------------------------------
+_rows_left = [f"row {n:03d}: status pending" for n in range(1, 102)]
+_rows_right = [f"row {n:03d}: status shipped" for n in range(1, 102)]
+_footer = [f"note {n}: unchanged" for n in range(1, 9)]
+case(
+    "035-refine-skipped-limit",
+    "txt",
+    lf("# batch export", *_rows_left, *_footer, "total rows: 101", "# end"),
+    lf("# batch export", *_rows_right, *_footer, "total rows: 102", "# end"),
+    opts(granularity="smart"),
+    "Runs `granularity: \"smart\"`. Lines 2-102 (101 lines) all change, giving one "
+    "`replace` of 101 lines per side, which is above `REFINE_MAX_LINES` (100, moves "
+    "spec 3.4). Eight equal lines later, line 111 changes `101` to `102`. A correct "
+    "result has two hunks: h1 with equal L1, the 101-line `replace` with `inline: []`, "
+    "and equal L103-105; h2 with equal L108-110, a one-line `replace` at L111 with "
+    "whole-word spans `[12, 15)` on both sides (3 graphemes, so no sub-word pass), and "
+    "equal L112. `warnings` is exactly one `refine-skipped-limit` with `side: null`, "
+    "and the status stays `different`.",
+)
+
+
+# 036 -------------------------------------------------------------------------
+case(
+    "036-blank-lines-ignored",
+    "txt",
+    _blank_left,
+    _blank_right,
+    opts(context=1, blank_lines=True),
+    "The inputs of case 026, run with `ignore.blankLines: true` (spec 7.3 step 3). Every "
+    "change op holds only blank lines, so each becomes an `ignored` op, which is not a "
+    "change op and never starts a hunk. A correct result is `identical` with `hunks: []`, "
+    "`changeCount: 0`, `hunkCount: 0`, `linesAdded: 0`, `linesRemoved: 0` and "
+    "`linesUnchanged: 8`. The three ignored lines (one left, two right) leave the "
+    "similarity denominator (spec 6.3), so `similarity` is `1` = 2 x 8 / (8 + 8).",
+)
+
+# 037 -------------------------------------------------------------------------
+case(
+    "037-blank-lines-near-changes",
+    "txt",
+    lf(
+        "# Shopping",
+        "",
+        "apples",
+        "bread",
+        "cheese",
+        "",
+        "dates",
+        "eggs",
+        "figs",
+        "grapes",
+        "honey",
+        "ice cream",
+        "",
+        "",
+        "jam",
+    ),
+    lf(
+        "# Shopping",
+        "apples",
+        "bread",
+        "butter",
+        "cheese",
+        "",
+        "",
+        "dates",
+        "eggs",
+        "figs",
+        "grapes",
+        "honey",
+        "ice cream",
+        "",
+        "jam",
+        "",
+        "kale",
+    ),
+    opts(context=3, blank_lines=True),
+    "Runs `ignore.blankLines: true` with `context: 3`. Two real changes (`butter` "
+    "inserted after `bread`, and `\"\"` plus `kale` appended at the end) sit among three "
+    "blank-only changes: the blank line after the heading is removed, a blank line is "
+    "added after `cheese`, and two blank lines before `jam` become one. The appended "
+    "insert holds a blank line and `kale`, so it stays an `insert` (a change op with any "
+    "non-blank line is never split). Context counts equal lines only, and ignored ops "
+    "are kept whole (spec 7.4). Which blank line of a pair is matched is the histogram "
+    "choice. A correct result has two hunks. h1: equal L1, `ignored` L2 (`rightRange "
+    "{start: 2, count: 0}`), equal L3-4, `insert` R4, equal L5, `ignored` R6 "
+    "(`leftRange {start: 6, count: 0}`), equal L6-7 (three equal lines on each side of "
+    "the insert). h2: equal L12-13, `ignored` L14 (`rightRange {start: 15, count: 0}`), "
+    "equal L15, `insert` R16-17. The ten equal lines between the two inserts are more "
+    "than 2 x 3, so the hunks stay apart. Stats: `changeCount: 2`, `linesAdded: 3`, "
+    "`linesRemoved: 0`, `linesUnchanged: 13` and `similarity: 0.8966` = 2 x 13 / "
+    "((15 - 2) + (17 - 1)).",
+)
+
+# 038 -------------------------------------------------------------------------
+_uuid = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+case(
+    "038-regex-uuid-durations",
+    "log",
+    lf(
+        "GET /api/orders 200 req=3f2b8c1e-9a4d-4e7b-8c21-5d6f7a8b9c0d in 12 ms",
+        "GET /api/orders/17 200 req=a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d in 8 ms",
+        "POST /api/orders 201 req=0f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f in 31 ms",
+        "GET /health 200 in 1 ms",
+        "GET /api/users/4 200 req=9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a in 5 ms",
+        "DELETE /api/orders/17 204 req=7c6b5a49-3827-4165-9f4e-3d2c1b0a9f8e in 9 ms",
+    ),
+    lf(
+        "GET /api/orders 200 req=5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a in 15 ms",
+        "GET /api/orders/17 404 req=b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e in 3 ms",
+        "POST /api/orders 201 req=1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d in 28 ms",
+        "GET /health 200 in 2 ms",
+        "GET /api/users/4 200 req= in 6 ms",
+        "DELETE /api/orders/17 204 req=8d7c6b5a-4938-4271-8e6f-5d4c3b2a1f0e in 11 ms",
+    ),
+    opts(regex=[_uuid, r"\d+ ms$"], context=1),
+    "Two request logs in which every request id (a UUID) and every duration differs. "
+    "`ignore.regex` holds two patterns: lowercase UUIDs, and a duration at the end of the "
+    "line. Each match is replaced with its pattern's placeholder (spec 7.2.1), so lines 1, "
+    "3, 4 and 6 compare equal. Two lines must still differ: L2 changes the status "
+    "(`200` to `404`), and on the right L5 has an empty request id (`req= in 6 ms`). A "
+    "placeholder keeps the presence of the masked value, so L5 differs; removing the "
+    "matches instead would make the two L5 lines equal and hide the missing id. With "
+    "`context: 1` a correct result has one hunk covering L1-6: equal L1, `replace` L2, "
+    "equal L3-4, `replace` L5, equal L6; `linesUnchanged: 4`, `similarity: 0.6667`.",
+)
+
+# 039 -------------------------------------------------------------------------
+_config_left = lf("[service]", "name = billing", "port = 8080", "workers = 4")
+_config_right = lf("[service]", "name = billing", "port = 8081", "workers = 4")
+case(
+    "039-regex-invalid",
+    "ini",
+    _config_left,
+    _config_right,
+    opts(regex=[r"port = \d+", r"(?P<count>\d+"]),
+    "`ignore.regex` holds a valid pattern and an invalid one (an unclosed group). The "
+    "options object itself is well formed, so the API returns a document, not an "
+    "error (spec 9). A correct result is `status: \"error\"` with exactly one "
+    "`invalid-regex` error (`side: null`), `hunks: []`, `moves: []` and `stats: null`. "
+    "Both file metas are filled in (`lineCount: 4` each) and both patterns are echoed "
+    "in `options` in the given order.",
+)
+
+# 040 -------------------------------------------------------------------------
+case(
+    "040-regex-limit-exceeded",
+    "ini",
+    _config_left,
+    _config_right,
+    opts(regex=[r"\w{32}"]),
+    "`ignore.regex` holds `\\w{32}`: 32 Unicode word characters in a row. It is a valid "
+    "pattern, but its forward NFA has more than 50000 units (states plus transitions), "
+    "the limit of spec 7.2.1, while `\\w{31}` is within it. The unit count does not depend "
+    "on the platform, so a 32-bit WASM build must give the same result as a 64-bit "
+    "native one. A correct result is `status: \"error\"` with exactly one "
+    "`limit-exceeded` error (`side: null`), `hunks: []` and `stats: null`, with both "
+    "file metas filled in and the pattern echoed in `options`.",
+)
+
 
 def write_case(entry: dict) -> None:
     directory = ROOT / entry["slug"]
     directory.mkdir(parents=True, exist_ok=True)
     for side in ("left", "right"):
         data = entry[side]
-        if len(data) > MAX_FILE_BYTES:
+        if len(data) > entry["max_bytes"]:
             raise SystemExit(f"{entry['slug']}: {side} is {len(data)} bytes, over the limit")
         (directory / f"{side}.{entry['ext']}").write_bytes(data)
     options_text = json.dumps(entry["options"], indent=2, ensure_ascii=False) + "\n"
@@ -692,8 +1215,11 @@ def write_case(entry: dict) -> None:
 
 def self_check() -> None:
     slugs = [entry["slug"] for entry in CASES]
-    if len(slugs) != 20 or len(set(slugs)) != 20:
-        raise SystemExit(f"expected 20 unique cases, found {len(slugs)}")
+    if len(slugs) != 40 or len(set(slugs)) != 40:
+        raise SystemExit(f"expected 40 unique cases, found {len(slugs)}")
+    for number, slug in enumerate(slugs, start=1):
+        if not slug.startswith(f"{number:03d}-"):
+            raise SystemExit(f"case {slug} is out of order")
     by_slug = {entry["slug"]: entry for entry in CASES}
     assert by_slug["002-both-empty"]["left"] == b"" == by_slug["002-both-empty"]["right"]
     assert by_slug["008-no-final-newline"]["right"][-1:] != b"\n"
@@ -701,9 +1227,23 @@ def self_check() -> None:
     assert b"\r" not in by_slug["009-crlf-vs-lf"]["left"]
     assert by_slug["010-utf8-bom"]["right"].startswith(BOM)
     assert not by_slug["010-utf8-bom"]["left"].startswith(BOM)
+    assert by_slug["024-lone-cr"]["left"].count(b"\r") == 6
+    assert b"\n" not in by_slug["024-lone-cr"]["left"] + by_slug["024-lone-cr"]["right"]
+    assert b"\n" not in by_slug["025-lone-cr-vs-lf"]["left"]
+    assert b"\r" not in by_slug["025-lone-cr-vs-lf"]["right"]
+    assert by_slug["027-only-newline"]["left"] == b"\n"
+    assert by_slug["022-utf16-bom"]["right"].startswith(b"\xff\xfe")
     for entry in CASES:
         for side in ("left", "right"):
-            entry[side].decode("utf-8")  # every input must be valid UTF-8
+            data = entry[side]
+            if entry["valid_utf8"] or side == "left":
+                data.decode("utf-8")  # every input except the invalid sides must be UTF-8
+            else:
+                try:
+                    data.decode("utf-8")
+                except UnicodeDecodeError:
+                    continue
+                raise SystemExit(f"{entry['slug']}: {side} was meant to be invalid UTF-8")
 
 
 def main() -> int:

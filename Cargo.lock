@@ -176,10 +176,11 @@ dependencies = [
 name = "diffyman-algo"
 version = "0.0.1"
 dependencies = [
+ "gix-imara-diff",
  "icu_casemap",
  "icu_properties",
- "imara-diff",
  "regex",
+ "regex-automata",
  "similar",
  "unicode-segmentation",
 ]
@@ -263,6 +264,16 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
+name = "gix-imara-diff"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7518b930f6aeb75e871d32ce873c2ae46e35cef19b5a0b039d4337f651d897cd"
+dependencies = [
+ "bstr",
+ "hashbrown",
+]
 
 [[package]]
 name = "hashbrown"
@@ -375,16 +386,6 @@ dependencies = [
  "zerofrom",
  "zerotrie",
  "zerovec",
-]
-
-[[package]]
-name = "imara-diff"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f01d462f766df78ab820dd06f5eb700233c51f0f4c2e846520eaf4ba6aa5c5c"
-dependencies = [
- "hashbrown",
- "memchr",
 ]
 
 [[package]]

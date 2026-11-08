@@ -1,0 +1,6 @@
+alpha = 1
+beta = 2
+gamma = 3
+delta = 40
+epsilon = 5
+zeta = 6

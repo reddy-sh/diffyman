@@ -1,6 +1,6 @@
 """diffyman: compare two inputs and get one canonical JSON Diff Document.
 
-The result follows ``docs/spec/diff-document.md`` (schema ``0.1.0``). The JSON
+The result follows ``docs/spec/diff-document.md`` (schema ``0.2.0``). The JSON
 returned by :func:`diff` is byte-identical to ``diffyman diff --json`` and to
 every other binding once the top-level ``provenance`` key is removed.
 

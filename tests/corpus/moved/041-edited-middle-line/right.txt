@@ -1,0 +1,19 @@
+package store
+
+import "time"
+
+func Open(path string) (*Store, error) {
+  return open(path, time.Second)
+}
+
+func (s *Store) Close() error {
+  return s.file.Close()
+}
+
+func (s *Store) Compact(maxAge time.Duration) int {
+  cutoff := s.clock.Now().Add(-maxAge)
+  removed := s.index.RemoveOlderThan(cutoff, s.log)
+  s.stats.Compactions++
+  s.stats.LastCompaction = s.clock.Now()
+  return removed
+}

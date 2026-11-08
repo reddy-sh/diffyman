@@ -1,0 +1,7 @@
+PATH = /usr/bin
+    indent with tab
+cols: a b
+trail
+a	b
+	x
+same

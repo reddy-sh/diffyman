@@ -193,7 +193,8 @@ pathological inputs stayed under 300 MB of footprint. All scripts that finished 
    expects the insert at `s + n` builds invalid hunks. The bench normalizes this, and so must
    `diffyman-algo`.
 9. **Huge lines are cheap.** A 50 MB line is hashed once (about 4 ms). The line diff is trivial;
-   the real cost is in the word and character refinement, which the plan already limits to small hunks.
+   the real cost is in the word and character refinement, which the engine limits to small hunks
+   (see [text granularity and moves](../spec/text-granularity-and-moves.md)).
 10. **Moved blocks** show up in every library as a separate delete and insert, as expected. Move
     detection stays our own post-pass over the line diff (see
     [the moved-blocks spec](../spec/text-granularity-and-moves.md#4-moved-blocks)).

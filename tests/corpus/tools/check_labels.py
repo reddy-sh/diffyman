@@ -10,12 +10,15 @@ The script exits non-zero if any check fails. It checks, per case:
 1. labels.json has exactly the shape of text-granularity-and-moves.md 5.2
    (keys, types, ranges inside the files, sort order, no overlap per side).
 2. The input files follow the corpus rules: valid UTF-8, a final newline,
-   no lone CR, and indentation made of spaces in steps of two.
+   no lone CR, and indentation made of spaces in steps of two. Lines are
+   numbered by diff-document.md 7.2 (LF, CRLF and a lone CR end a line); lone
+   CRs are still rejected because the git stand-in diff below treats a CR as
+   content and would number lines differently.
 3. Every label meets the minimum move size of section 4.2 on both sides.
-4. A "pure" label pairs its lines one to one with equal keys under the
-   default moveWhitespace "allowIndentationChange" (same indentation delta on
-   every non-blank line). An "edited" label reaches the block similarity of
-   section 4.5 and is not secretly pure.
+4. A "pure" label pairs its lines one to one with equal move keys (section
+   4.4 with ignore.whitespace "none": leading whitespace removed, the rest
+   exact) and the same indentation delta on every non-blank line. An "edited"
+   label reaches the block similarity of section 4.5 and is not secretly pure.
 5. Line-diff consistency: using git's histogram diff (no indent heuristic) as
    an independent stand-in for text.histogram@1, every labeled left line is
    deleted, every labeled right line is inserted, and the two sides are in
@@ -72,18 +75,27 @@ class CaseErrors:
 # --- text helpers -----------------------------------------------------------
 
 
+LINE_END = re.compile(r"\r\n|\r|\n")
+WHITESPACE = "\t\x0b\x0c "
+
+
 def split_lines(text: str) -> list[str]:
-    """Split on LF and CRLF only (moves spec section 1); a lone CR is content."""
+    """Split into line contents by diff-document.md 7.2 (moves spec section 1).
+
+    LF, CRLF and a lone CR each end a line; CR followed by LF is one CRLF
+    terminator, and a terminator at the end of the input starts no new line.
+    """
     if text == "":
         return []
-    parts = text.split("\n")
+    parts = LINE_END.split(text)
     if parts[-1] == "":
         parts.pop()
-    return [p[:-1] if p.endswith("\r") else p for p in parts]
+    return parts
 
 
 def is_ws(ch: str) -> bool:
-    return ch.isspace() and ch not in "\n\r"
+    """Whitespace as diff-document.md 7.2 defines it: U+0009, U+000B, U+000C, U+0020."""
+    return ch in WHITESPACE
 
 
 def leading_ws(line: str) -> str:
@@ -94,7 +106,7 @@ def leading_ws(line: str) -> str:
 
 
 def key(line: str) -> str:
-    """Comparison key under allowIndentationChange: leading whitespace removed."""
+    """Move key (section 4.4) under ignore.whitespace "none": leading whitespace removed."""
     return line[len(leading_ws(line)):]
 
 
@@ -316,7 +328,9 @@ def match(predictions: list[dict], labels: list[dict]):
 # --- options ----------------------------------------------------------------
 
 
-def check_options(path: Path, errors: CaseErrors, *, detect_moves: bool | None) -> None:
+def check_options(
+    path: Path, errors: CaseErrors, *, detect_moves: bool | None, line_only: bool
+) -> None:
     try:
         options = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -331,8 +345,8 @@ def check_options(path: Path, errors: CaseErrors, *, detect_moves: bool | None) 
             errors.error(f"options.{name} = {options[name]!r} is not a valid value")
     if "positionEncoding" not in options:
         errors.error("options.json must pin positionEncoding")
-    if options.get("granularity", "line") != "line":
-        errors.error("corpus v0 cases must use granularity 'line'")
+    if line_only and options.get("granularity", "line") != "line":
+        errors.error("moved cases must use granularity 'line'")
     ignore = options.get("ignore", {})
     if not isinstance(ignore, dict) or set(ignore) - {"whitespace", "case", "blankLines", "regex"}:
         errors.error("options.ignore has unknown keys")
@@ -401,7 +415,7 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
             errors.error(f"missing {required.name}")
     if errors.errors:
         return errors
-    check_options(directory / "options.json", errors, detect_moves=True)
+    check_options(directory / "options.json", errors, detect_moves=True, line_only=True)
     left = check_files(left_path.read_bytes(), "left", errors)
     right = check_files(right_path.read_bytes(), "right", errors)
     if left is None or right is None:
@@ -513,7 +527,21 @@ def check_case(directory: Path, totals: dict) -> CaseErrors:
             else:
                 errors.info.append(f"boundary differs: label {label} vs predicted {pred}")
     used = set(matched.values())
-    leftovers = [p for pi, p in enumerate(predictions) if pi not in used]
+    leftovers = []
+    for pi, pred in enumerate(predictions):
+        if pi in used:
+            continue
+        # A pure piece inside an edited label is joined into that edited move
+        # (moves spec 4.3 step 4), so it is expected, not a false positive.
+        inside = any(
+            line_set(pred["left"]) <= line_set(label["left"])
+            and line_set(pred["right"]) <= line_set(label["right"])
+            for label in edited_labels
+        )
+        if inside:
+            errors.info.append(f"pure piece {pred} inside an edited label")
+        else:
+            leftovers.append(pred)
     explained_by_edited = match(leftovers, edited_labels)
     for pi, pred in enumerate(leftovers):
         totals["fp"] += 1
@@ -544,7 +572,7 @@ def check_text_cases() -> list[CaseErrors]:
         if "options.json" not in names:
             errors.error("missing options.json")
         else:
-            check_options(directory / "options.json", errors, detect_moves=False)
+            check_options(directory / "options.json", errors, detect_moves=False, line_only=False)
         results.append(errors)
     return results
 

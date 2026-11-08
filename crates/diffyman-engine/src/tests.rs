@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use super::*;
 use serde_json::json;
 
@@ -37,7 +39,7 @@ fn worked_example_matches_spec() {
     );
     let value = serde_json::to_value(&d).unwrap();
     let expected = json!({
-        "schemaVersion": "0.1.0",
+        "schemaVersion": "0.2.0",
         "kind": "text",
         "status": "different",
         "positionEncoding": "utf-8",
@@ -86,7 +88,7 @@ fn worked_example_matches_spec() {
     assert_eq!(value["right"]["lineCount"], 6);
     assert_eq!(
         d.id,
-        "sha256:488c0d1086c1e8389d24959f51ccf6282d9075b0c715daa4bbe7649fe165ea82"
+        "sha256:95ff6bb81d8f60205c99119cc386ddfa9235ee9f83e253fc10fd6f166e604a54"
     );
 }
 
@@ -265,19 +267,187 @@ fn invalid_utf8_is_an_error_document() {
     assert_eq!(doc(b"\xFF\xFEa\x00", b"", "{}").status, Status::Error);
 }
 
+fn kinds(d: &DiffDocument) -> Vec<Vec<OpKind>> {
+    d.hunks
+        .iter()
+        .map(|h| h.ops.iter().map(|o| o.op).collect())
+        .collect()
+}
+
+const BLANK_LEFT: &[u8] = b"one\n\ntwo\nthree\nfour\nfive\nsix\n\n\nseven\n";
+const BLANK_RIGHT: &[u8] = b"one\ntwo\nthree\nfour\nfive\nsix\n  \nseven\n\n";
+
 #[test]
-fn unsupported_options_give_error_documents() {
-    for options in [
+fn blank_only_changes_are_ignored() {
+    let plain = doc(BLANK_LEFT, BLANK_RIGHT, r#"{"context": 1}"#);
+    assert_eq!(plain.status, Status::Different);
+    let d = doc(
+        BLANK_LEFT,
+        BLANK_RIGHT,
+        r#"{"context": 1, "ignore": {"blankLines": true}}"#,
+    );
+    // Every change is blank on both sides, so the inputs are identical.
+    assert_eq!(d.status, Status::Identical);
+    assert!(d.hunks.is_empty());
+    let stats = d.stats.unwrap();
+    assert_eq!((stats.change_count, stats.hunk_count), (0, 0));
+    assert_eq!((stats.lines_added, stats.lines_removed), (0, 0));
+    assert_eq!((stats.lines_left, stats.lines_right), (10, 9));
+    assert_eq!(stats.lines_unchanged, 7);
+    // Ignored lines leave the similarity denominator: 2 * 7 / (7 + 7).
+    assert_eq!(stats.similarity, Similarity::ONE);
+    assert!(d.options.ignore.blank_lines);
+}
+
+#[test]
+fn ignored_ops_appear_next_to_real_changes() {
+    let right = b"one\ntwo\nthree\nFOUR\nfive\nsix\n  \nseven\n\n";
+    let d = doc(
+        BLANK_LEFT,
+        right,
+        r#"{"context": 3, "ignore": {"blankLines": true}}"#,
+    );
+    assert_eq!(d.status, Status::Different);
+    // Three equal lines of context on each side of the change; the ignored ops
+    // in between are kept whole and do not count. The blank line appended at
+    // the end lies beyond the context.
+    assert_eq!(
+        kinds(&d),
+        [[
+            OpKind::Equal,
+            OpKind::Ignored,
+            OpKind::Equal,
+            OpKind::Replace,
+            OpKind::Equal,
+            OpKind::Ignored,
+            OpKind::Equal
+        ]]
+    );
+    let ops = &d.hunks[0].ops;
+    assert_eq!(ops[1].left_range, Range { start: 2, count: 1 });
+    assert_eq!(ops[1].right_range, Range { start: 2, count: 0 });
+    assert!(ops[1].inline.is_empty());
+    // Hunk ranges still tile the ops.
+    assert_eq!(
+        d.hunks[0].left,
+        Range {
+            start: 1,
+            count: 10
+        }
+    );
+    assert_eq!(d.hunks[0].right, Range { start: 1, count: 8 });
+    let stats = d.stats.as_ref().unwrap();
+    assert_eq!(
+        (stats.change_count, stats.lines_added, stats.lines_removed),
+        (1, 1, 1)
+    );
+    assert_eq!(stats.lines_unchanged, 6);
+    // 2 * 6 / (7 + 7) = 0.857142... -> 0.8571
+    assert_eq!(stats.similarity.basis_points(), 8571);
+    let json = model::to_canonical_json(&d).unwrap();
+    assert!(json.contains(r#""op":"ignored""#));
+}
+
+#[test]
+fn mixed_blank_and_text_changes_stay_changes() {
+    let d = doc(
+        b"a\nb\n",
+        b"a\n\nB\n",
         r#"{"ignore": {"blankLines": true}}"#,
+    );
+    assert_eq!(d.status, Status::Different);
+    assert_eq!(kinds(&d), [[OpKind::Equal, OpKind::Replace]]);
+    // A whitespace-only line is blank; a terminator change of a blank line is too.
+    let d = doc(
+        b"x\n\t\n",
+        b"x\n\r\n",
+        r#"{"ignore": {"blankLines": true}}"#,
+    );
+    assert_eq!(d.status, Status::Identical);
+    // U+00A0 is not whitespace, so that line is not blank.
+    let d = doc(
+        "x\n".as_bytes(),
+        "x\n\u{a0}\n".as_bytes(),
+        r#"{"ignore": {"blankLines": true}}"#,
+    );
+    assert_eq!(d.status, Status::Different);
+}
+
+#[test]
+fn ignored_lines_are_never_moved() {
+    let left = "fn alpha_function(first, second)\nfn beta_function(first, second)\nkeep 1\nkeep 2\nkeep 3\n\n\n\nkeep 4\n";
+    let right = "keep 1\nkeep 2\nkeep 3\nkeep 4\nfn alpha_function(first, second)\nfn beta_function(first, second)\n";
+    let d = doc(
+        left.as_bytes(),
+        right.as_bytes(),
+        r#"{"detectMoves": true, "ignore": {"blankLines": true}}"#,
+    );
+    assert_eq!(d.moves.len(), 1);
+    assert_eq!(d.moves[0].from.range, Range { start: 1, count: 2 });
+    let ignored: Vec<&Op> = d
+        .hunks
+        .iter()
+        .flat_map(|h| &h.ops)
+        .filter(|o| o.op == OpKind::Ignored)
+        .collect();
+    assert_eq!(ignored.len(), 1);
+    assert_eq!(ignored[0].left_range, Range { start: 6, count: 3 });
+}
+
+#[test]
+fn regex_masks_compare_lines_without_the_matches() {
+    let left = b"2026-01-01T10:00:00Z start job 7\n2026-01-01T10:00:05Z done job 7\n";
+    let right = b"2026-02-03T11:30:00Z start job 7\n2026-02-03T11:30:09Z failed job 7\n";
+    let opts = r#"{"ignore": {"regex": ["^\\d{4}-\\d{2}-\\d{2}T[0-9:]{8}Z"]}, "context": 0}"#;
+    let d = doc(left, right, opts);
+    assert_eq!(d.status, Status::Different);
+    assert_eq!(kinds(&d), [[OpKind::Replace]]);
+    assert_eq!(d.hunks[0].ops[0].left_range, Range { start: 2, count: 1 });
+    assert_eq!(d.options.ignore.regex, [r"^\d{4}-\d{2}-\d{2}T[0-9:]{8}Z"]);
+    // Masking everything that differs gives `identical`.
+    let all = r#"{"ignore": {"regex": ["^\\S+", "done|failed"]}}"#;
+    assert_eq!(doc(left, right, all).status, Status::Identical);
+    // A line that lacks the masked text entirely still differs.
+    let d = doc(
+        b"id 42 ok\n",
+        b"id  ok\n",
         r#"{"ignore": {"regex": ["\\d+"]}}"#,
-        r#"{"detectMoves": true}"#,
+    );
+    assert_eq!(d.status, Status::Different);
+}
+
+#[test]
+fn bad_regex_patterns_give_error_documents() {
+    for (options, code) in [
+        (r#"{"ignore": {"regex": ["(unclosed"]}}"#, "invalid-regex"),
+        (r#"{"ignore": {"regex": ["a(?=b)"]}}"#, "invalid-regex"),
+        (r#"{"ignore": {"regex": ["\\w{100}"]}}"#, "limit-exceeded"),
     ] {
         let d = doc(b"a\n", b"b\n", options);
         assert_eq!(d.status, Status::Error, "{options}");
-        assert_eq!(codes(&d), [("unsupported-option", None)]);
-        assert!(d.stats.is_none());
+        assert_eq!(codes(&d), [(code, None)], "{options}");
+        assert!(d.stats.is_none() && d.hunks.is_empty());
         assert_eq!(d.left.line_count, Some(1));
     }
+    let many: Vec<String> = (0..=key::MAX_REGEX_PATTERNS)
+        .map(|i| format!("p{i}"))
+        .collect();
+    let options = json!({"ignore": {"regex": many}}).to_string();
+    assert_eq!(
+        codes(&doc(b"a\n", b"b\n", &options)),
+        [("limit-exceeded", None)]
+    );
+    let both = r#"{"ignore": {"regex": ["(", "\\w{100}"]}}"#;
+    assert_eq!(
+        codes(&doc(b"a\n", b"b\n", both)),
+        [("invalid-regex", None), ("limit-exceeded", None)]
+    );
+    // Pattern errors are reported even when an input does not decode.
+    let d = doc(b"\xff\n", b"b\n", r#"{"ignore": {"regex": ["("]}}"#);
+    assert_eq!(
+        codes(&d),
+        [("invalid-utf8", Some(Side::Left)), ("invalid-regex", None)]
+    );
 }
 
 #[test]
@@ -286,6 +456,40 @@ fn invalid_options_are_rejected_without_a_document() {
         diff(b"a", b"b", r#"{"bogus": true}"#),
         Err(Error::InvalidOptions(_))
     ));
+}
+
+#[test]
+fn typed_api_rejects_invalid_options() {
+    let bad = [
+        Options {
+            granularity: Granularity::Unknown,
+            ..Options::default()
+        },
+        Options {
+            context: model::MAX_CONTEXT + 1,
+            ..Options::default()
+        },
+    ];
+    for options in &bad {
+        assert!(matches!(
+            diff_document(Input::new(b"a\n"), Input::new(b"b\n"), options),
+            Err(Error::InvalidOptions(_))
+        ));
+        assert!(matches!(
+            diff_document_with(
+                Input::new(b"a\n"),
+                Input::new(b"b\n"),
+                options,
+                &Settings::default()
+            ),
+            Err(Error::InvalidOptions(_))
+        ));
+    }
+    let ok = Options {
+        context: model::MAX_CONTEXT,
+        ..Options::default()
+    };
+    assert!(diff_document(Input::new(b"a\n"), Input::new(b"b\n"), &ok).is_ok());
 }
 
 #[test]
@@ -421,4 +625,117 @@ fn input_names_keep_the_final_component() {
     assert_eq!(Input::named(b"", r"C:\x\y.txt").name(), Some("y.txt"));
     assert_eq!(Input::named(b"", "dir/").name(), None);
     assert_eq!(Input::new(b"").name(), None);
+}
+
+const MOVE_LEFT: &str = "header line\nfn moved_function_one(argument_value)\nfn moved_function_two(argument_value)\nthe old wording here\nstable one\nstable two\nstable three\nstable four\n";
+const MOVE_RIGHT: &str = "header line\nthe new wording here\nstable one\nstable two\nstable three\nstable four\nfn moved_function_one(argument_value)\nfn moved_function_two(argument_value)\n";
+
+#[test]
+fn moves_reference_ops_and_leave_hunks_unchanged() {
+    let with = doc(
+        MOVE_LEFT.as_bytes(),
+        MOVE_RIGHT.as_bytes(),
+        r#"{"detectMoves": true, "context": 1}"#,
+    );
+    let without = doc(
+        MOVE_LEFT.as_bytes(),
+        MOVE_RIGHT.as_bytes(),
+        r#"{"context": 1}"#,
+    );
+    assert_eq!(with.status, Status::Different);
+    assert!(codes(&with).is_empty());
+    assert_eq!(with.hunks, without.hunks);
+    assert_eq!(with.stats, without.stats);
+    assert!(without.moves.is_empty());
+    assert_eq!(with.moves.len(), 1);
+    let json: Value = serde_json::from_str(&model::to_canonical_json(&with).unwrap()).unwrap();
+    // Left 2-3 sit in the replace op of h1; right 7-8 are the insert of h2.
+    assert_eq!(
+        json["moves"],
+        json!([{
+            "id": "m1",
+            "kind": "pure",
+            "from": { "side": "left", "range": { "start": 2, "count": 2 } },
+            "to": { "side": "right", "range": { "start": 7, "count": 2 } },
+            "similarity": 1,
+            "fromOps": [{ "hunk": "h1", "op": 1 }],
+            "toOps": [{ "hunk": "h2", "op": 1 }]
+        }])
+    );
+    assert_eq!(with.hunks[0].ops[1].op, OpKind::Replace);
+    assert_eq!(with.hunks[1].ops[1].op, OpKind::Insert);
+    assert_eq!(
+        json["provenance"]["moves"],
+        Value::String(moves::MOVES_ID.to_owned())
+    );
+    // Op references follow the hunk grouping: one hunk with a large context.
+    let wide = doc(
+        MOVE_LEFT.as_bytes(),
+        MOVE_RIGHT.as_bytes(),
+        r#"{"detectMoves": true, "context": 10}"#,
+    );
+    assert_eq!(
+        wide.moves[0].from_ops,
+        [OpRef {
+            hunk: "h1".to_owned(),
+            op: 1
+        }]
+    );
+    assert_eq!(
+        wide.moves[0].to_ops,
+        [OpRef {
+            hunk: "h1".to_owned(),
+            op: 3
+        }]
+    );
+}
+
+#[test]
+fn moved_lines_get_no_inline_spans() {
+    let opts = |moves: bool| format!(r#"{{"detectMoves": {moves}, "granularity": "word"}}"#);
+    let with = doc(MOVE_LEFT.as_bytes(), MOVE_RIGHT.as_bytes(), &opts(true));
+    let without = doc(MOVE_LEFT.as_bytes(), MOVE_RIGHT.as_bytes(), &opts(false));
+    let spans = |d: &DiffDocument| -> Vec<(Side, u64)> {
+        d.hunks
+            .iter()
+            .flat_map(|h| &h.ops)
+            .flat_map(|o| &o.inline)
+            .map(|s| (s.side, s.line))
+            .collect()
+    };
+    let moved = spans(&with);
+    assert!(!moved.is_empty());
+    // Only the reworded line pair (left 4, right 2) is refined.
+    assert!(
+        moved
+            .iter()
+            .all(|s| *s == (Side::Left, 4) || *s == (Side::Right, 2)),
+        "{moved:?}"
+    );
+    assert!(
+        spans(&without)
+            .iter()
+            .any(|s| s.0 == Side::Left && (s.1 == 2 || s.1 == 3))
+    );
+}
+
+#[test]
+fn move_detection_on_identical_and_huge_inputs() {
+    let d = doc(LEFT, LEFT, r#"{"detectMoves": true}"#);
+    assert_eq!(d.status, Status::Identical);
+    assert!(d.moves.is_empty());
+    // More deleted lines than the candidate guard allows.
+    let big: String = (0..=moves_limit()).fold(String::new(), |mut s, i| {
+        let _ = writeln!(s, "line {i}");
+        s
+    });
+    let d = doc(big.as_bytes(), b"other\n", r#"{"detectMoves": true}"#);
+    assert_eq!(d.status, Status::Different);
+    assert!(d.moves.is_empty());
+    assert_eq!(codes(&d), [("moves-skipped-limit", None)]);
+    assert!(!d.hunks.is_empty());
+}
+
+fn moves_limit() -> usize {
+    moves::MOVE_MAX_CANDIDATE_LINES
 }

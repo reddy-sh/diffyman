@@ -50,7 +50,7 @@ jobs:
         run: cargo test --locked --workspace
 
       - name: Conformance corpus
-        run: cargo run --locked -p diffyman-conformance
+        run: cargo run --locked -p diffyman-conformance -- --strict
 
       - name: Build the engine for wasm32
         if: runner.os == 'Linux'

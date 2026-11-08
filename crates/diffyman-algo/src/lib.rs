@@ -10,8 +10,8 @@
 //!   masks) and token interning.
 //! - [`line_diff`]: `text.histogram@1`, `text.myers@1`, `text.patience@1`.
 //! - [`ops`]: the full op list and hunk grouping (spec §7.3, §7.4).
-//! - [`refine`]: word, char and smart inline spans (`text.refine@1`, provisional).
-//! - [`moves`]: moved blocks (`text.moves@1`, Phase 0 stub).
+//! - [`refine`]: word, char and smart inline spans (`text.refine@1`).
+//! - [`moves`]: pure and edited moved blocks (`text.moves@1`).
 
 pub mod key;
 pub mod line_diff;
@@ -22,12 +22,14 @@ pub mod refine;
 
 /// Versions of the libraries whose behavior defines the algorithm IDs. They
 /// must match the exact pins in the workspace `Cargo.toml`.
-pub const LIBRARY_VERSIONS: [(&str, &str); 5] = [
-    ("imara-diff", "0.2.0"),
+pub const LIBRARY_VERSIONS: [(&str, &str); 7] = [
+    ("gix-imara-diff", "0.3.3"),
     ("similar", "3.2.1"),
     ("unicode-segmentation", "1.13.3"),
     ("icu_casemap", "2.4.0"),
     ("icu_properties", "2.4.0"),
+    ("regex", "1.13.1"),
+    ("regex-automata", "0.4.18"),
 ];
 
 /// The Unicode version of the word and grapheme segmentation tables.

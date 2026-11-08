@@ -1,0 +1,16 @@
+{
+  "algorithm": "histogram",
+  "granularity": "line",
+  "ignore": {
+    "whitespace": "none",
+    "case": false,
+    "blankLines": false,
+    "regex": [
+      "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+      "\\d+ ms$"
+    ]
+  },
+  "context": 1,
+  "positionEncoding": "utf-8",
+  "detectMoves": false
+}

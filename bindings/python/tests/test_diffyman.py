@@ -23,7 +23,7 @@ GROUPS = ("text", "moved")
 LEFT = b"apple\nbanana\ncherry\ndate\nelderberry\n"
 RIGHT = b"apple\nblueberry\ncherry\ndate\nelderberry\nfig"
 # Diff Document spec section 14: the worked example (unnamed inputs give a different id).
-WORKED_EXAMPLE_ID = "sha256:488c0d1086c1e8389d24959f51ccf6282d9075b0c715daa4bbe7649fe165ea82"
+WORKED_EXAMPLE_ID = "sha256:95ff6bb81d8f60205c99119cc386ddfa9235ee9f83e253fc10fd6f166e604a54"
 
 
 def without_provenance(doc: dict[str, Any]) -> dict[str, Any]:
@@ -45,7 +45,7 @@ def only(case: pathlib.Path, stem: str) -> pathlib.Path:
 
 
 def test_versions() -> None:
-    assert diffyman.SCHEMA_VERSION == "0.1.0"
+    assert diffyman.SCHEMA_VERSION == "0.2.0"
     assert diffyman.__version__ == diffyman.ENGINE_VERSION
     assert diffyman.ENGINE_VERSION
 
@@ -126,10 +126,19 @@ def test_invalid_options_raise(options: Any) -> None:
     assert issubclass(diffyman.DiffymanError, ValueError)
 
 
-def test_unsupported_option_gives_error_document() -> None:
-    doc = diffyman.diff_document(LEFT, RIGHT, {"detectMoves": True})
+def test_ignore_options() -> None:
+    blank = diffyman.diff_document(b"a\n\nb\n", b"a\nb\n\n", {"ignore": {"blankLines": True}})
+    assert blank["status"] == "identical"
+    assert blank["stats"]["similarity"] == 1
+    masked = diffyman.diff_document(b"t=1 ok\n", b"t=22 ok\n", {"ignore": {"regex": [r"\d+"]}})
+    assert masked["status"] == "identical"
+    assert masked["options"]["ignore"]["regex"] == [r"\d+"]
+
+
+def test_invalid_regex_gives_error_document() -> None:
+    doc = diffyman.diff_document(LEFT, RIGHT, {"ignore": {"regex": ["(unclosed"]}})
     assert doc["status"] == "error"
-    assert ("unsupported-option", None) in [(w["code"], w["side"]) for w in doc["warnings"]]
+    assert [(w["code"], w["side"]) for w in doc["warnings"]][-1] == ("invalid-regex", None)
     assert doc["hunks"] == []
 
 

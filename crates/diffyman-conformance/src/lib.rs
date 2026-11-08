@@ -13,8 +13,9 @@
 //! never a valid expected result.
 //!
 //! `moved` cases also carry `labels.json` (human ground truth). The runner
-//! matches predicted moves against labels and prints precision and recall.
-//! Moved-block detection is a stub in Phase 0, so the metrics never fail the run.
+//! matches predicted moves against labels (moves spec §5.3), prints precision
+//! and recall per case, per category and in total, and checks the gate of
+//! moves spec §5.4 ([`gate_failures`]).
 
 use std::fmt::Write as _;
 use std::fs;
@@ -50,7 +51,7 @@ pub struct CaseResult {
     /// Outcome.
     pub outcome: Outcome,
     /// Move metrics, for `moved` cases with valid labels.
-    pub metrics: Option<Counts>,
+    pub metrics: Option<Evaluation>,
 }
 
 /// Runner settings.
@@ -102,7 +103,7 @@ pub fn run_case(name: &str, dir: &Path, options: &RunOptions) -> CaseResult {
     };
     if name.starts_with("moved/") {
         match load_labels(&dir.join("labels.json")) {
-            Ok(labels) => result.metrics = Some(score(&predictions(&doc), &labels, MoveMode::Pure)),
+            Ok(labels) => result.metrics = Some(evaluate(&predictions(&doc), &labels)),
             Err(e) => {
                 result.outcome = Outcome::Error(format!("labels.json: {e}"));
                 return result;
@@ -248,15 +249,11 @@ pub struct MoveSpec {
     pub edited: bool,
 }
 
-/// Lines as the moves spec counts them: only LF and CRLF end a line.
+/// Lines as the Diff Document counts them (spec §7.2): LF, CRLF and a lone CR
+/// each end a line. Labels use the same numbering.
 pub fn label_line_count(bytes: &[u8]) -> u64 {
     let text = diffyman::decode_text(bytes).unwrap_or_default();
-    let breaks = text.bytes().filter(|b| *b == b'\n').count() as u64;
-    if !text.is_empty() && !text.ends_with('\n') {
-        breaks + 1
-    } else {
-        breaks
-    }
+    diffyman::split_lines(text).len() as u64
 }
 
 /// Loads and validates `labels.json` (moves spec §5.2).
@@ -430,6 +427,99 @@ fn ratio(num: u64, den: u64) -> Option<f64> {
 /// greedy by the larger minimum-side Jaccard; ties by label order, then
 /// prediction order) and counts the result.
 pub fn score(predicted: &[MoveSpec], labels: &[MoveSpec], mode: MoveMode) -> Counts {
+    let label_match = match_moves(predicted, labels);
+    let in_scope = |label: &MoveSpec| mode == MoveMode::Edited || !label.edited;
+    let mut counts = Counts::default();
+    let mut pred_matched = vec![false; predicted.len()];
+    for (label, m) in labels.iter().zip(&label_match) {
+        if let Some(p) = m {
+            pred_matched[*p] = true;
+        }
+        match m {
+            Some(_) if in_scope(label) => counts.tp += 1,
+            None if in_scope(label) => counts.fn_ += 1,
+            _ => {}
+        }
+    }
+    counts.fp = pred_matched.iter().filter(|m| !**m).count() as u64;
+    counts
+}
+
+/// Move metrics of one case or a sum of cases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Evaluation {
+    /// All labels count (moves spec §5.3, edited moves shipped).
+    pub all: Counts,
+    /// `edited` labels left out (the pure-only scope).
+    pub pure_only: Counts,
+    /// Matched pairs whose predicted kind equals the label's kind.
+    pub kind_ok: u64,
+    /// Matched pairs whose ranges equal the label's on both sides.
+    pub exact: u64,
+    /// Number of predictions.
+    pub predicted: u64,
+    /// Number of labels.
+    pub labels: u64,
+}
+
+impl Evaluation {
+    /// Adds another case's metrics.
+    pub fn add(&mut self, other: &Evaluation) {
+        self.all.add(other.all);
+        self.pure_only.add(other.pure_only);
+        self.kind_ok += other.kind_ok;
+        self.exact += other.exact;
+        self.predicted += other.predicted;
+        self.labels += other.labels;
+    }
+}
+
+/// Scores one case in both scopes, with kind accuracy and exact boundaries.
+pub fn evaluate(predicted: &[MoveSpec], labels: &[MoveSpec]) -> Evaluation {
+    let label_match = match_moves(predicted, labels);
+    let mut eval = Evaluation {
+        all: score(predicted, labels, MoveMode::Edited),
+        pure_only: score(predicted, labels, MoveMode::Pure),
+        predicted: predicted.len() as u64,
+        labels: labels.len() as u64,
+        ..Evaluation::default()
+    };
+    for (label, m) in labels.iter().zip(&label_match) {
+        if let Some(p) = m {
+            let pred = &predicted[*p];
+            eval.kind_ok += u64::from(pred.edited == label.edited);
+            eval.exact += u64::from(pred.left == label.left && pred.right == label.right);
+        }
+    }
+    eval
+}
+
+/// The category of a `moved` case: the word after the number in its folder
+/// name, such as `pure` for `moved/001-pure-function-down`.
+pub fn category(name: &str) -> &str {
+    let case = name.rsplit('/').next().unwrap_or(name);
+    case.split('-').nth(1).unwrap_or("other")
+}
+
+/// Gate of moves spec §5.4 over all labels: precision >= 0.95, recall >= 0.90,
+/// and no predictions in a case without labels. Returns the failures.
+pub fn gate_failures(total: &Evaluation, negatives_with_moves: &[String]) -> Vec<String> {
+    let mut failures = Vec::new();
+    let c = total.all;
+    if 100 * c.tp < 95 * (c.tp + c.fp) {
+        failures.push(format!("precision {} < 0.95", fmt_ratio(c.precision())));
+    }
+    if 10 * c.tp < 9 * (c.tp + c.fn_) {
+        failures.push(format!("recall {} < 0.90", fmt_ratio(c.recall())));
+    }
+    for name in negatives_with_moves {
+        failures.push(format!("negative case {name} has moves"));
+    }
+    failures
+}
+
+/// The prediction matched to each label, if any (moves spec §5.3).
+pub fn match_moves(predicted: &[MoveSpec], labels: &[MoveSpec]) -> Vec<Option<usize>> {
     // Candidate pairs (label index, prediction index, min-side Jaccard).
     let mut pairs: Vec<(usize, usize, (u64, u64))> = Vec::new();
     for (g, label) in labels.iter().enumerate() {
@@ -460,21 +550,7 @@ pub fn score(predicted: &[MoveSpec], labels: &[MoveSpec], mode: MoveMode) -> Cou
             pred_match[p] = Some(g);
         }
     }
-    let in_scope = |label: &MoveSpec| mode == MoveMode::Edited || !label.edited;
-    let mut counts = Counts::default();
-    for (g, label) in labels.iter().enumerate() {
-        match label_match[g] {
-            Some(_) if in_scope(label) => counts.tp += 1,
-            None if in_scope(label) => counts.fn_ += 1,
-            _ => {}
-        }
-    }
-    for m in &pred_match {
-        if m.is_none() {
-            counts.fp += 1;
-        }
-    }
-    counts
+    label_match
 }
 
 /// Formats an optional ratio with 4 decimals.

@@ -10,22 +10,23 @@ it follows are [`docs/spec/diff-document.md`](../../docs/spec/diff-document.md)
 
 ```
 tests/corpus/
-  text/NNN-slug/       20 text conformance cases
+  text/NNN-slug/       40 text conformance cases
     left.<ext>         left input, byte-exact
     right.<ext>        right input, byte-exact
     options.json       options object (diff-document.md section 9)
     case.md            one paragraph: what the case tests, what a correct result shows
     expected.json      golden Diff Document (added later, see below)
-  moved/NNN-slug/      40 labeled moved-block cases
+  moved/NNN-slug/      41 labeled moved-block cases
     left.txt
     right.txt
     options.json       same shape, with "detectMoves": true
     labels.json        human ground truth (moves spec section 5.2)
     expected.json      golden Diff Document (added later)
   tools/
-    make_text_cases.py   writes every text/ case
-    make_moved_cases.py  writes every moved/ case and its labels
-    check_labels.py      checks labels, inputs and options; must pass
+    make_text_cases.py      writes every text/ case
+    make_moved_cases.py     writes every moved/ case and its labels
+    check_labels.py         checks labels, inputs and options; must pass
+    check_text_expected.py  re-derives text/ expected.json facts from the inputs; must pass
 ```
 
 Cases are grouped by directory (`text/`, `moved/`, and later `smart-<name>/`
@@ -44,6 +45,7 @@ invisible characters survive. From the repository root:
 uv run --python 3.12 python tests/corpus/tools/make_text_cases.py
 uv run --python 3.12 python tests/corpus/tools/make_moved_cases.py
 uv run --python 3.12 python tests/corpus/tools/check_labels.py
+uv run --python 3.12 python tests/corpus/tools/check_text_expected.py
 ```
 
 The generators rewrite inputs, `options.json`, `case.md` and `labels.json`, and
@@ -54,8 +56,14 @@ endings or trimming whitespace in the inputs.
 
 `options.json` always spells out every key, even when it equals the default,
 and always pins `positionEncoding`, so a case keeps its meaning if a default
-changes. All cases use `"granularity": "line"`; word, char and smart
-granularity are provisional and get their own cases when their spec is final.
+changes. Most cases use `"granularity": "line"`. Cases 028 and 031-035 use
+`word`, `char` and `smart` (moves spec section 3) and pin their inline spans;
+the dedicated `smart-<name>/` cases of moves spec section 3.5 are still to come.
+
+Inputs are UTF-8 except in two cases: `text/021-invalid-utf8` (Latin-1 bytes)
+and `text/022-utf16-bom` (UTF-16LE with its BOM) are meant to fail decoding.
+`text/028-long-line` holds one line of about 200 KB; every other input stays
+under 20 KB.
 
 ## Expected results
 
@@ -65,24 +73,45 @@ It is regenerated, and reviewed again, whenever an algorithm ID changes
 (diff-document.md section 12). Until then the cases hold inputs and options
 only.
 
-Two consequences of schema 0.1.0 are deliberate:
+`check_text_expected.py` backs up that review for the `text/` cases. With its
+own code it recomputes file meta, per-side warnings, hunk tiling, the context
+rule, stats and the key equality of every `equal` line, and it turns every inline
+span back into text. For the granularity cases it compares that text with a
+table written by hand.
 
-- `text/018-log-timestamps-regex` uses a non-empty `ignore.regex`, which is
-  deferred to 0.2.0. Its correct 0.1.0 result is `status: "error"` with an
-  `unsupported-option` error. Its `case.md` also states the result expected
-  once masking ships.
-- Every `moved/` case sets `"detectMoves": true`, which 0.1.0 engines also
-  answer with `unsupported-option`. The moved cases are scored by the move
-  metrics runner against `labels.json`, not by byte conformance, until move
-  detection ships. The options `moveDetection` and `moveWhitespace` from the
-  moves spec are not yet part of the options shape, so the cases rely on their
-  defaults (`pure` and `allowIndentationChange`).
+These consequences of schema 0.2.0 are deliberate:
+
+- `text/021-invalid-utf8` and `text/022-utf16-bom` are `status: "error"`
+  documents with an `invalid-utf8` error: there is no binary fallback yet.
+- `text/018-log-timestamps-regex` and `text/038-regex-uuid-durations` mask
+  timestamps, request ids and durations with `ignore.regex`
+  (diff-document.md section 7.2.1). `text/039-regex-invalid` and
+  `text/040-regex-limit-exceeded` are error documents (`invalid-regex`,
+  `limit-exceeded`); 040 sits just above the pattern size limit, so it also
+  checks that 32-bit WASM decides the same way as native builds.
+- `text/036-blank-lines-ignored` runs the inputs of 026 with
+  `ignore.blankLines: true` and is `identical`; `text/037-blank-lines-near-changes`
+  shows `ignored` ops inside hunks next to real changes (section 7.3 step 3
+  and 7.4).
+- Every `moved/` case sets `"detectMoves": true` and has a golden
+  `expected.json` with real `moves[]` (`text.moves@1`). Separately, the
+  runner scores the predicted moves against `labels.json` (moves spec section
+  5) and fails when the gate is missed. Never edit `labels.json` to make the
+  metrics pass. `detectMoves` is the only move option (diff-document.md
+  section 9): the detected kinds follow the moves algorithm ID, and move keys
+  follow `ignore.whitespace` (moves spec section 4.4). Every moved case uses
+  `ignore.whitespace: "none"`, so indentation changes are allowed with a
+  constant delta and the rest of each line must match exactly.
 
 ## Labels
 
 `labels.json` follows section 5.2 of the moves spec exactly: an object with
-`moves` (ranges `{start, count}`, 1-based, lines split on LF and CRLF only, and
-`kind` `pure` or `edited`) and an optional `notes` string. Labels mark what the
+`moves` (ranges `{start, count}`, 1-based, and `kind` `pure` or `edited`) and
+an optional `notes` string. Lines are numbered by the Diff Document rule
+(diff-document.md section 7.2): LF, CRLF and a lone CR each end a line. The
+moved inputs contain no lone CR (the checker rejects one, because its git
+stand-in diff would treat it as content), so for these files the rule gives
+the same numbering as splitting on LF and CRLF. Labels mark what the
 spec says should be detected, with the boundaries a reader would choose; blank
 separator lines are left out. Anything a reader might call a move but that is
 below the minimum size (section 4.2) is explained in `notes`. Precision and

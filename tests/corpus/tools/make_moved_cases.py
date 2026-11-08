@@ -1013,7 +1013,7 @@ case(
 )
 
 # ---------------------------------------------------------------------------
-# Indentation changes (moveWhitespace "allowIndentationChange", the default)
+# Indentation changes (always allowed with a constant delta, moves spec 4.4)
 # ---------------------------------------------------------------------------
 
 case(
@@ -1223,7 +1223,7 @@ case(
 )
 
 # ---------------------------------------------------------------------------
-# Edited moves (labels of kind "edited"; scored only with moveDetection "edited")
+# Edited moves (labels of kind "edited"; scored only once edited moves ship)
 # Each block is designed so that no unchanged sub-run meets the pure minimum size,
 # so the edited label is the only sensible answer.
 # ---------------------------------------------------------------------------
@@ -1807,6 +1807,48 @@ func Sync(src, dst Store) error {
     "only 17 alphanumeric characters, so even with the indentation change allowed "
     "they are below the move minimum; this guards against reporting boilerplate as "
     "moved code.",
+)
+
+GO_STORE_HEAD = b("""
+package store
+
+import "time"
+""")
+GO_STORE_OPEN = b("""
+func Open(path string) (*Store, error) {
+  return open(path, time.Second)
+}
+""")
+GO_STORE_CLOSE = b("""
+func (s *Store) Close() error {
+  return s.file.Close()
+}
+""")
+case(
+    "041-edited-middle-line",
+    [("head", GO_STORE_HEAD), ("b0", BLANK), ("moved_l", b("""
+func (s *Store) Compact(maxAge time.Duration) int {
+  cutoff := s.clock.Now().Add(-maxAge)
+  removed := s.index.RemoveOlderThan(cutoff)
+  s.stats.Compactions++
+  s.stats.LastCompaction = s.clock.Now()
+  return removed
+}
+""")), ("b1", BLANK), ("open", GO_STORE_OPEN), ("b2", BLANK), ("close", GO_STORE_CLOSE)],
+    [("head", GO_STORE_HEAD), ("b1", BLANK), ("open", GO_STORE_OPEN), ("b2", BLANK), ("close", GO_STORE_CLOSE),
+     ("b0", BLANK), ("moved_r", b("""
+func (s *Store) Compact(maxAge time.Duration) int {
+  cutoff := s.clock.Now().Add(-maxAge)
+  removed := s.index.RemoveOlderThan(cutoff, s.log)
+  s.stats.Compactions++
+  s.stats.LastCompaction = s.clock.Now()
+  return removed
+}
+"""))],
+    [("moved_l", "moved_r", "edited")],
+    "Compact() moved to the end of the file and its middle line gained an argument. "
+    "The two lines above the edit and the four below it are each long enough to be a "
+    "pure move on their own; the edited line joins them into one edited move.",
 )
 
 

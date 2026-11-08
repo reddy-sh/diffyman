@@ -1,0 +1,3 @@
+# 033-smart-prose
+
+Runs `granularity: "smart"` on prose with four word changes in one `replace` of L2-3/R2-3. `colour`/`color` and `harbour`/`harbor` are one-word swaps of at least 4 graphemes that are similar enough for the sub-word pass (moves spec 3.3 step 3), so only the `u` is marked: left spans `[8, 9)` and `[23, 24)` on L2, and no right span on R2. `old`/`new` is under 4 graphemes and `lunch`/`dinner` is not similar enough, so they keep whole-word spans: left `[17, 20)` and `[38, 43)` on L3, right `[17, 20)` and `[38, 44)` on R3. Offsets are UTF-8 bytes. Most text is equal, so the noise cutoff does not apply.

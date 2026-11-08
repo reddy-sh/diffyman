@@ -33,6 +33,8 @@ Licensed under either of
 
 at your option.
 
+The exception is the Histogram diff copied from gix-imara-diff into `crates/diffyman-algo/src/line_diff/` (`histogram.rs` and the `histogram/` folder). Those files are Apache-2.0 only, so the `diffyman-algo` crate is licensed `(MIT OR Apache-2.0) AND Apache-2.0`. See [their NOTICE](crates/diffyman-algo/src/line_diff/histogram/NOTICE).
+
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
 
 ---

@@ -1,6 +1,6 @@
 //! Diff Document types for diffyman, plus their canonical JSON form and JSON Schema.
 //!
-//! The normative definition is `docs/spec/diff-document.md` (schema `0.1.0`).
+//! The normative definition is `docs/spec/diff-document.md` (schema `0.2.0`).
 //! This crate holds no diff logic:
 //!
 //! - [`document`] and [`options`]: serde types for the document and its options.
@@ -34,21 +34,10 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 
 const HEX: &[u8; 16] = b"0123456789abcdef";
 
-/// The document as a JSON value with the top-level keys in `remove` taken out.
-fn value_without(doc: &DiffDocument, remove: &[&str]) -> Result<Value, JcsError> {
-    let mut value = serde_json::to_value(doc)?;
-    if let Value::Object(map) = &mut value {
-        for key in remove {
-            map.remove(*key);
-        }
-    }
-    Ok(value)
-}
-
 /// Computes the document `id`: `"sha256:"` + hex SHA-256 of the JCS bytes of the
 /// document without its `id` and `provenance` keys (spec §5).
 pub fn compute_id(doc: &DiffDocument) -> Result<String, JcsError> {
-    let canonical = jcs::canonicalize(&value_without(doc, &["id", "provenance"])?)?;
+    let canonical = jcs::to_canonical_string_without(doc, &["id", "provenance"])?;
     Ok(format!("sha256:{}", sha256_hex(canonical.as_bytes())))
 }
 
@@ -60,12 +49,17 @@ pub fn to_canonical_json(doc: &DiffDocument) -> Result<String, JcsError> {
 /// The canonical JSON text of the document without `provenance`: the form two
 /// conformant engines must agree on byte for byte (spec §3).
 pub fn to_conformance_json(doc: &DiffDocument) -> Result<String, JcsError> {
-    jcs::canonicalize(&value_without(doc, &["provenance"])?)
+    jcs::to_canonical_string_without(doc, &["provenance"])
 }
 
-/// JSON Schema (2020-12) of the Diff Document.
+/// JSON Schema (2020-12) of the Diff Document as writers produce it: every
+/// field required (spec §4), even though readers accept missing fields.
 pub fn document_schema() -> Value {
-    serde_json::to_value(schemars::schema_for!(DiffDocument)).unwrap_or(Value::Null)
+    let schema = schemars::generate::SchemaSettings::draft2020_12()
+        .for_serialize()
+        .into_generator()
+        .into_root_schema_for::<DiffDocument>();
+    serde_json::to_value(schema).unwrap_or(Value::Null)
 }
 
 /// JSON Schema (2020-12) of the options input (`options.json`).
@@ -225,8 +219,120 @@ mod tests {
         let map = value.as_object_mut().unwrap();
         map.insert("futureField".to_owned(), serde_json::json!(1));
         map.insert("kind".to_owned(), serde_json::json!("hologram"));
+        map["left"]["futureMeta"] = serde_json::json!({"a": 1});
+        map["options"]["algorithm"] = serde_json::json!("diff3");
+        map["options"]["futureOption"] = serde_json::json!(true);
         let back: DiffDocument = serde_json::from_value(value).unwrap();
         assert_eq!(back.kind, Kind::Unknown);
+        assert_eq!(back.options.algorithm, Algorithm::Unknown);
+        assert_eq!(back.left, doc.left);
+    }
+
+    #[test]
+    fn readers_treat_missing_fields_as_null_or_empty() {
+        let doc = sample();
+        let mut value = serde_json::to_value(&doc).unwrap();
+        let map = value.as_object_mut().unwrap();
+        for key in ["stats", "hunks", "moves", "warnings", "extensions", "kind"] {
+            map.remove(key);
+        }
+        map["left"].as_object_mut().unwrap().remove("lineCount");
+        map["options"]
+            .as_object_mut()
+            .unwrap()
+            .remove("granularity");
+        map["options"]["ignore"]
+            .as_object_mut()
+            .unwrap()
+            .remove("whitespace");
+        let back: DiffDocument = serde_json::from_value(value).unwrap();
+        assert_eq!(back.stats, None);
+        assert!(back.hunks.is_empty() && back.moves.is_empty() && back.warnings.is_empty());
+        assert!(back.extensions.is_empty());
+        assert_eq!(back.kind, Kind::Unknown);
+        assert_eq!(back.left.line_count, None);
+        assert_eq!(back.left.sha256, doc.left.sha256);
+        assert_eq!(back.options.granularity, Granularity::Unknown);
+        assert_eq!(back.options.ignore.whitespace, WhitespaceMode::Unknown);
+        assert_eq!(back.options.context, doc.options.context);
+        assert_eq!(back.provenance, doc.provenance);
+
+        // Even an empty object reads; nothing in it is a known value.
+        let empty: DiffDocument = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty.status, Status::Unknown);
+        assert_eq!(empty.position_encoding, PositionEncoding::Unknown);
+        assert_eq!(empty.options, Options::unset());
+        assert!(empty.provenance.extra.is_empty());
+
+        // Nested objects read the same way.
+        let w: Warning = serde_json::from_str(r#"{"code": "bom-stripped"}"#).unwrap();
+        assert_eq!(
+            (w.code, w.severity, w.side),
+            (WarningCode::BomStripped, Severity::Unknown, None)
+        );
+        let m: Move = serde_json::from_str(r#"{"id": "m1", "kind": "teleport"}"#).unwrap();
+        assert_eq!(m.kind, MoveKind::Unknown);
+        assert_eq!(m.from.side, Side::Unknown);
+        assert!(m.from_ops.is_empty());
+    }
+
+    #[test]
+    fn unknown_values_are_never_written() {
+        assert!(serde_json::to_value(Kind::Unknown).is_err());
+        assert!(serde_json::to_value(Side::Unknown).is_err());
+        assert!(serde_json::to_value(WarningCode::Unknown).is_err());
+        assert!(serde_json::to_value(Algorithm::Unknown).is_err());
+        assert!(serde_json::to_value(PositionEncoding::Unknown).is_err());
+        let mut doc = sample();
+        doc.options.granularity = Granularity::Unknown;
+        assert!(to_canonical_json(&doc).is_err());
+        assert!(compute_id(&doc).is_err());
+    }
+
+    #[test]
+    fn move_shape_per_spec() {
+        let m = Move {
+            id: "m1".to_owned(),
+            kind: MoveKind::Pure,
+            from: MoveEnd {
+                side: Side::Left,
+                range: Range { start: 3, count: 4 },
+            },
+            to: MoveEnd {
+                side: Side::Right,
+                range: Range {
+                    start: 10,
+                    count: 4,
+                },
+            },
+            similarity: Similarity::ONE,
+            from_ops: vec![OpRef {
+                hunk: "h1".to_owned(),
+                op: 1,
+            }],
+            to_ops: vec![OpRef {
+                hunk: "h2".to_owned(),
+                op: 0,
+            }],
+        };
+        assert_eq!(
+            jcs::to_canonical_string(&m).unwrap(),
+            concat!(
+                r#"{"from":{"range":{"count":4,"start":3},"side":"left"},"#,
+                r#""fromOps":[{"hunk":"h1","op":1}],"id":"m1","kind":"pure","similarity":1,"#,
+                r#""to":{"range":{"count":4,"start":10},"side":"right"},"#,
+                r#""toOps":[{"hunk":"h2","op":0}]}"#
+            )
+        );
+        let edited = Move {
+            kind: MoveKind::Edited,
+            similarity: Similarity::from_basis_points(8750),
+            ..m
+        };
+        let text = jcs::to_canonical_string(&edited).unwrap();
+        assert!(text.contains(r#""similarity":0.875,"#), "{text}");
+        let back: Move = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, edited);
     }
 
     #[test]
@@ -262,17 +368,43 @@ mod tests {
 
     #[test]
     fn warning_code_strings_match_serde() {
-        for code in [
-            WarningCode::BomStripped,
-            WarningCode::MixedLineEndings,
-            WarningCode::NoNewlineAtEof,
-            WarningCode::Approximate,
-            WarningCode::RefineSkippedLimit,
-            WarningCode::InvalidUtf8,
-            WarningCode::UnsupportedOption,
-            WarningCode::LimitExceeded,
-        ] {
+        for code in WarningCode::ALL {
             assert_eq!(serde_json::to_value(code).unwrap(), code.as_str());
+            let back: WarningCode = serde_json::from_value(code.as_str().into()).unwrap();
+            assert_eq!(back, code);
+            assert_ne!(code.severity(), Severity::Unknown);
+        }
+    }
+
+    /// The §10 table of `docs/spec/diff-document.md` is authoritative: every
+    /// code, severity and message here must appear in it verbatim, and the
+    /// table must list no other code.
+    #[test]
+    fn warning_table_matches_spec() {
+        let spec = include_str!("../../../docs/spec/diff-document.md");
+        let section = spec
+            .split("## 10. Warnings and errors")
+            .nth(1)
+            .and_then(|s| s.split("\n## ").next())
+            .expect("spec has section 10");
+        let rows: Vec<Vec<&str>> = section
+            .lines()
+            .filter(|l| l.starts_with("| `"))
+            .map(|l| l.trim_matches('|').split(" | ").map(str::trim).collect())
+            .collect();
+        assert_eq!(rows.len(), WarningCode::ALL.len(), "{rows:?}");
+        for code in WarningCode::ALL {
+            let name = format!("`{}`", code.as_str());
+            let row = rows
+                .iter()
+                .find(|r| r[0] == name)
+                .unwrap_or_else(|| panic!("{name} missing from spec §10"));
+            let severity = match code.severity() {
+                Severity::Error => "error",
+                _ => "warning",
+            };
+            assert_eq!(row[1], severity, "{name}");
+            assert_eq!(row[3], format!("`{}`", code.message()), "{name}");
         }
     }
 
@@ -301,8 +433,20 @@ mod tests {
     fn schemas_generate() {
         let doc = document_schema();
         assert_eq!(doc["title"], "DiffDocument");
+        // Writers always emit every field (spec §4).
+        assert_eq!(doc["required"].as_array().unwrap().len(), 19);
+        assert_eq!(
+            doc["$defs"]["Move"]["required"].as_array().unwrap().len(),
+            7
+        );
         let text = doc.to_string();
         assert!(text.contains("positionEncoding"));
+        // 0.2.0 additions.
+        assert!(text.contains("\"ignored\""), "op kind `ignored`");
+        assert!(
+            text.contains("\"invalid-regex\""),
+            "warning code `invalid-regex`"
+        );
         assert!(
             !text.contains("\"unknown\""),
             "unknown variants must stay out of the schema"

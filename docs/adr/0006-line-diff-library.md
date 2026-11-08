@@ -6,8 +6,8 @@
 ## Context
 
 Every text, code and document diff ends in a line diff, so this choice sets most of diffyman's speed,
-memory use and output quality. The plan names two Apache-2.0 crates, `similar` and `imara-diff`, and sets
-a Phase 1 budget: a 1 GB log pair in ≤60 s with ≤2 GB peak memory on the development Mac. The output must
+memory use and output quality. Two Apache-2.0 crates were considered, `similar` and `imara-diff`. The
+Phase 1 budget is a 1 GB log pair in ≤60 s with ≤2 GB peak memory on the development Mac. The output must
 be deterministic, and algorithm IDs are versioned (`text.histogram@1`). Hostile inputs must not hang the
 engine.
 
@@ -76,3 +76,58 @@ Rejected:
   0.2.0 pruning issue upstream.
 - Revisit if upstream imara-diff ships the fixes and a work limit, or if `gix-imara-diff` stops being
   maintained.
+
+## Implementation notes
+
+Added in Phase 1, increment 1a.
+
+- **Code.** `crates/diffyman-algo/src/line_diff.rs` holds the IDs, the budget and the `approximate`
+  rule. The Histogram copy is `crates/diffyman-algo/src/line_diff/histogram.rs` plus
+  `crates/diffyman-algo/src/line_diff/histogram/lcs.rs` and
+  `crates/diffyman-algo/src/line_diff/histogram/list_pool.rs`, with upstream headers kept and
+  `crates/diffyman-algo/src/line_diff/histogram/NOTICE` listing the changes.
+- **Work units.** One per token added to the histogram, one per right-side position scanned, and one
+  per occurrence visited plus one per step of extending a match. The counter is checked before each
+  region and after each occurrence, so it can pass the budget by at most one extension. No clock is
+  read.
+- **Budget.** `max(HISTOGRAM_WORK_MIN, HISTOGRAM_WORK_PER_LINE × (n + m))` with
+  `HISTOGRAM_WORK_MIN = 4,000,000` and `HISTOGRAM_WORK_PER_LINE = 128`, where `n` and `m` are the line
+  counts after the common prefix and suffix are trimmed. Each level of anchor nesting costs about
+  2 units per line, so 128 allows 64 levels, more than balanced nesting needs at the 2^31-line maximum.
+  Past the budget, every region not yet diffed goes to `gix-imara-diff` Myers, the same Myers that
+  Histogram already uses for very repetitive regions. The left-part recursion is an explicit stack
+  visited in the same order, so deep inputs cannot overflow the call stack.
+- **Warnings.** Item 3 names an `algorithm_fallback` warning, but the spec's warning table (§10) has
+  no such code, so none is emitted. The budget does not set `approximate` either: Histogram never
+  promises a minimal result, and the Myers part is covered by the existing edit-count rule
+  (`is_approximate`, more than 500 changed lines whose key occurs on the other side). Callers can see a
+  fallback through `line_diff::AlignReport`, which is not part of the document.
+- **Patience limit.** An input over 256 MiB (268,435,456 bytes) on either side gives a
+  `limit-exceeded` error and `status: "error"`, checked before any diffing.
+- **IDs.** They stay `@1`: no version was released with `imara-diff` 0.2.0, and all 60 corpus cases
+  give byte-identical output without re-blessing, in the CLI, Python and WASM.
+
+Measurements on the development Mac (release build, line diff only, without reading and interning;
+`cargo run --release -p diffyman-algo --example line_diff_work -- LEFT RIGHT --unguarded`):
+
+| Case | Lines after trim | Work per line | Fell back | Histogram | Myers | Same as unguarded |
+|---|---|---|---|---|---|---|
+| 1 GB log | 19.3 M | 26.3 | no | 0.33 s | 0.18 s | yes |
+| 100 MB log | 1.93 M | 18.9 | no | 0.02 s | 0.01 s | yes |
+| 50 MB source | 3.62 M | 18.0 | no | 0.11 s | 0.05 s | yes |
+| Low-frequency lines, pairs swapped | 400 k | 32.3 | no | 0.03 s | 0.38 s | yes |
+| 5 M copies of one line | 10.0 M | 1.5 | no | 0.32 s | 0.33 s | yes |
+| All lines different | 2.0 M | 1.0 | no | 0.002 s | 0.005 s | yes |
+| 200 k unique lines, pairs swapped | 400 k | 128 (budget) | yes | **0.46 s** (unguarded: 33 s) | 0.38 s | no |
+
+The 1 GB pair through the CLI (`diffyman diff --json`, release) takes 10.4 s wall time with 5.2 GB
+max RSS and 5.7 GB peak footprint, and reports the same 48,485 changes (196,662 changed lines) as the
+spike. Time is within budget; memory is not, because the CLI reads both files into memory and the
+engine keeps a record and an owned comparison key per line. Large-file mode (memory-mapped input and
+borrowed keys) is the next increment.
+
+Regression tests are in `crates/diffyman-algo/tests/line_diff_guard.rs`: 5 M identical lines with 10
+edits, swapped pairs (budget hit, linear work growth, unguarded work quadratic), the low-frequency and
+all-different cases, and random inputs checked for validity, equality with upstream Histogram below the
+budget, and Myers minimality when `approximate` is not set. The full-size swapped-pairs timing check
+runs in release with `cargo test --release -p diffyman-algo --test line_diff_guard -- --ignored`.

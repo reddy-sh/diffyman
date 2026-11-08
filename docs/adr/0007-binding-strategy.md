@@ -5,7 +5,7 @@
 
 ## Context
 
-diffyman promises the same Diff Document in every language (ADR 0002). The plan lists rich native
+diffyman promises the same Diff Document in every language (ADR 0002). diffyman ships rich native
 bindings (Python, Node, browser WASM, Java, Swift) and one C ABI for the rest. Each binding could map the
 document into native objects in Rust (`#[pyclass]`, `serde-wasm-bindgen`, JNI object builders), or it
 could pass the engine's canonical JSON through unchanged. Spike B

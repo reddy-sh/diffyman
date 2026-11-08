@@ -1,0 +1,7 @@
+name: sensor-12
+zone: north
+   
+mode: active
+label: ok 
+note: keep
+end

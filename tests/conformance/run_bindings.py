@@ -17,10 +17,10 @@ and checks, per docs/spec/diff-document.md section 3, that
      the same way), and
   4. the CLI exit code matches the status (0 identical, 1 different, 2 error).
 
-Move detection is deferred in schema 0.1.0, so every moved case is an error
-document. Unless --golden-only is given, the moved inputs also run a second
-time with "detectMoves": false; those extra cases have no expected.json and
-must only agree byte for byte across the three surfaces.
+The moved cases run with "detectMoves": true and carry real moves[]. Unless
+--golden-only is given, the moved inputs also run a second time with
+"detectMoves": false; those extra cases have no expected.json and must only
+agree byte for byte across the three surfaces.
 
 Run from the repository root after building the CLI, the Python binding and the
 WASM package (see docs/spikes/B-binding-round-trip.md):
@@ -111,10 +111,9 @@ def list_cases(root: pathlib.Path) -> list[Case]:
 def line_only_variants(cases: list[Case], workdir: pathlib.Path) -> list[Case]:
     """The moved cases again with "detectMoves": false.
 
-    Move detection is deferred in schema 0.1.0, so every moved case is an
-    `unsupported-option` error document. Re-running the same inputs as a plain
-    line diff exercises real hunks (CRLF, CJK, right-to-left text) on all three
-    surfaces. These have no expected.json; only cross-surface agreement counts.
+    Re-running the moved inputs as a plain line diff checks, on all three
+    surfaces, the same hunks without move detection (CRLF, CJK, right-to-left
+    text). These have no expected.json; only cross-surface agreement counts.
     """
     extra = []
     for case in cases:

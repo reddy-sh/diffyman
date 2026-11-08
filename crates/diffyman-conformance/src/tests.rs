@@ -113,31 +113,69 @@ fn broken_cases_are_errors() {
 #[test]
 fn moved_cases_report_metrics() {
     let scratch = Scratch::new("moved");
-    let left = "fn alpha() {\n  one_two_three();\n  four_five_six();\n}\nfn beta() {}\n";
-    let right = "fn beta() {}\nfn alpha() {\n  one_two_three();\n  four_five_six();\n}\n";
-    let labels = r#"{"moves": [{"left": {"start": 1, "count": 4}, "right": {"start": 2, "count": 4}, "kind": "pure"}], "notes": "alpha moved down"}"#;
+    // beta() is longer, so the line diff keeps it in place and alpha() moves.
+    let alpha = "fn alpha() {\n  one_two_three();\n  four_five_six();\n}\n";
+    let beta = "fn beta() {\n  seven_eight();\n  nine_ten();\n  eleven();\n}\n";
+    let left = format!("{alpha}{beta}");
+    let right = format!("{beta}{alpha}");
+    let labels = r#"{"moves": [{"left": {"start": 1, "count": 4}, "right": {"start": 6, "count": 4}, "kind": "pure"}], "notes": "alpha moved down"}"#;
     let dir = write_case(
         &scratch.0,
         "moved",
         "simple",
         &[
-            ("left.rs", left),
-            ("right.rs", right),
-            ("options.json", "{}"),
+            ("left.rs", &left),
+            ("right.rs", &right),
+            ("options.json", r#"{"detectMoves": true}"#),
             ("labels.json", labels),
         ],
     );
     let result = run_case("moved/simple", &dir, &RunOptions::default());
     assert_eq!(result.outcome, Outcome::New);
-    // The Phase 0 stub predicts nothing: one false negative.
+    let eval = result.metrics.unwrap();
     assert_eq!(
-        result.metrics,
-        Some(Counts {
-            tp: 0,
+        eval.all,
+        Counts {
+            tp: 1,
             fp: 0,
-            fn_: 1
-        })
+            fn_: 0
+        }
     );
+    assert_eq!((eval.kind_ok, eval.predicted, eval.labels), (1, 1, 1));
+}
+
+#[test]
+fn evaluation_gate_and_categories() {
+    let labels = [mv((1, 4), (10, 4), false), mv((20, 2), (30, 2), true)];
+    let predicted = [mv((1, 4), (10, 4), false), mv((20, 2), (30, 3), false)];
+    let e = evaluate(&predicted, &labels);
+    assert_eq!(e.all.tp, 2);
+    assert_eq!(
+        e.pure_only,
+        Counts {
+            tp: 1,
+            fp: 0,
+            fn_: 0
+        }
+    );
+    // The second pair matches with the wrong kind and inexact boundaries.
+    assert_eq!((e.kind_ok, e.exact), (1, 1));
+    assert!(gate_failures(&e, &[]).is_empty());
+    let mut total = e;
+    total.add(&evaluate(&[mv((50, 3), (60, 3), false)], &[]));
+    let failures = gate_failures(&total, &["moved/032-neg-x".to_owned()]);
+    assert_eq!(failures.len(), 2, "{failures:?}");
+    assert!(failures[0].starts_with("precision"));
+    assert!(failures[1].contains("032-neg-x"));
+    let missed = evaluate(&[], &labels);
+    assert!(
+        gate_failures(&missed, &[])
+            .iter()
+            .any(|f| f.starts_with("recall"))
+    );
+    assert_eq!(category("moved/001-pure-function-down"), "pure");
+    assert_eq!(category("moved/040-neg-repeated-short-lines"), "neg");
+    assert_eq!(category("odd"), "other");
 }
 
 #[test]
@@ -163,11 +201,13 @@ fn label_validation() {
 }
 
 #[test]
-fn label_lines_ignore_lone_cr() {
+fn label_lines_follow_the_document_line_rule() {
     assert_eq!(label_line_count(b""), 0);
     assert_eq!(label_line_count(b"a\nb"), 2);
     assert_eq!(label_line_count(b"a\r\nb\n"), 2);
-    assert_eq!(label_line_count(b"a\rb\n"), 1);
+    // A lone CR ends a line (Diff Document spec §7.2).
+    assert_eq!(label_line_count(b"a\rb\n"), 2);
+    assert_eq!(label_line_count(b"a\r\n\r"), 2);
 }
 
 #[test]

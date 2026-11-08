@@ -1,0 +1,3 @@
+# 035-refine-skipped-limit
+
+Runs `granularity: "smart"`. Lines 2-102 (101 lines) all change, giving one `replace` of 101 lines per side, which is above `REFINE_MAX_LINES` (100, moves spec 3.4). Eight equal lines later, line 111 changes `101` to `102`. A correct result has two hunks: h1 with equal L1, the 101-line `replace` with `inline: []`, and equal L103-105; h2 with equal L108-110, a one-line `replace` at L111 with whole-word spans `[12, 15)` on both sides (3 graphemes, so no sub-word pass), and equal L112. `warnings` is exactly one `refine-skipped-limit` with `side: null`, and the status stays `different`.

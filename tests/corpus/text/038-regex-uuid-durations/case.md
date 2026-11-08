@@ -1,0 +1,3 @@
+# 038-regex-uuid-durations
+
+Two request logs in which every request id (a UUID) and every duration differs. `ignore.regex` holds two patterns: lowercase UUIDs, and a duration at the end of the line. Each match is replaced with its pattern's placeholder (spec 7.2.1), so lines 1, 3, 4 and 6 compare equal. Two lines must still differ: L2 changes the status (`200` to `404`), and on the right L5 has an empty request id (`req= in 6 ms`). A placeholder keeps the presence of the masked value, so L5 differs; removing the matches instead would make the two L5 lines equal and hide the missing id. With `context: 1` a correct result has one hunk covering L1-6: equal L1, `replace` L2, equal L3-4, `replace` L5, equal L6; `linesUnchanged: 4`, `similarity: 0.6667`.

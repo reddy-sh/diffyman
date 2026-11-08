@@ -2,8 +2,9 @@
 //!
 //! An options object with an unknown key, a wrong type (including `null`) or an
 //! unknown enum value is invalid and is rejected with [`Error::InvalidOptions`].
-//! A valid but unsupported value is not an error here: the engine returns a
-//! document with an `unsupported-option` error instead (see [`is_supported`]).
+//! An `ignore.regex` pattern is only checked when the diff runs: one that does
+//! not compile, or is over a limit, gives a document with an `invalid-regex` or
+//! `limit-exceeded` error instead (spec §9).
 
 use diffyman_model::{
     Algorithm, Granularity, IgnoreOptions, MAX_CONTEXT, Options, OptionsInput, PositionEncoding,
@@ -76,6 +77,16 @@ pub fn resolve_options(input: &OptionsInput) -> Result<Options, Error> {
             .unwrap_or(defaults.position_encoding),
         detect_moves: input.detect_moves.unwrap_or(defaults.detect_moves),
     };
+    validate_options(&options)?;
+    Ok(options)
+}
+
+/// Checks resolved options with the same rules as the JSON path: an `Unknown`
+/// enum value or a `context` above 2^31 − 1 is [`Error::InvalidOptions`].
+///
+/// The typed API ([`crate::diff_document`]) calls this, so a caller-built
+/// [`Options`] can never produce a document that echoes `"unknown"`.
+pub fn validate_options(options: &Options) -> Result<(), Error> {
     let unknown = |what: &str| Err(Error::InvalidOptions(format!("unknown value for {what}")));
     if options.algorithm == Algorithm::Unknown {
         return unknown("algorithm");
@@ -89,15 +100,12 @@ pub fn resolve_options(input: &OptionsInput) -> Result<Options, Error> {
     if options.position_encoding == PositionEncoding::Unknown {
         return unknown("positionEncoding");
     }
-    Ok(options)
-}
-
-/// False when a valid option value is deferred in this engine version:
-/// `ignore.blankLines: true`, a non-empty `ignore.regex` or `detectMoves: true`.
-///
-/// `granularity` values other than `line` are provisional and supported.
-pub fn is_supported(options: &Options) -> bool {
-    !options.ignore.blank_lines && options.ignore.regex.is_empty() && !options.detect_moves
+    if options.context > MAX_CONTEXT {
+        return Err(Error::InvalidOptions(format!(
+            "context must be 0 to {MAX_CONTEXT}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -147,20 +155,67 @@ mod tests {
     }
 
     #[test]
-    fn deferred_values_are_unsupported() {
-        assert!(is_supported(&Options::default()));
-        for deferred in [
-            r#"{"ignore": {"blankLines": true}}"#,
-            r#"{"ignore": {"regex": ["x"]}}"#,
-            r#"{"detectMoves": true}"#,
-        ] {
+    fn typed_options_are_validated_like_json() {
+        assert!(validate_options(&Options::default()).is_ok());
+        let max = Options {
+            context: MAX_CONTEXT,
+            ..Options::default()
+        };
+        assert!(validate_options(&max).is_ok());
+        let bad = [
+            Options {
+                algorithm: Algorithm::Unknown,
+                ..Options::default()
+            },
+            Options {
+                granularity: Granularity::Unknown,
+                ..Options::default()
+            },
+            Options {
+                ignore: IgnoreOptions {
+                    whitespace: WhitespaceMode::Unknown,
+                    ..IgnoreOptions::default()
+                },
+                ..Options::default()
+            },
+            Options {
+                position_encoding: PositionEncoding::Unknown,
+                ..Options::default()
+            },
+            Options {
+                context: MAX_CONTEXT + 1,
+                ..Options::default()
+            },
+            Options {
+                context: u32::MAX,
+                ..Options::default()
+            },
+            Options::unset(),
+        ];
+        for options in bad {
             assert!(
-                !is_supported(&parse_options(deferred).unwrap()),
-                "{deferred}"
+                matches!(validate_options(&options), Err(Error::InvalidOptions(_))),
+                "accepted {options:?}"
             );
         }
-        assert!(is_supported(
-            &parse_options(r#"{"granularity": "smart"}"#).unwrap()
-        ));
+    }
+
+    #[test]
+    fn regex_patterns_are_kept_in_order_and_checked_later() {
+        let o =
+            parse_options(r#"{"ignore": {"regex": ["b", "(", "a"], "blankLines": true}}"#).unwrap();
+        assert_eq!(o.ignore.regex, ["b", "(", "a"]);
+        assert!(o.ignore.blank_lines);
+        for bad in [
+            r#"{"ignore": {"regex": "a"}}"#,
+            r#"{"ignore": {"regex": [1]}}"#,
+            r#"{"ignore": {"regex": [null]}}"#,
+            r#"{"ignore": {"blankLines": "yes"}}"#,
+        ] {
+            assert!(
+                matches!(parse_options(bad), Err(Error::InvalidOptions(_))),
+                "accepted {bad}"
+            );
+        }
     }
 }
