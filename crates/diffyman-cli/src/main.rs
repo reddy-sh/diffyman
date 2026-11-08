@@ -45,6 +45,8 @@ const EXIT_CODES: &str = "Exit codes: 0 identical, 1 different or partial, 2 err
 #[derive(Debug, Parser)]
 #[command(
     name = "diffyman",
+    // Help and errors always say `diffyman`, also where the file is `diffyman.exe`.
+    bin_name = "diffyman",
     version,
     about = "Diff any file: text, binary, folders and archives.",
     long_about = "Diff any file: text, binary, folders and archives. Prints a unified diff, \
