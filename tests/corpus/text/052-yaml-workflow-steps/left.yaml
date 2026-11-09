@@ -1,0 +1,13 @@
+name: build
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: lint
+        run: make lint
+      - name: unit tests
+        run: make test
+      - name: upload coverage
+        run: make coverage

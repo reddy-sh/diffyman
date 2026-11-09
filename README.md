@@ -4,7 +4,7 @@
 
 diffyman is an open-source, headless diff engine. One Rust core compares two files or folders and always returns the same versioned JSON result, the **Diff Document**. You get that result from a command-line tool, from language bindings (Python, Java, JavaScript/WASM and more), and from a local REST API.
 
-> **Status:** early development — the engine compares text, binary files, folders and archives, with a CLI and Python and WASM bindings. Nothing is published to a package registry yet; see [Usage](#usage) to build from source, and [docs/STATUS.md](docs/STATUS.md).
+> **Status:** early development — the engine compares text, binary files, folders and archives, with a CLI, bindings for Python, Node.js, Java and the browser (WASM and React), and a C ABI. Nothing is published to a package registry yet; see [Usage](#usage) and [Use it from your language](#use-it-from-your-language) to build from source, and [docs/STATUS.md](docs/STATUS.md).
 
 ## Why
 
@@ -36,6 +36,21 @@ diffyman git install                          # prints the git difftool config; 
 ```
 
 See the [command-line reference](docs/cli.md) for every command, flag and output format.
+
+## Use it from your language
+
+Every surface returns the same Diff Document, byte for byte apart from `provenance`. Each quickstart builds from source, diffs two files, prints the status and the changed lines, and handles errors; [`docs/quickstart/check_examples.py`](docs/quickstart/check_examples.py) runs every example in them against local builds.
+
+| Language | Quickstart | Package (not published yet) | Reference |
+|---|---|---|---|
+| Command line | [CLI](docs/quickstart/cli.md) | crate `diffyman-cli` | [CLI reference](docs/cli.md) |
+| Python 3.11+ | [Python](docs/quickstart/python.md) | `diffyman` (PyO3, abi3 wheel) | [bindings/python](bindings/python/README.md) |
+| Node.js 22+ | [Node.js](docs/quickstart/node.md) | `@diffyman/node` (Node-API) | [bindings/node](bindings/node/README.md) |
+| Java 17+ | [Java](docs/quickstart/java.md) | `sh.reddy.diffyman:diffyman` (JNI) | [bindings/java](bindings/java/README.md) |
+| Browser, React | [Browser and React](docs/quickstart/browser-react.md) | `@diffyman/react` over the WASM build | [bindings/wasm/react](bindings/wasm/react/README.md), [example app](examples/amplify-react) |
+| C, and Go, C#, Zig, Swift through C | [C](docs/quickstart/c.md) | `diffyman-ffi` (shared or static library) | [crates/diffyman-ffi](crates/diffyman-ffi/README.md) |
+
+The document's fields, options and warnings are defined in the [Diff Document specification](docs/spec/diff-document.md).
 
 ## Roadmap
 

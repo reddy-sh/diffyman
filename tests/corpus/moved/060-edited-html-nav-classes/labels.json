@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 8,
+        "count": 5
+      },
+      "right": {
+        "start": 4,
+        "count": 5
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "An HTML navigation list moved from below the main content to above it, and its CSS class names changed from nav to menu on every line except the closing `</ul>`. Every line keeps its links and text, so the block similarity is high and it is one edited move."
+}

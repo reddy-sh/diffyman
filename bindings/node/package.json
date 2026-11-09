@@ -1,0 +1,65 @@
+{
+  "name": "@diffyman/node",
+  "version": "0.0.1",
+  "description": "Node.js binding for diffyman, a headless \"diff any file\" engine: one canonical JSON Diff Document for text, binary files, folders and archives.",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "author": "Sankara Reddy Telukutla <sankara@reddy.sh> (https://reddy.sh)",
+  "homepage": "https://reddy.sh",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/reddy-sh/diffyman.git",
+    "directory": "bindings/node"
+  },
+  "keywords": [
+    "diff",
+    "napi",
+    "json",
+    "binary-diff",
+    "folder-diff"
+  ],
+  "type": "commonjs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "types/document.d.ts",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "napi": {
+    "binaryName": "diffyman",
+    "packageName": "@diffyman/node",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release --no-js --no-dts-header --dts native.d.ts -- --locked",
+    "build:debug": "napi build --platform --no-js --dts native.d.ts -- --locked",
+    "test": "node --test \"test/*.test.mjs\"",
+    "types": "node scripts/generate-types.mjs",
+    "types:check": "node scripts/generate-types.mjs --check && tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.10.12",
+    "@types/node": "22.20.5",
+    "typescript": "6.0.3"
+  }
+}

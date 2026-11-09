@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 14,
+        "count": 3
+      },
+      "right": {
+        "start": 4,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A shell script whose log() helper was defined after the call to deploy, so the script failed; the fix moves log() above deploy(). The label is the three-line function."
+}

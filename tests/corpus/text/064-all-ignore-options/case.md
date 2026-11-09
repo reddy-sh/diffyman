@@ -1,0 +1,3 @@
+# 064-all-ignore-options
+
+Every ignore option at once: `ignore.regex` masks the leading timestamps, `ignore.whitespace: "all"` removes the spacing differences, `ignore.case: true` folds the capitalization and `ignore.blankLines: true` turns blank-only changes into `ignored` ops. Only the last line has a real change (`on 0.0.0.0` appended). A correct result has one hunk: equal L1/R1, `ignored` L2 (a blank line removed), equal L3/R2, `ignored` R3-4 (two blank lines added), equal L4/R5 and `replace` L5/R6. Stats: `changeCount: 1`, `linesUnchanged: 3` and `similarity: 0.75` = 2 x 3 / ((5 - 1) + (6 - 2)), the ignored lines left out of the denominator.

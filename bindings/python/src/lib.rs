@@ -94,6 +94,14 @@ fn read_path(
     Ok(PyBytes::new(py, &data).unbind())
 }
 
+/// Returns the JSON Schema (2020-12) of the Diff Document as pretty-printed
+/// JSON text: the same text `diffyman schema` prints, without its final
+/// newline. `tools/gen_types.py` generates `diffyman.types` from it.
+#[pyfunction]
+fn document_schema() -> String {
+    format!("{:#}", diffyman::model::document_schema())
+}
+
 fn to_py_error(e: &Error) -> PyErr {
     match e {
         // `Unsupported` needs a build without archive support; this binding
@@ -116,6 +124,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(diff, m)?)?;
     m.add_function(wrap_pyfunction!(diff_paths, m)?)?;
     m.add_function(wrap_pyfunction!(read_path, m)?)?;
+    m.add_function(wrap_pyfunction!(document_schema, m)?)?;
     m.add("DiffymanError", m.py().get_type::<DiffymanError>())?;
     m.add("MAX_STREAM_BYTES", diffyman::MAX_STREAM_BYTES)?;
     m.add("ENGINE_VERSION", diffyman::ENGINE_VERSION)?;

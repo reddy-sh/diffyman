@@ -62,7 +62,7 @@ BLANK = [""]
 CASES: list[dict] = []
 
 
-def case(slug, left, right, moves, notes, *, crlf=False, ignore=None):
+def case(slug, left, right, moves, notes, *, crlf=False, ignore=None, ext="txt"):
     """Register a case.
 
     left/right: lists of (segment name, lines). Names must be unique per side.
@@ -70,6 +70,7 @@ def case(slug, left, right, moves, notes, *, crlf=False, ignore=None):
     names spans consecutive segments.
     crlf: True for CRLF on both sides, "right" for CRLF on the right side only.
     ignore: keys that replace the defaults of options.ignore.
+    ext: the extension of left.<ext> and right.<ext> (moves spec 5.1).
     """
     CASES.append(
         {
@@ -80,6 +81,7 @@ def case(slug, left, right, moves, notes, *, crlf=False, ignore=None):
             "notes": notes,
             "crlf": crlf,
             "ignore": ignore or {},
+            "ext": ext,
         }
     )
 
@@ -2075,6 +2077,758 @@ case(
 
 
 # ---------------------------------------------------------------------------
+# More languages and formats (048-068): Go, Java, SQL, CSS, Markdown, YAML,
+# C with CRLF, shell, TypeScript, Python, Rust, HTML, JSON, INI; boundary
+# cases for the minimum move size; one large block.
+# ---------------------------------------------------------------------------
+
+
+def alnum_count(lines: list[str]) -> int:
+    return sum(ch.isalnum() for line in lines for ch in line)
+
+
+GO_SRV_HEAD = b("""
+package server
+
+import (
+  "encoding/json"
+  "net/http"
+)
+""")
+GO_SRV_HEALTH = b("""
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+  w.Header().Set("Content-Type", "application/json")
+  json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+""")
+GO_SRV_ORDERS = b("""
+func handleOrders(w http.ResponseWriter, r *http.Request) {
+  if r.Method != http.MethodGet {
+    http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+    return
+  }
+  orders, err := store.ListOrders(r.Context())
+  if err != nil {
+    http.Error(w, err.Error(), http.StatusInternalServerError)
+    return
+  }
+  json.NewEncoder(w).Encode(orders)
+}
+""")
+GO_SRV_ROUTES = b("""
+func Routes(mux *http.ServeMux) {
+  mux.HandleFunc("/health", handleHealth)
+  mux.HandleFunc("/orders", handleOrders)
+}
+""")
+case(
+    "048-pure-go-routes-up",
+    [("head", GO_SRV_HEAD), ("b0", BLANK), ("health", GO_SRV_HEALTH), ("b1", BLANK), ("orders", GO_SRV_ORDERS),
+     ("b2", BLANK), ("routes", GO_SRV_ROUTES)],
+    [("head", GO_SRV_HEAD), ("b0", BLANK), ("routes", GO_SRV_ROUTES), ("b2", BLANK), ("health", GO_SRV_HEALTH),
+     ("b1", BLANK), ("orders", GO_SRV_ORDERS)],
+    [("routes", "routes", "pure")],
+    "A Go file: Routes() moved from the end of the file to just below the imports, above "
+    "the handlers it registers. The two handlers stay in place.",
+    ext="go",
+)
+
+JAVA_MONEY_HEAD = b("""
+public final class Money {
+  private final long cents;
+  private final String currency;
+
+  public Money(long cents, String currency) {
+    this.cents = cents;
+    this.currency = currency;
+  }
+""")
+JAVA_MONEY_TOSTRING = b("""
+  @Override
+  public String toString() {
+    return String.format("%d.%02d %s", cents / 100, cents % 100, currency);
+  }
+""")
+JAVA_MONEY_PLUS = b("""
+  public Money plus(Money other) {
+    if (!currency.equals(other.currency)) {
+      throw new IllegalArgumentException("currency mismatch: " + other.currency);
+    }
+    return new Money(cents + other.cents, currency);
+  }
+""")
+case(
+    "049-pure-java-method-down",
+    [("head", JAVA_MONEY_HEAD), ("b0", BLANK), ("tostring", JAVA_MONEY_TOSTRING), ("b1", BLANK),
+     ("plus", JAVA_MONEY_PLUS), ("tail", ["}"])],
+    [("head", JAVA_MONEY_HEAD), ("b1", BLANK), ("plus", JAVA_MONEY_PLUS), ("b0", BLANK),
+     ("tostring", JAVA_MONEY_TOSTRING), ("tail", ["}"])],
+    [("tostring", "tostring", "pure")],
+    "A Java class: toString() with its @Override annotation moved below plus(), to the end "
+    "of the class. The label runs from the annotation to the method's closing brace.",
+    ext="java",
+)
+
+SQL_CUSTOMERS = b("""
+CREATE TABLE customers (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE
+);
+""")
+SQL_ORDERS = b("""
+CREATE TABLE orders (
+  id INTEGER PRIMARY KEY,
+  customer_id INTEGER NOT NULL REFERENCES customers (id),
+  placed_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open'
+);
+""")
+SQL_VIEW = b("""
+CREATE VIEW open_orders AS
+SELECT o.id, o.placed_at, c.name
+FROM orders o
+JOIN customers c ON c.id = o.customer_id
+WHERE o.status = 'open';
+""")
+case(
+    "050-pure-sql-view-after-table",
+    [("customers", SQL_CUSTOMERS), ("b0", BLANK), ("view", SQL_VIEW), ("b1", BLANK), ("orders", SQL_ORDERS)],
+    [("customers", SQL_CUSTOMERS), ("b1", BLANK), ("orders", SQL_ORDERS), ("b0", BLANK), ("view", SQL_VIEW)],
+    [("view", "view", "pure")],
+    "A SQL schema: the open_orders view moved below the orders table it reads, so the "
+    "script runs in order. Both tables share the line `  id INTEGER PRIMARY KEY,` and the "
+    "closing `);`, which the line diff matches in place.",
+    ext="sql",
+)
+
+CSS_BUTTON = b("""
+.button {
+  padding: 8px 16px;
+  border: 1px solid #3a6;
+  background: #4b7;
+}
+""")
+CSS_DISABLED = b("""
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+""")
+CSS_HOVER = b("""
+.button:hover {
+  background: #3a6;
+  border-color: #295;
+  color: #fff;
+}
+""")
+CSS_CARD = b("""
+.card {
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+""")
+case(
+    "051-pure-css-rule-down",
+    [("button", CSS_BUTTON), ("b0", BLANK), ("disabled", CSS_DISABLED), ("b1", BLANK), ("hover", CSS_HOVER),
+     ("b2", BLANK), ("card", CSS_CARD)],
+    [("button", CSS_BUTTON), ("b1", BLANK), ("hover", CSS_HOVER), ("b0", BLANK), ("disabled", CSS_DISABLED),
+     ("b2", BLANK), ("card", CSS_CARD)],
+    [("disabled", "disabled", "pure")],
+    "A stylesheet: the .button:disabled rule moved below .button:hover, so it wins when "
+    "both apply. The hover rule is one line longer, so the line diff keeps it in place and "
+    "reports the disabled rule as the moved block.",
+    ext="css",
+)
+
+MD_GUIDE_TITLE = b("""
+# Field notes app
+""")
+MD_GUIDE_USAGE = b("""
+## Usage
+Open the app, pick a notebook and tap the plus button to start a note.
+Notes are saved on every keystroke and synced when the device is online.
+Long-press a note to pin it, share it or move it to another notebook.
+""")
+MD_GUIDE_INSTALL = b("""
+## Installation
+Download the package for your platform from the releases page.
+On first start the app asks where to keep its notebooks.
+""")
+MD_GUIDE_LICENSE = b("""
+## License
+MIT or Apache-2.0, at your choice.
+""")
+case(
+    "052-pure-markdown-section-up",
+    [("title", MD_GUIDE_TITLE), ("b0", BLANK), ("usage", MD_GUIDE_USAGE), ("b1", BLANK), ("install", MD_GUIDE_INSTALL),
+     ("b2", BLANK), ("license", MD_GUIDE_LICENSE)],
+    [("title", MD_GUIDE_TITLE), ("b0", BLANK), ("install", MD_GUIDE_INSTALL), ("b1", BLANK), ("usage", MD_GUIDE_USAGE),
+     ("b2", BLANK), ("license", MD_GUIDE_LICENSE)],
+    [("install", "install", "pure")],
+    "A Markdown README: the Installation section (heading and two lines) moved above "
+    "Usage. Usage is one line longer, so the line diff keeps it in place and Installation "
+    "is the moved block.",
+    ext="md",
+)
+
+YAML_BUILD = b("""
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: make build
+""")
+YAML_LINT = b("""
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: make lint
+""")
+YAML_TEST = b("""
+  test:
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - run: make test
+      - run: make integration
+""")
+case(
+    "053-pure-yaml-job-down",
+    [("head", ["name: ci"]), ("build", YAML_BUILD), ("lint", YAML_LINT), ("test", YAML_TEST)],
+    [("head", ["name: ci"]), ("build", YAML_BUILD), ("test", YAML_TEST), ("lint", YAML_LINT)],
+    [("lint", "lint", "pure")],
+    "A CI workflow: the lint job moved below the test job, at the same indentation. Its "
+    "`runs-on` and `steps` lines also occur in the other jobs; the job name and its run "
+    "line are unique, and the whole four-line block is the move.",
+    ext="yaml",
+)
+
+C_LIST_HEAD = b("""
+#include <stdlib.h>
+#include "list.h"
+""")
+C_LIST_NODE = b("""
+static struct node *node_new(int value)
+{
+  struct node *n = malloc(sizeof *n);
+  if (n != NULL) {
+    n->value = value;
+    n->next = NULL;
+  }
+  return n;
+}
+""")
+C_LIST_PUSH = b("""
+int list_push(struct list *list, int value)
+{
+  struct node *n = node_new(value);
+  if (n == NULL) {
+    return -1;
+  }
+  n->next = list->head;
+  list->head = n;
+  list->length++;
+  return 0;
+}
+""")
+case(
+    "054-pure-c-helper-up-crlf",
+    [("head", C_LIST_HEAD), ("b0", BLANK), ("push", C_LIST_PUSH), ("b1", BLANK), ("node", C_LIST_NODE)],
+    [("head", C_LIST_HEAD), ("b1", BLANK), ("node", C_LIST_NODE), ("b0", BLANK), ("push", C_LIST_PUSH)],
+    [("node", "node", "pure")],
+    "A C file with CRLF line endings on both sides: the static helper node_new() moved "
+    "above list_push(), which calls it, so no forward declaration is needed. Both blocks "
+    "share `{`, `}` and `return` shapes; the label covers the helper from its signature to "
+    "its closing brace.",
+    crlf=True,
+    ext="c",
+)
+
+SH_DEPLOY_HEAD = b("""
+#!/bin/sh
+set -eu
+""")
+SH_DEPLOY_LOG = b("""
+log() {
+  printf '%s %s\\n' "$(date -u +%H:%M:%S)" "$*" >&2
+}
+""")
+SH_DEPLOY_MAIN = b("""
+deploy() {
+  log "building release $1"
+  make release VERSION="$1"
+  log "uploading artifacts"
+  rsync -a dist/ "deploy@$TARGET:/srv/app/releases/$1/"
+  log "done"
+}
+
+deploy "${1:?usage: deploy.sh VERSION}"
+""")
+case(
+    "055-pure-shell-function-up",
+    [("head", SH_DEPLOY_HEAD), ("b0", BLANK), ("main", SH_DEPLOY_MAIN), ("b1", BLANK), ("log", SH_DEPLOY_LOG)],
+    [("head", SH_DEPLOY_HEAD), ("b1", BLANK), ("log", SH_DEPLOY_LOG), ("b0", BLANK), ("main", SH_DEPLOY_MAIN)],
+    [("log", "log", "pure")],
+    "A shell script whose log() helper was defined after the call to deploy, so the script "
+    "failed; the fix moves log() above deploy(). The label is the three-line function.",
+    ext="sh",
+)
+
+TS_UNITS_FN = b("""
+export function toCelsius(fahrenheit: number): number {
+  const delta = fahrenheit - 32;
+  return (delta * 5) / 9;
+}
+""")
+TS_UNITS_FN_NESTED = ["  " + line for line in TS_UNITS_FN]
+TS_UNITS_NS_HEAD = b("""
+export namespace Units {
+  export const freezingFahrenheit = 32;
+""")
+case(
+    "056-indent-ts-into-namespace",
+    [("fn_l", TS_UNITS_FN), ("b0", BLANK), ("ns", TS_UNITS_NS_HEAD), ("end", ["}"])],
+    [("ns", TS_UNITS_NS_HEAD), ("b0", BLANK), ("fn_r", TS_UNITS_FN_NESTED), ("end", ["}"])],
+    [("fn_l", "fn_r", "pure")],
+    "A TypeScript function moved from the top level into a namespace below it, gaining two "
+    "spaces on every line. The indentation delta is the same on every line, so it is a "
+    "pure move (moves spec 4.4).",
+    ext="ts",
+)
+
+PY_ARTICLE_INIT = b("""
+class Article:
+  def __init__(self, title):
+    self.title = title
+""")
+PY_ARTICLE_SLUG_NESTED = b("""
+  def slugify(text):
+    cleaned = "".join(ch if ch.isalnum() else "-" for ch in text.lower())
+    return "-".join(part for part in cleaned.split("-") if part)
+""")
+PY_ARTICLE_SLUG_TOP = [line[2:] for line in PY_ARTICLE_SLUG_NESTED]
+PY_ARTICLE_URL = b("""
+  def url(self):
+    return "/articles/" + slugify(self.title)
+""")
+case(
+    "057-indent-python-out-of-class",
+    [("init", PY_ARTICLE_INIT), ("b0", BLANK), ("slug_l", PY_ARTICLE_SLUG_NESTED), ("b1", BLANK),
+     ("url", PY_ARTICLE_URL)],
+    [("slug_r", PY_ARTICLE_SLUG_TOP), ("b1", BLANK), ("b2", BLANK), ("init", PY_ARTICLE_INIT), ("b0", BLANK),
+     ("url", PY_ARTICLE_URL)],
+    [("slug_l", "slug_r", "pure")],
+    "A helper that never used self moved out of the class to module level, losing two "
+    "spaces on every line (a constant delta, so a pure move). Python is indented by two "
+    "spaces here, as every corpus input is.",
+    ext="py",
+)
+
+RS_RING_STRUCT = b("""
+pub struct Ring<T> {
+  items: Vec<T>,
+  cap: usize,
+}
+""")
+RS_RING_STRUCT_R = b("""
+pub struct Ring<T> {
+  items: Vec<T>,
+  capacity: usize,
+}
+""")
+RS_RING_USE = b("""
+fn fill(ring: &mut Ring<u8>) -> usize {
+  let mut added = 0;
+  while !ring.is_full() {
+    ring.items.push(0);
+    added += 1;
+  }
+  added
+}
+""")
+case(
+    "058-edited-rust-field-renamed",
+    [("struct", RS_RING_STRUCT), ("b0", BLANK), ("const", ["pub const DEFAULT_CAPACITY: usize = 16;"]),
+     ("b2", BLANK), ("impl_l", b("""
+impl<T> Ring<T> {
+  pub fn new(cap: usize) -> Self {
+    Ring { items: Vec::with_capacity(cap), cap }
+  }
+  pub fn is_full(&self) -> bool {
+    self.items.len() >= self.cap
+  }
+}
+""")), ("b1", BLANK), ("use", RS_RING_USE)],
+    [("struct", RS_RING_STRUCT_R), ("b0", BLANK), ("const", ["pub const DEFAULT_CAPACITY: usize = 16;"]),
+     ("b1", BLANK), ("use", RS_RING_USE), ("b2", BLANK), ("impl_r", b("""
+impl<T> Ring<T> {
+  pub fn new(capacity: usize) -> Self {
+    Ring { items: Vec::with_capacity(capacity), capacity }
+  }
+  pub fn is_full(&self) -> bool {
+    self.items.len() >= self.capacity
+  }
+}
+"""))],
+    [("impl_l", "impl_r", "edited")],
+    "The impl block moved below fill(), and the field cap was renamed to capacity on every "
+    "line that names it (the struct definition changes in place). The unchanged runs "
+    "inside the block are single lines or the two-line `}` / `pub fn is_full` run with 19 "
+    "alphanumeric characters, so no part of the block is a pure move on its own. fill() "
+    "is longer than the unchanged lines of the block, so the line diff keeps fill() in "
+    "place.",
+    ext="rs",
+)
+
+SQL_REPORT_HEAD = b("""
+-- monthly customer report
+""")
+SQL_REPORT_OTHER = b("""
+SELECT status, COUNT(*) AS orders
+FROM orders
+GROUP BY status
+ORDER BY orders DESC;
+""")
+SQL_REPORT_JOIN = "FROM clients c JOIN orders o ON o.client_id = c.id"
+assert alnum_count([SQL_REPORT_JOIN]) == 37
+case(
+    "059-edited-sql-column-added",
+    [("head", SQL_REPORT_HEAD), ("b0", BLANK), ("q_l", b("""
+SELECT c.name, c.email,
+  SUM(o.total) AS spent
+""") + [SQL_REPORT_JOIN] + b("""
+WHERE o.placed_at >= :since
+GROUP BY c.name, c.email;
+""")), ("b1", BLANK), ("other", SQL_REPORT_OTHER)],
+    [("head", SQL_REPORT_HEAD), ("b1", BLANK), ("other", SQL_REPORT_OTHER), ("b0", BLANK), ("q_r", b("""
+SELECT c.name, c.email,
+  SUM(o.total) AS spent,
+  COUNT(*) AS paid_orders
+""") + [SQL_REPORT_JOIN] + b("""
+WHERE o.placed_at >= :start
+GROUP BY c.name, c.email;
+"""))],
+    [("q_l", "q_r", "edited")],
+    "The per-client query moved below the per-status one; on the way it gained a column "
+    "and its parameter was renamed. Every unchanged line inside the block stands alone "
+    "between edits and is below the minimum move size on its own (the join line has 37 "
+    "alphanumeric characters, under the 40 a single line needs), so only an edited move "
+    "describes it.",
+    ext="sql",
+)
+
+HTML_PAGE_HEAD = b("""
+<!doctype html>
+<html lang="en">
+<body>
+""")
+HTML_PAGE_MAIN = b("""
+<main>
+  <h1>Release notes</h1>
+  <p>Version 3 adds offline mode and a new export dialog.</p>
+</main>
+""")
+HTML_PAGE_TAIL = b("""
+</body>
+</html>
+""")
+case(
+    "060-edited-html-nav-classes",
+    [("head", HTML_PAGE_HEAD), ("main", HTML_PAGE_MAIN), ("nav_l", b("""
+<ul class="nav">
+  <li class="nav-item"><a href="/docs/">Documentation</a></li>
+  <li class="nav-item"><a href="/blog/">Blog</a></li>
+  <li class="nav-item"><a href="/download/">Download</a></li>
+</ul>
+""")), ("tail", HTML_PAGE_TAIL)],
+    [("head", HTML_PAGE_HEAD), ("nav_r", b("""
+<ul class="menu">
+  <li class="menu-item"><a href="/docs/">Documentation</a></li>
+  <li class="menu-item"><a href="/blog/">Blog</a></li>
+  <li class="menu-item"><a href="/download/">Download</a></li>
+</ul>
+""")), ("main", HTML_PAGE_MAIN), ("tail", HTML_PAGE_TAIL)],
+    [("nav_l", "nav_r", "edited")],
+    "An HTML navigation list moved from below the main content to above it, and its CSS "
+    "class names changed from nav to menu on every line except the closing `</ul>`. Every "
+    "line keeps its links and text, so the block similarity is high and it is one edited "
+    "move.",
+    ext="html",
+)
+
+HTML_DOC_HEAD = b("""
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Status board</title>
+""")
+HTML_DOC_SCRIPT = b("""
+  <script src="/static/board.js" defer></script>
+  <script src="/static/charts.js" defer></script>
+""")
+HTML_DOC_STYLE = b("""
+  <link rel="stylesheet" href="/static/board.css">
+""")
+HTML_DOC_BODY_START = b("""
+</head>
+<body>
+""")
+HTML_DOC_HEADER = b("""
+  <header>
+    <h1>Status board</h1>
+    <p class="updated">Updated every minute</p>
+  </header>
+""")
+HTML_DOC_GRID = b("""
+  <section id="grid">
+    <div class="tile" data-service="api"></div>
+    <div class="tile" data-service="worker"></div>
+    <div class="tile" data-service="search"></div>
+  </section>
+""")
+HTML_DOC_FOOTER = b("""
+  <footer>
+    <a href="/history">History of incidents</a>
+  </footer>
+""")
+case(
+    "061-pure-html-two-moves",
+    [("head", HTML_DOC_HEAD), ("script", HTML_DOC_SCRIPT), ("style", HTML_DOC_STYLE), ("start", HTML_DOC_BODY_START),
+     ("header", HTML_DOC_HEADER), ("grid", HTML_DOC_GRID), ("footer", HTML_DOC_FOOTER), ("end", HTML_PAGE_TAIL)],
+    [("head", HTML_DOC_HEAD), ("style", HTML_DOC_STYLE), ("start", HTML_DOC_BODY_START), ("footer", HTML_DOC_FOOTER),
+     ("header", HTML_DOC_HEADER), ("grid", HTML_DOC_GRID), ("script", HTML_DOC_SCRIPT), ("end", HTML_PAGE_TAIL)],
+    [("script", "script", "pure"), ("footer", "footer", "pure")],
+    "Two independent moves in one HTML page: the two script tags moved from the head to "
+    "the end of the body, and the footer moved above the header. The script tags change "
+    "indentation context but not indentation, so both moves are pure.",
+    ext="html",
+)
+
+JSON_SERVICES_OPEN = b("""
+{
+  "services": [
+""")
+JSON_SERVICES_CLOSE = b("""
+  ]
+}
+""")
+
+
+def _json_service(name: str, port: int, replicas: int) -> list[str]:
+    return [
+        "    {",
+        f"      \"name\": \"{name}\",",
+        f"      \"port\": {port},",
+        f"      \"replicas\": {replicas}",
+        "    },",
+    ]
+
+
+JSON_LAST = [
+    "    {",
+    "      \"name\": \"gateway\",",
+    "      \"port\": 443,",
+    "      \"replicas\": 3",
+    "    }",
+]
+case(
+    "062-pure-json-object-moved",
+    [("open", JSON_SERVICES_OPEN), ("api", _json_service("api", 8080, 4)),
+     ("search", _json_service("search", 9200, 2)), ("worker", _json_service("worker", 9000, 6)),
+     ("mailer", _json_service("mailer", 2525, 1)), ("gateway", JSON_LAST), ("close", JSON_SERVICES_CLOSE)],
+    [("open", JSON_SERVICES_OPEN), ("api", _json_service("api", 8080, 4)),
+     ("worker", _json_service("worker", 9000, 6)), ("mailer", _json_service("mailer", 2525, 1)),
+     ("search", _json_service("search", 9200, 2)), ("gateway", JSON_LAST), ("close", JSON_SERVICES_CLOSE)],
+    [("search", "search", "pure")],
+    "A JSON array of service objects (diffed as text): the search object moved two places "
+    "down. It stays in the middle of the array, so its trailing comma is unchanged and "
+    "the five lines are equal. The braces it shares with every other object are where "
+    "slider compaction may put the boundaries; the label is the whole object.",
+    ext="json",
+)
+
+PY_IMPORTS = [
+    "from collections import OrderedDict",
+    "from dataclasses import dataclass, field",
+    "from pathlib import Path",
+    "from typing import Iterable, Optional",
+    "import argparse",
+    "import json",
+]
+case(
+    "063-neg-reversed-imports",
+    [("imports_l", PY_IMPORTS), ("b0", BLANK), ("main", ["VERSION = \"2.1.0\""])],
+    [("imports_r", list(reversed(PY_IMPORTS))), ("b0", BLANK), ("main", ["VERSION = \"2.1.0\""])],
+    [],
+    "Six import lines in reverse order. Every line exists on both sides, but no two lines "
+    "that were next to each other are still next to each other in the same order, so "
+    "every candidate block is a single line, and each has fewer than 40 alphanumeric "
+    "characters (the longest has 32). A reader would call this a reorder, not a move.",
+    ext="py",
+)
+
+INI_APP = b("""
+[app]
+name = inventory-service
+port = 8080
+""")
+INI_DB = b("""
+[db]
+url = postgres://db.internal/inventory
+pool = 10
+""")
+INI_LOG_19 = b("""
+level = warn
+format = text
+""")
+INI_LOG_20 = b("""
+level = debug
+format = text
+""")
+assert alnum_count(INI_LOG_19) == 19 and alnum_count(INI_LOG_20) == 20
+case(
+    "064-neg-two-lines-19-alnum",
+    [("app", INI_APP), ("log", INI_LOG_19), ("db", INI_DB)],
+    [("app", INI_APP), ("db", INI_DB), ("log", INI_LOG_19)],
+    [],
+    "Two settings lines moved from the app section to the end of the file. Together they "
+    "have 19 alphanumeric characters, one below the minimum move size of 20 (moves spec "
+    "4.2), so a correct result has no move. Case 065 is the same with 20.",
+    ext="ini",
+)
+case(
+    "065-pure-two-lines-20-alnum",
+    [("app", INI_APP), ("log", INI_LOG_20), ("db", INI_DB)],
+    [("app", INI_APP), ("db", INI_DB), ("log", INI_LOG_20)],
+    [("log", "log", "pure")],
+    "The boundary twin of 064: the two moved lines have exactly 20 alphanumeric "
+    "characters and both are non-trivial, so they meet the minimum move size and form a "
+    "pure move.",
+    ext="ini",
+)
+
+
+def _py_method(name: str, field: str, n: int) -> list[str]:
+    return [
+        f"  def {name}(self, value):",
+        f"    if not isinstance(value, {['int', 'str', 'float'][n % 3]}):",
+        f"      raise TypeError(\"{name} expects a {['number', 'string', 'decimal'][n % 3]}\")",
+        f"    self.{field} = value",
+        f"    self._dirty.add(\"{field}\")",
+        "    return self",
+        "",
+    ]
+
+
+PY_RECORD = ["class Record:", "  def __init__(self):", "    self._dirty = set()", ""]
+for _n, (_name, _field) in enumerate([
+    ("set_owner", "owner"), ("set_title", "title"), ("set_price", "price"), ("set_stock", "stock"),
+    ("set_label", "label"), ("set_color", "color"), ("set_width", "width"), ("set_depth", "depth"),
+]):
+    PY_RECORD += _py_method(_name, _field, _n)
+PY_RECORD += [
+    "  def changed(self):",
+    "    return sorted(self._dirty)",
+]
+
+
+def _py_function(n: int) -> list[str]:
+    return [
+        f"def report_{n:02d}(records, out):",
+        f"  selected = [r for r in records if r.stock > {n * 5}]",
+        f"  out.write(\"report {n:02d}: %d records\\n\" % len(selected))",
+        "  for record in selected:",
+        f"    out.write(\"  %s (%s)\\n\" % (record.title, record.owner))",
+        f"  return len(selected) + {n}",
+        "",
+        "",
+    ]
+
+
+PY_REPORTS: list[str] = []
+for _n in range(12):
+    PY_REPORTS += _py_function(_n)
+PY_REPORTS = PY_REPORTS[:-2]
+case(
+    "066-pure-large-python-class",
+    [("head", ["import sys", "", ""]), ("record", PY_RECORD), ("b0", BLANK), ("b1", BLANK), ("reports", PY_REPORTS)],
+    [("head", ["import sys", "", ""]), ("reports", PY_REPORTS), ("b0", BLANK), ("b1", BLANK), ("record", PY_RECORD)],
+    [("record", "record", "pure")],
+    "A 62-line class moved below twelve report functions (94 lines) that use it. The class "
+    "repeats the same method shape eight times and shares lines such as `    return self` "
+    "and blank lines; the whole class is one pure move.",
+    ext="py",
+)
+
+INI_CACHE_SERVER = b("""
+[server]
+host = 0.0.0.0
+port = 8443
+""")
+INI_CACHE_QUEUE = b("""
+[queue]
+backend = rabbitmq
+host = mq.internal
+port = 5672
+prefetch = 20
+durable = true
+""")
+case(
+    "067-edited-ini-one-value-changed",
+    [("server", INI_CACHE_SERVER), ("b0", BLANK), ("cache_l", b("""
+[cache]
+backend = redis
+host = cache.internal
+port = 6379
+ttl_seconds = 300
+""")), ("b1", BLANK), ("queue", INI_CACHE_QUEUE)],
+    [("server", INI_CACHE_SERVER), ("b1", BLANK), ("queue", INI_CACHE_QUEUE), ("b0", BLANK), ("cache_r", b("""
+[cache]
+backend = redis
+host = cache.internal
+port = 6379
+ttl_seconds = 600
+"""))],
+    [("cache_l", "cache_r", "edited")],
+    "The counterpart of 045: the [cache] section moved to the end of the file and kept "
+    "four of its five lines, changing only the last value; a reader sees one edited move "
+    "of the whole section. The [queue] section it moved past is longer, so the line diff "
+    "keeps [queue] in place. text.moves@1 reports the first four lines as a pure move: "
+    "joining (moves spec 4.3 step 4) only absorbs edited lines up to the next pure piece, "
+    "so an edit on the last line of a block is left out, and one line alone is below the "
+    "edited minimum. The match still counts (Jaccard 0.8), with the wrong kind and "
+    "boundaries.",
+    ext="ini",
+)
+
+case(
+    "068-neg-moved-and-rewritten",
+    [("head", ["import math", ""]), ("old", b("""
+def distance(a, b):
+  dx = a[0] - b[0]
+  dy = a[1] - b[1]
+  return math.sqrt(dx * dx + dy * dy)
+""")), ("b0", BLANK), ("keep", b("""
+def midpoint(a, b):
+  return ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+"""))],
+    [("head", ["import math", ""]), ("keep", b("""
+def midpoint(a, b):
+  return ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+""")), ("b0", BLANK), ("new", b("""
+def distance(p, q):
+  return math.hypot(q.x - p.x, q.y - p.y)
+"""))],
+    [],
+    "distance() was deleted at the top and written again below midpoint() with another "
+    "signature and body. Only the name survives; no line pair is similar enough for an "
+    "edited move (moves spec 4.5), so a correct result has no move.",
+    ext="py",
+)
+
+
+# ---------------------------------------------------------------------------
 # Writer
 # ---------------------------------------------------------------------------
 
@@ -2108,7 +2862,7 @@ def write_case(entry: dict) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     for side, lines in (("left", left_lines), ("right", right_lines)):
         data = "".join(line + terminators[side] for line in lines).encode("utf-8")
-        (directory / f"{side}.txt").write_bytes(data)
+        (directory / f"{side}.{entry['ext']}").write_bytes(data)
     options = json.loads(json.dumps(OPTIONS))
     options["ignore"].update(entry["ignore"])
     if any(kind == "edited" for _, _, kind in entry["moves"]):

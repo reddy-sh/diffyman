@@ -1,0 +1,3 @@
+# 067-smart-utf16-typescript
+
+TypeScript UI strings with emoji, run with `granularity: "smart"` and `positionEncoding: "utf-16"`. L3 changes one word (`document` -> `file`), L4 replaces its emoji (`📴`, two UTF-16 units) and most of its text. A correct result has one `replace` of L3-4/R3-4 with word spans on `document`/`file` at unit 32 of L3/R3 (`❌` is one unit), and on L4/R4 one span per side from the emoji to the end of the string, `📴 You are offline` and `📶 Reconnecting…`, at unit 12: the changed words are joined across the single spaces between them. The lines keep enough equal text that the noise cutoff does not apply.

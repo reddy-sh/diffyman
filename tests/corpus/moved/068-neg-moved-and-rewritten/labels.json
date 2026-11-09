@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "distance() was deleted at the top and written again below midpoint() with another signature and body. Only the name survives; no line pair is similar enough for an edited move (moves spec 4.5), so a correct result has no move."
+}

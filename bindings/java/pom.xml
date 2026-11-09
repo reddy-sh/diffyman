@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Java binding of diffyman (JNI). Build the native library first (the release build of the
+  Cargo package diffyman-java), then this project with `mvn verify`; bindings/java/build.sh runs
+  both, and README.md lists the commands.
+
+  The library is taken from ${diffyman.native.dir} (default: the workspace's target/release) and
+  packaged as native/<os>-<arch>/<library> inside the jar.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>sh.reddy.diffyman</groupId>
+  <artifactId>diffyman</artifactId>
+  <!-- Keep equal to the workspace version in Cargo.toml (the tests check it). -->
+  <version>0.0.1</version>
+  <packaging>jar</packaging>
+
+  <name>diffyman</name>
+  <description>Headless "diff any file" engine: one canonical JSON Diff Document from any two inputs (JNI binding).</description>
+  <url>https://reddy.sh</url>
+
+  <licenses>
+    <license>
+      <name>MIT</name>
+      <url>https://opensource.org/license/mit</url>
+      <distribution>repo</distribution>
+      <comments>MIT OR Apache-2.0, at your option</comments>
+    </license>
+    <license>
+      <name>Apache-2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+      <distribution>repo</distribution>
+      <comments>MIT OR Apache-2.0, at your option</comments>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <name>Sankara Reddy Telukutla</name>
+      <url>https://reddy.sh</url>
+    </developer>
+  </developers>
+
+  <scm>
+    <connection>scm:git:https://github.com/reddy-sh/diffyman.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/reddy-sh/diffyman.git</developerConnection>
+    <url>https://github.com/reddy-sh/diffyman</url>
+  </scm>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <maven.compiler.release>17</maven.compiler.release>
+    <!-- A fixed timestamp makes the jar reproducible. -->
+    <project.build.outputTimestamp>2026-11-08T00:00:00Z</project.build.outputTimestamp>
+    <!-- Not released yet: `mvn deploy` publishes nothing. -->
+    <maven.deploy.skip>true</maven.deploy.skip>
+
+    <!-- Where `cargo build -p diffyman-java` put the library; override with -Ddiffyman.native.dir=... -->
+    <diffyman.native.dir>${project.basedir}/../../target/release</diffyman.native.dir>
+    <!-- Set by the platform profiles below; NativeLibrary.resourceName uses the same names. -->
+    <diffyman.native.platform>unknown</diffyman.native.platform>
+    <diffyman.corpus>${project.basedir}/../../tests/corpus</diffyman.corpus>
+
+    <!-- Test-only dependencies. The jar has no runtime dependencies. JUnit 5 is EPL-2.0, a
+         test-scope exception of the dependency policy (docs/adr/0005-license.md): it never ships. -->
+    <junit.version>5.14.4</junit.version>
+    <jackson.version>2.22.4</jackson.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <resources>
+      <resource>
+        <directory>${project.basedir}/src/main/resources</directory>
+      </resource>
+      <resource>
+        <directory>${project.basedir}/../..</directory>
+        <targetPath>META-INF</targetPath>
+        <includes>
+          <include>LICENSE-MIT</include>
+          <include>LICENSE-APACHE</include>
+        </includes>
+      </resource>
+      <!-- The native library for the build platform, inside the jar. -->
+      <resource>
+        <directory>${diffyman.native.dir}</directory>
+        <targetPath>native/${diffyman.native.platform}</targetPath>
+        <includes>
+          <include>libdiffyman_java.dylib</include>
+          <include>libdiffyman_java.so</include>
+          <include>diffyman_java.dll</include>
+        </includes>
+      </resource>
+    </resources>
+
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-clean-plugin</artifactId>
+          <version>3.5.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>3.5.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.16.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.6.1</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>3.5.1</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-install-plugin</artifactId>
+          <version>3.2.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-deploy-plugin</artifactId>
+          <version>3.2.0</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <compilerArgs>
+            <arg>-Xlint:all</arg>
+            <arg>-Werror</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- JDK 24 and later warn about JNI use unless native access is enabled. -->
+          <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+          <systemPropertyVariables>
+            <diffyman.corpus>${diffyman.corpus}</diffyman.corpus>
+            <diffyman.expected.version>${project.version}</diffyman.expected.version>
+            <diffyman.expected.resource>native/${diffyman.native.platform}</diffyman.expected.resource>
+          </systemPropertyVariables>
+        </configuration>
+        <executions>
+          <!-- The default run loads the library from the jar resources (target/classes). This
+               one loads it through -Ddiffyman.library.path in a JVM of its own. -->
+          <execution>
+            <id>library-path</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <test>NativeLibraryTest</test>
+              <systemPropertyVariables>
+                <diffyman.library.path>${diffyman.native.dir}</diffyman.library.path>
+              </systemPropertyVariables>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifestEntries>
+              <Automatic-Module-Name>sh.reddy.diffyman</Automatic-Module-Name>
+            </manifestEntries>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <id>macos-aarch64</id>
+      <activation>
+        <os>
+          <family>mac</family>
+          <arch>aarch64</arch>
+        </os>
+      </activation>
+      <properties>
+        <diffyman.native.platform>macos-aarch64</diffyman.native.platform>
+      </properties>
+    </profile>
+    <profile>
+      <id>macos-x86_64</id>
+      <activation>
+        <os>
+          <family>mac</family>
+          <arch>x86_64</arch>
+        </os>
+      </activation>
+      <properties>
+        <diffyman.native.platform>macos-x86_64</diffyman.native.platform>
+      </properties>
+    </profile>
+    <profile>
+      <id>linux-x86_64</id>
+      <activation>
+        <os>
+          <name>linux</name>
+          <arch>amd64</arch>
+        </os>
+      </activation>
+      <properties>
+        <diffyman.native.platform>linux-x86_64</diffyman.native.platform>
+      </properties>
+    </profile>
+    <profile>
+      <id>linux-aarch64</id>
+      <activation>
+        <os>
+          <name>linux</name>
+          <arch>aarch64</arch>
+        </os>
+      </activation>
+      <properties>
+        <diffyman.native.platform>linux-aarch64</diffyman.native.platform>
+      </properties>
+    </profile>
+    <profile>
+      <id>windows-x86_64</id>
+      <activation>
+        <os>
+          <family>windows</family>
+          <arch>amd64</arch>
+        </os>
+      </activation>
+      <properties>
+        <diffyman.native.platform>windows-x86_64</diffyman.native.platform>
+      </properties>
+    </profile>
+    <profile>
+      <id>windows-aarch64</id>
+      <activation>
+        <os>
+          <family>windows</family>
+          <arch>aarch64</arch>
+        </os>
+      </activation>
+      <properties>
+        <diffyman.native.platform>windows-aarch64</diffyman.native.platform>
+      </properties>
+    </profile>
+  </profiles>
+</project>

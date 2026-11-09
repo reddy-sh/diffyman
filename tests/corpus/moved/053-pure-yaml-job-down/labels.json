@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 7,
+        "count": 4
+      },
+      "right": {
+        "start": 13,
+        "count": 4
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A CI workflow: the lint job moved below the test job, at the same indentation. Its `runs-on` and `steps` lines also occur in the other jobs; the job name and its run line are unique, and the whole four-line block is the move."
+}

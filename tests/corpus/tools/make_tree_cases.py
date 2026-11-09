@@ -766,6 +766,161 @@ case(
     "`identical`, entry for entry.",
 )
 
+# --- 030-039: larger folders, folder renames, deflated zips, tar type ------
+# --- changes, globstar excludes, cross-format trees, text options for -----
+# --- child documents, UTF-8 zip names. --------------------------------------
+
+
+def _module(name: str, n: int) -> bytes:
+    return lines(f"// module {name}", f"export const id = {n};", f"export const label = \"{name}\";")
+
+
+_many_left = {f"pkg/{group}/{name}.js": _module(f"{group}-{name}", 10 * g + k)
+              for g, group in enumerate(["core", "net", "ui", "util"])
+              for k, name in enumerate(["alpha", "beta", "gamma", "delta", "omega"])}
+_many_left["README.md"] = lines("# pkg", "", "Twenty small modules.")
+_many_right = dict(_many_left)
+_many_right["pkg/net/beta.js"] = _module("net-beta", 99)
+_many_right["pkg/ui/omega.js"] = _module("ui-omega", 34) + lines("export const hidden = true;")
+del _many_right["pkg/util/gamma.js"]
+_many_right["pkg/util/epsilon.js"] = _module("util-epsilon", 45)
+_many_right["pkg/extra/zeta.js"] = _module("extra-zeta", 50)
+case(
+    "030-folder-many-files",
+    _many_left,
+    _many_right,
+    opts(),
+    "Two folders of 21 files in five folders. On the right two modules changed "
+    "(`pkg/net/beta.js` gets a new id, `pkg/ui/omega.js` a new id and an added line), "
+    "`pkg/util/gamma.js` was removed, and `pkg/util/epsilon.js` and `pkg/extra/zeta.js` (in "
+    "a new folder) were added. A correct result lists every path once, sorted: the two "
+    "edited files `modified` with text child documents, `pkg/util/gamma.js` `removed`, "
+    "`pkg/extra` and both new files `added`, and the other 18 files and the five folders "
+    "`unchanged` (`entriesLeft: 26`, `entriesRight: 28`). No entry is `moved`: every added "
+    "file has content no removed file had.",
+)
+case(
+    "031-folder-renamed-directory",
+    {"src/main.py": APP, "src/helpers.py": HELPERS, "src/data/table.bin": BLOB, "setup.cfg": lines("[metadata]", "name = app")},
+    {"app/main.py": APP, "app/helpers.py": HELPERS, "app/data/table.bin": BLOB, "setup.cfg": lines("[metadata]", "name = app")},
+    opts(),
+    "A folder renamed from `src` to `app` with its three files unchanged. Folders are not "
+    "matched by content, only files are: a correct result has `src` and `src/data` "
+    "`removed`, `app` and `app/data` `added`, and the three files `moved` (`app/main.py` "
+    "from `src/main.py`, `app/helpers.py` from `src/helpers.py`, `app/data/table.bin` from "
+    "`src/data/table.bin`), with no child documents; `setup.cfg` is `unchanged`.",
+)
+_deflate_text_left = lines(*[f"line {n:03d}: the quick brown fox" for n in range(1, 81)])
+_deflate_text_right = _deflate_text_left.replace(b"line 040: the quick brown fox", b"line 040: the slow brown fox")
+case(
+    "032-zip-deflated-entries",
+    ("left.zip", zip_bytes([zentry("notes.txt", _deflate_text_left, deflated=True),
+                            zentry("zeros.bin", bytes(4096), deflated=True)])),
+    ("right.zip", zip_bytes([zentry("notes.txt", _deflate_text_right, deflated=True),
+                             zentry("zeros.bin", bytes(4096), deflated=True),
+                             zentry("added.txt", lines("new entry"), deflated=True)])),
+    opts(),
+    "Two zips whose entries are deflate-compressed (method 8). Entries are inflated in "
+    "memory and compared by their content, not their compressed bytes. A correct result "
+    "has `notes.txt` `modified` with a text child document that has one `replace` at line "
+    "40, `zeros.bin` `unchanged` (4096 zero bytes on both sides), and `added.txt` `added`.",
+)
+case(
+    "033-tar-file-becomes-symlink",
+    ("left.tar", tar_bytes([("file", "config.ini", lines("mode = live")),
+                            ("file", "config.live.ini", lines("mode = live")),
+                            ("dir", "logs/")])),
+    ("right.tar", tar_bytes([("symlink", "config.ini", "config.live.ini"),
+                             ("file", "config.live.ini", lines("mode = live")),
+                             ("dir", "logs/")])),
+    opts(),
+    "A tar where a regular file was replaced by a symbolic link to a sibling with the same "
+    "content. The type differs, so a correct result has `config.ini` as `typeChange` "
+    "(left `file`, right `symlink` with target `config.live.ini`, never followed) and no "
+    "child document; `config.live.ini` and `logs` are `unchanged`.",
+)
+case(
+    "034-folder-exclude-globstar",
+    {
+        "docs/guide.md": lines("# Guide", "old"),
+        "docs/keep.md": lines("keep", "left"),
+        "src/a.tmp": lines("temp left"),
+        "src/deep/b.tmp": lines("temp left"),
+        "src/main.rs": lines("fn main() {}"),
+    },
+    {
+        "docs/guide.md": lines("# Guide", "new"),
+        "docs/keep.md": lines("keep", "right"),
+        "src/a.tmp": lines("temp right"),
+        "src/deep/b.tmp": lines("temp right"),
+        "src/main.rs": lines("fn main() {}"),
+    },
+    opts(exclude=["**/*.tmp", "docs/**", "!docs/keep.md"]),
+    "`tree.exclude` with `.gitignore` globstar patterns: `**/*.tmp` at any depth, `docs/**` "
+    "for everything inside `docs`, and a negation that brings `docs/keep.md` back (allowed "
+    "because `docs` itself is not excluded). A correct result leaves out both `.tmp` files "
+    "and `docs/guide.md`, lists `docs` and `src/deep` as `unchanged` folders, "
+    "`docs/keep.md` as `modified` with a text child, and `src/main.rs` as `unchanged`.",
+)
+case(
+    "035-folder-vs-tar-edited",
+    {"docs/guide.txt": lines("step one", "step two"), "src/app.js": lines("console.log('app');")},
+    ("right.tar", tar_bytes([("dir", "docs/"),
+                             ("file", "docs/guide.txt", lines("step one", "step 2")),
+                             ("file", "src/app.js", lines("console.log('app');"))])),
+    opts(),
+    "A folder against a tar of the same files with one line edited. The tar lists `docs/` "
+    "explicitly and implies `src`; the folder has both as real folders. A correct result "
+    "has `docs/guide.txt` `modified` with a text child document (one `replace` of line 2), "
+    "and `docs`, `src` and `src/app.js` `unchanged`; the right side has `mediaType: "
+    "\"application/x-tar\"`.",
+)
+_cross = [("file", "a.txt", lines("alpha")), ("file", "sub/b.bin", noise(35, 200))]
+case(
+    "036-zip-vs-targz-identical",
+    ("left.zip", zip_bytes([zentry("a.txt", lines("alpha"), deflated=True), zentry("sub/b.bin", noise(35, 200))])),
+    ("right.tar.gz", gzip_member(tar_bytes(_cross))),
+    opts(),
+    "The same two files as a zip (one entry deflated, one stored) and as a gzip-compressed "
+    "tar. Archive formats and compression do not matter, only paths, types and content. A "
+    "correct result is `identical`: `a.txt`, `sub` (implied by `sub/b.bin` on both sides) "
+    "and `sub/b.bin` `unchanged`, with `application/zip` and `application/gzip` media types.",
+)
+case(
+    "037-folder-child-ignore-whitespace",
+    {"style.css": lines(".a {", "  color: red;", "}"), "notes.txt": lines("one two", "three")},
+    {"style.css": lines(".a {", "\tcolor:   red;", "}"), "notes.txt": lines("one two", "four")},
+    {**opts(), "ignore": {"whitespace": "all", "case": False, "blankLines": False, "regex": []}},
+    "Text options apply to the child documents of a tree (spec 9, 19.5): with "
+    "`ignore.whitespace: \"all\"`, `style.css` differs only in whitespace. Its bytes and "
+    "SHA-256 differ, so the entry is `modified`, but its child document is `identical` with "
+    "`hunks: []`. `notes.txt` is `modified` with a child document that has one `replace` "
+    "at line 2.",
+)
+case(
+    "038-zip-utf8-names",
+    ("left.zip", zip_bytes([zentry("文档/说明.txt", lines("版本 1"), flags=0x800),
+                            zentry("café/menu.txt", lines("espresso"), flags=0x800)])),
+    ("right.zip", zip_bytes([zentry("文档/说明.txt", lines("版本 2"), flags=0x800),
+                             zentry("café/carte.txt", lines("espresso"), flags=0x800)])),
+    opts(),
+    "Zip entries with UTF-8 names (general purpose flag bit 11): Chinese folder and file "
+    "names and an accented folder name. A correct result keeps the names as UTF-8 without "
+    "a `non-utf8-path` warning: `文档/说明.txt` is `modified` with a text child, "
+    "`café/carte.txt` is `moved` from `café/menu.txt` (same content), and the folders "
+    "`文档` and `café` are `unchanged`.",
+)
+case(
+    "039-zip-child-word-granularity",
+    ("left.zip", zip_bytes([zentry("readme.txt", lines("Install with the setup script.", "Run it twice."))])),
+    ("right.zip", zip_bytes([zentry("readme.txt", lines("Install with the bootstrap script.", "Run it twice."))])),
+    {**opts(), "granularity": "word"},
+    "`granularity: \"word\"` applies to the child documents of a tree: the modified "
+    "`readme.txt` gets a text child document with a `replace` of line 1 whose spans are "
+    "`setup` (left) and `bootstrap` (right) at byte 17. A correct result has that one "
+    "`modified` entry and no other change.",
+)
+
 
 # --- writing ---------------------------------------------------------------
 

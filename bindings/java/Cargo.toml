@@ -1,0 +1,26 @@
+[package]
+name = "diffyman-java"
+description = "Java binding for the diffyman diff engine (JNI)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+# Loaded by `sh.reddy.diffyman.NativeLibrary` as `libdiffyman_java.dylib`,
+# `libdiffyman_java.so` or `diffyman_java.dll`. The Java sources and tests
+# in src/main/java and src/test/java are built by Maven (pom.xml).
+name = "diffyman_java"
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+diffyman = { workspace = true, features = ["fs"] }
+jni.workspace = true
+
+[lints]
+workspace = true

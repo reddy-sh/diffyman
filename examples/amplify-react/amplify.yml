@@ -1,0 +1,54 @@
+# Build settings for AWS Amplify Hosting (static site, no backend).
+#
+# Not deployed: this file shows how the app would be built there. Connect the
+# repository in the Amplify console, set the monorepo app root to
+# examples/amplify-react (environment variable AMPLIFY_MONOREPO_APP_ROOT), and
+# Amplify runs these commands from that folder. The WASM package and the hook
+# package are built from this repository first, because neither is published.
+
+version: 1
+applications:
+  - appRoot: examples/amplify-react
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            # Rust as pinned in rust-toolchain.toml, with the wasm32 target.
+            - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+            - . "$HOME/.cargo/env"
+            - (cd ../.. && rustup toolchain install)
+            - cargo install --locked wasm-pack --version 0.15.1
+            # The browser build of the engine (bindings/wasm/pkg-web).
+            - (cd ../.. && wasm-pack build bindings/wasm --release --target web --out-dir pkg-web -- --locked)
+            # The React hook package (bindings/wasm/react/dist).
+            - npm --prefix ../../bindings/wasm/react ci
+            - npm --prefix ../../bindings/wasm/react run build
+            - npm ci
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: dist
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - node_modules/**/*
+      customHeaders:
+        # Lets the browser compile the module while it downloads.
+        - pattern: "**/*.wasm"
+          headers:
+            - key: Content-Type
+              value: application/wasm
+        # File names under assets/ carry a content hash.
+        - pattern: "assets/**"
+          headers:
+            - key: Cache-Control
+              value: public, max-age=31536000, immutable
+        # Same-origin scripts and workers only; WebAssembly compiles without eval.
+        - pattern: "**/*"
+          headers:
+            - key: Content-Security-Policy
+              value: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+            - key: X-Content-Type-Options
+              value: nosniff

@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 5,
+        "count": 3
+      },
+      "right": {
+        "start": 1,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A helper that never used self moved out of the class to module level, losing two spaces on every line (a constant delta, so a pure move). Python is indented by two spaces here, as every corpus input is."
+}

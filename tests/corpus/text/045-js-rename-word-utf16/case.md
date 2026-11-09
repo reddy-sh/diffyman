@@ -1,0 +1,3 @@
+# 045-js-rename-word-utf16
+
+A JavaScript parameter renamed from `usr` to `user` on three lines, with `word` granularity and `positionEncoding: "utf-16"`. L3 holds a waving-hand emoji (two UTF-16 code units) before the renamed word, so its offsets differ from UTF-8 bytes and code points. A correct result has one `replace` of L2-4/R2-4 with one span per side and line: `usr`/`user` at unit 22 of L2/R2, and `usr.name`/`user.name` and `usr.locale`/`user.locale` at unit 24 of L3/R3 and L4/R4. UAX #29 keeps letters joined by a full stop in one word segment, so the property access is one token and its span covers it whole. On L3 the emoji counts two units. The comment line is equal.

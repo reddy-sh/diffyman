@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 7,
+        "count": 5
+      },
+      "right": {
+        "start": 14,
+        "count": 5
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A SQL schema: the open_orders view moved below the orders table it reads, so the script runs in order. Both tables share the line `  id INTEGER PRIMARY KEY,` and the closing `);`, which the line diff matches in place."
+}

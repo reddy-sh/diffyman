@@ -1278,6 +1278,1144 @@ case(
     "0.7692.",
 )
 
+# --- Increment 1d: source code, data formats, large files, every algorithm, ---
+# --- every granularity with every position encoding, ignore combinations.   ---
+
+LARGE_FILE_BYTES = 100 * 1024
+
+
+def park_miller(seed: int):
+    """A Park-Miller generator: exact integer arithmetic, the same everywhere."""
+    state = [seed]
+
+    def next_int(k: int) -> int:
+        state[0] = (state[0] * 16807) % 2147483647
+        return state[0] % k
+
+    return next_int
+
+
+# 044 -------------------------------------------------------------------------
+case(
+    "044-python-extract-function",
+    "py",
+    lf(
+        "import logging",
+        "",
+        "log = logging.getLogger(__name__)",
+        "",
+        "",
+        "def process_orders(orders, inventory):",
+        "    accepted = []",
+        "    for order in orders:",
+        "        if order.quantity <= 0:",
+        "            log.warning(\"order %s has no quantity\", order.id)",
+        "            continue",
+        "        if order.sku not in inventory:",
+        "            log.warning(\"order %s has an unknown sku\", order.id)",
+        "            continue",
+        "        inventory[order.sku] -= order.quantity",
+        "        accepted.append(order)",
+        "    return accepted",
+    ),
+    lf(
+        "import logging",
+        "",
+        "log = logging.getLogger(__name__)",
+        "",
+        "",
+        "def is_valid(order, inventory):",
+        "    if order.quantity <= 0:",
+        "        log.warning(\"order %s has no quantity\", order.id)",
+        "        return False",
+        "    if order.sku not in inventory:",
+        "        log.warning(\"order %s has an unknown sku\", order.id)",
+        "        return False",
+        "    return True",
+        "",
+        "",
+        "def process_orders(orders, inventory):",
+        "    accepted = []",
+        "    for order in orders:",
+        "        if not is_valid(order, inventory):",
+        "            continue",
+        "        inventory[order.sku] -= order.quantity",
+        "        accepted.append(order)",
+        "    return accepted",
+    ),
+    opts(),
+    "A Python refactor that extracts the two validation checks of `process_orders` into a "
+    "new function `is_valid` above it. The checks lose four spaces of indentation and "
+    "`continue` becomes `return False`, so under `ignore.whitespace: \"none\"` none of the "
+    "moved lines is equal. A correct result has one hunk covering L3-16/R3-22: equal L3-5, "
+    "an `insert` of R6-15 (the new function and its two blank lines, placed above "
+    "`def process_orders` by slider compaction), equal L6-8/R16-18, a `replace` of L9-13 "
+    "(both checks up to the second warning) by R19 (`if not is_valid(...)`), and equal "
+    "L14-16/R20-22, where the second `continue` pairs with the one that stays. Stats: "
+    "`linesAdded: 11`, `linesRemoved: 5`, `linesUnchanged: 12`, `similarity: 0.6`; git's "
+    "histogram diff gives the same hunk.",
+)
+
+# 045 -------------------------------------------------------------------------
+case(
+    "045-js-rename-word-utf16",
+    "js",
+    lf(
+        "// \U0001F389 greeting helpers",
+        "export function greet(usr) {",
+        "  const label = \"\U0001F44B \" + usr.name;",
+        "  return label + \" (\" + usr.locale + \")\";",
+        "}",
+    ),
+    lf(
+        "// \U0001F389 greeting helpers",
+        "export function greet(user) {",
+        "  const label = \"\U0001F44B \" + user.name;",
+        "  return label + \" (\" + user.locale + \")\";",
+        "}",
+    ),
+    opts(granularity="word", position="utf-16"),
+    "A JavaScript parameter renamed from `usr` to `user` on three lines, with `word` "
+    "granularity and `positionEncoding: \"utf-16\"`. L3 holds a waving-hand emoji (two UTF-16 "
+    "code units) before the renamed word, so its offsets differ from UTF-8 bytes and code "
+    "points. A correct result has one `replace` of L2-4/R2-4 with one span per side and "
+    "line: `usr`/`user` at unit 22 of L2/R2, and `usr.name`/`user.name` and "
+    "`usr.locale`/`user.locale` at unit 24 of L3/R3 and L4/R4. UAX #29 keeps letters "
+    "joined by a full stop in one word segment, so the property access is one token and "
+    "its span covers it whole. On L3 the emoji counts two units. The comment line is equal.",
+)
+
+# 046 -------------------------------------------------------------------------
+case(
+    "046-ts-patience-new-method",
+    "ts",
+    lf(
+        "export class Cart {",
+        "  private items: Item[] = [];",
+        "",
+        "  add(item: Item): void {",
+        "    this.items.push(item);",
+        "  }",
+        "",
+        "  total(): number {",
+        "    let sum = 0;",
+        "    for (const item of this.items) {",
+        "      sum += item.price * item.quantity;",
+        "    }",
+        "    return sum;",
+        "  }",
+        "}",
+    ),
+    lf(
+        "export class Cart {",
+        "  private items: Item[] = [];",
+        "",
+        "  add(item: Item): void {",
+        "    this.items.push(item);",
+        "  }",
+        "",
+        "  remove(sku: string): void {",
+        "    this.items = this.items.filter((item) => item.sku !== sku);",
+        "  }",
+        "",
+        "  total(): number {",
+        "    let sum = 0;",
+        "    for (const item of this.items) {",
+        "      sum += item.price * item.quantity;",
+        "    }",
+        "    return sum;",
+        "  }",
+        "}",
+    ),
+    opts(algorithm="patience"),
+    "A TypeScript class gains a `remove` method between `add` and `total`, run with "
+    "`algorithm: \"patience\"`. Patience anchors on lines that occur once on each side; the "
+    "closing `  }` and the blank lines occur several times, so the inserted method could "
+    "be described at more than one position. A correct result has one hunk: equal L5-7, a "
+    "single `insert` of R8-11 (`remove(...) {`, its body, `  }` and a blank line) and equal "
+    "L8-10/R12-14. Slider compaction puts the insertion at the method header, as git's "
+    "patience diff does. Stats: `linesAdded: 4`, `linesUnchanged: 15`.",
+)
+
+# 047 -------------------------------------------------------------------------
+case(
+    "047-go-smart-error-wrap",
+    "go",
+    lf(
+        "func readConfig(path string) (*Config, error) {",
+        "\tdata, err := os.ReadFile(path)",
+        "\tif err != nil {",
+        "\t\treturn nil, err",
+        "\t}",
+        "\tvar cfg Config",
+        "\tif err := json.Unmarshal(data, &cfg); err != nil {",
+        "\t\treturn nil, err",
+        "\t}",
+        "\treturn &cfg, nil",
+        "}",
+    ),
+    lf(
+        "func readConfig(path string) (*Config, error) {",
+        "\tdata, err := os.ReadFile(path)",
+        "\tif err != nil {",
+        "\t\treturn nil, fmt.Errorf(\"read %s: %w\", path, err)",
+        "\t}",
+        "\tvar cfg Config",
+        "\tif err := json.Unmarshal(data, &cfg); err != nil {",
+        "\t\treturn nil, fmt.Errorf(\"parse %s: %w\", path, err)",
+        "\t}",
+        "\treturn &cfg, nil",
+        "}",
+    ),
+    opts(algorithm="myers", granularity="smart"),
+    "A Go function whose two bare `return nil, err` lines now wrap the error, run with "
+    "`algorithm: \"myers\"` and `granularity: \"smart\"`. Tab-indented code. A correct result "
+    "has one hunk with two single-line `replace` ops (L4/R4 and L8/R8) around equal "
+    "L5-7. Each replaced line keeps `\\t\\treturn nil, ` and `err`, so no left span exists "
+    "and the right spans cover only the inserted text, in two pieces per line: "
+    "`fmt.Errorf(\"read %s: %w\", path, ` at byte 14 and the closing `)` after `err` on R4, "
+    "and the same with `parse` on R8.",
+)
+
+# 048 -------------------------------------------------------------------------
+case(
+    "048-rust-char-utf8",
+    "rs",
+    lf(
+        "pub fn classify(c: char) -> Kind {",
+        "    match c {",
+        "        'a'..='z' => Kind::Lower,",
+        "        'A'..='Z' => Kind::Upper,",
+        "        '0'..='9' => Kind::Digit,",
+        "        'ä' | 'ö' | 'ü' => Kind::Umlaut,",
+        "        _ => Kind::Other,",
+        "    }",
+        "}",
+    ),
+    lf(
+        "pub fn classify(c: char) -> Kind {",
+        "    match c {",
+        "        'a'..='f' => Kind::Lower,",
+        "        'A'..='Z' => Kind::Upper,",
+        "        '0'..='7' => Kind::Digit,",
+        "        'ä' | 'ő' | 'ü' => Kind::Umlaut,",
+        "        _ => Kind::Other,",
+        "    }",
+        "}",
+    ),
+    opts(granularity="char", position="utf-8"),
+    "A Rust `match` with three one-character edits, run with `granularity: \"char\"` and "
+    "`positionEncoding: \"utf-8\"`. A correct result has one hunk with two `replace` ops, "
+    "L3/R3 and L5-6/R5-6, around equal L4. The spans are one grapheme each: `z`/`f` at "
+    "byte 15 of L3/R3, `9`/`7` at byte 15 of L5/R5, and `ö`/`ő` at bytes 16-18 of L6/R6, "
+    "two bytes long because both are two-byte UTF-8 characters (`ä` before them also "
+    "takes two bytes).",
+)
+
+# 049 -------------------------------------------------------------------------
+case(
+    "049-java-imports-sorted",
+    "java",
+    lf(
+        "package sh.example.billing;",
+        "",
+        "import java.util.Map;",
+        "import java.time.Instant;",
+        "import java.util.List;",
+        "import java.io.IOException;",
+        "import java.util.HashMap;",
+        "",
+        "public final class InvoiceStore {",
+        "    private final Map<String, Invoice> byId = new HashMap<>();",
+        "}",
+    ),
+    lf(
+        "package sh.example.billing;",
+        "",
+        "import java.io.IOException;",
+        "import java.time.Instant;",
+        "import java.util.HashMap;",
+        "import java.util.List;",
+        "import java.util.Map;",
+        "import java.util.Objects;",
+        "",
+        "public final class InvoiceStore {",
+        "    private final Map<String, Invoice> byId = new HashMap<>();",
+        "}",
+    ),
+    opts(),
+    "The import block of a Java class is sorted and one import (`java.util.Objects`) is "
+    "added. Every import line still exists on both sides, but the order changed, so a line "
+    "diff must give up some of them: histogram keeps the longest run it can anchor and "
+    "reports the rest as removed and added. A correct result is one hunk covering L1-10: "
+    "equal L1-2, `delete` L3-5 (`Map`, `Instant`, `List`), equal L6/R3 (`IOException`), "
+    "`insert` R4 (`Instant`), equal L7/R5 (`HashMap`), `insert` R6-8 (`List`, `Map`, "
+    "`Objects`) and equal L8-10/R9-11, as git's histogram diff gives. Two of the five old "
+    "imports stay unchanged: `linesAdded: 4`, `linesRemoved: 3`, `linesUnchanged: 8`; "
+    "without `detectMoves` there are no moves.",
+)
+
+# 050 -------------------------------------------------------------------------
+case(
+    "050-c-whitespace-all",
+    "c",
+    lf(
+        "int clamp(int x,int lo,int hi){",
+        "    if(x<lo) return lo;",
+        "    if(x>hi) return hi;",
+        "    return x;",
+        "}",
+        "",
+        "int sign(int x){",
+        "    return (x>0)-(x<0);",
+        "}",
+    ),
+    lf(
+        "int clamp(int x, int lo, int hi) {",
+        "\tif (x < lo) return lo;",
+        "\tif (x > hi) return hi;",
+        "\treturn x;",
+        "}",
+        "",
+        "int sign(int x) {",
+        "\treturn (x > 0) - (x < 0) + 0;",
+        "}",
+    ),
+    opts(whitespace="all"),
+    "C code reformatted by a code formatter (spaces after commas and around operators, tab "
+    "indentation) with `ignore.whitespace: \"all\"`, which removes every U+0009, U+000B, "
+    "U+000C and U+0020 from the comparison key. All reformatted lines compare equal; only "
+    "L8 also changed its tokens (` + 0` appended). A correct result has one hunk: equal "
+    "L5-7, `replace` L8/R8, equal L9; `linesUnchanged: 8`, `similarity: 0.8889`.",
+)
+
+# 051 -------------------------------------------------------------------------
+case(
+    "051-sql-ignore-case",
+    "sql",
+    lf(
+        "select id, name from customers",
+        "where city = 'Été' and active = 1",
+        "order by name;",
+        "",
+        "update streets set name = 'Straße' where id = 7;",
+        "delete from sessions where expires < now();",
+    ),
+    lf(
+        "SELECT id, name FROM customers",
+        "WHERE city = 'ÉTÉ' AND active = 1",
+        "ORDER BY name;",
+        "",
+        "UPDATE streets SET name = 'STRASSE' WHERE id = 7;",
+        "DELETE FROM sessions WHERE expires < NOW();",
+    ),
+    opts(case=True),
+    "SQL keywords upper-cased, with `ignore.case: true` (Unicode simple case folding, "
+    "statuses C and S). `Été` and `ÉTÉ` fold to the same text, so L1-3 and L6 compare "
+    "equal. `ß` has only a full case folding (`ss`, status F), which is not applied, so "
+    "`'Straße'` and `'STRASSE'` still differ. A correct result has one hunk: equal L2-4, "
+    "`replace` L5/R5, equal L6; `linesUnchanged: 5`.",
+)
+
+# 052 -------------------------------------------------------------------------
+case(
+    "052-yaml-workflow-steps",
+    "yaml",
+    lf(
+        "name: build",
+        "on: [push]",
+        "jobs:",
+        "  test:",
+        "    runs-on: ubuntu-24.04",
+        "    steps:",
+        "      - uses: actions/checkout@v4",
+        "      - name: lint",
+        "        run: make lint",
+        "      - name: unit tests",
+        "        run: make test",
+        "      - name: upload coverage",
+        "        run: make coverage",
+    ),
+    lf(
+        "name: build",
+        "on: [push, pull_request]",
+        "jobs:",
+        "  test:",
+        "    runs-on: ubuntu-24.04",
+        "    timeout-minutes: 20",
+        "    steps:",
+        "      - uses: actions/checkout@v4",
+        "      - name: unit tests",
+        "        run: make test",
+        "      - name: lint",
+        "        run: make lint",
+        "      - name: upload coverage",
+        "        run: make coverage",
+    ),
+    opts(),
+    "A CI workflow in YAML (`mediaType: \"application/yaml\"` from the extension): the "
+    "trigger list grows, a `timeout-minutes` key is added and the lint and test steps swap. "
+    "A correct result has one hunk: `replace` L2/R2, `insert` R6, and the swap reported as "
+    "the lint step deleted at L8-9 and inserted again at R11-12 below the unit tests, which "
+    "stay equal (L10-11/R9-10), as git's histogram diff gives. Stats: `linesAdded: 4`, "
+    "`linesRemoved: 3`, `linesUnchanged: 10`.",
+)
+
+# 053 -------------------------------------------------------------------------
+case(
+    "053-json-reindent-whitespace-change",
+    "json",
+    lf(
+        "{",
+        "  \"name\": \"diffyman-demo\",",
+        "  \"version\": \"1.4.0\",",
+        "  \"scripts\": {",
+        "    \"build\": \"tsc -p .\",",
+        "    \"test\": \"node --test\"",
+        "  },",
+        "  \"private\": true",
+        "}",
+    ),
+    lf(
+        "{",
+        "    \"name\": \"diffyman-demo\",",
+        "    \"version\": \"1.5.0\",",
+        "    \"scripts\": {",
+        "        \"build\": \"tsc -p .\",",
+        "        \"test\":  \"node --test\"",
+        "    },",
+        "    \"private\": true",
+        "}",
+    ),
+    opts(whitespace="change"),
+    "A JSON file (as text: `mediaType: \"application/json\"`) re-indented from two to four "
+    "spaces, with an aligned value on L6 and a new version on L3, under `ignore.whitespace: "
+    "\"change\"`. Leading indentation of any width is one run of whitespace, so it "
+    "collapses to one space on both sides and the re-indented lines compare equal. A "
+    "correct result has one hunk: equal L1-2, `replace` L3/R3, equal L4-6; "
+    "`linesUnchanged: 8`, `similarity: 0.8889`.",
+)
+
+# 054 -------------------------------------------------------------------------
+case(
+    "054-markdown-smart-codepoint",
+    "md",
+    lf(
+        "# Café opening hours",
+        "",
+        "We open at 8:00 on weekdays and at 9:00 on Saturdays.",
+        "The crème brûlée is made fresh every morning.",
+        "Closed on Sundays.",
+    ),
+    lf(
+        "# Café opening hours",
+        "",
+        "We open at 7:30 on weekdays and at 9:00 on Saturdays.",
+        "The crème brulée is made fresh every morning.",
+        "Closed on Sundays.",
+    ),
+    opts(granularity="smart", position="codepoint"),
+    "A Markdown page (`mediaType: \"text/markdown\"`) with two edits, run with `granularity: "
+    "\"smart\"` and `positionEncoding: \"codepoint\"`: an opening time changes and an accent "
+    "is dropped. A correct result has one `replace` of L3-4/R3-4. `brûlée`/`brulée` is a "
+    "one-word swap of at least 4 graphemes and similar enough for the sub-word pass, so "
+    "only `û`/`u` is marked, at code point 12 of L4/R4 (`è` before it counts as one code "
+    "point). A colon joins only letters in UAX #29, so `8:00` is three segments and the "
+    "spans are `8`/`7` at 11 and `00`/`30` at 13, with the colon equal.",
+)
+
+# 055 -------------------------------------------------------------------------
+case(
+    "055-html-word-codepoint",
+    "html",
+    lf(
+        "<!doctype html>",
+        "<html lang=\"en\">",
+        "<head><title>Ångström units</title></head>",
+        "<body>",
+        "<p class=\"note\">One ångström is 0.1 nanometres.</p>",
+        "<a href=\"/units/length\" rel=\"next\">Length</a>",
+        "</body>",
+        "</html>",
+    ),
+    lf(
+        "<!doctype html>",
+        "<html lang=\"sv\">",
+        "<head><title>Ångström units</title></head>",
+        "<body>",
+        "<p class=\"note warning\">One ångström is 0.1 nanometres.</p>",
+        "<a href=\"/units/size\" rel=\"next\">Length</a>",
+        "</body>",
+        "</html>",
+    ),
+    opts(granularity="word", position="codepoint"),
+    "An HTML page (`mediaType: \"text/html\"` from the extension) with attribute edits, run "
+    "with `granularity: \"word\"` and `positionEncoding: \"codepoint\"`. A correct result has "
+    "`replace` L2/R2 with spans on `en`/`sv`, equal L3-4, and `replace` L5-6/R5-6 with a "
+    "right-only span for the added ` warning` class and spans on `length`/`size` in the "
+    "link target. Punctuation such as `\"`, `=` and `/` is its own segment and stays equal.",
+)
+
+# 056 -------------------------------------------------------------------------
+case(
+    "056-css-rules-edited",
+    "css",
+    lf(
+        ".card {",
+        "  display: flex;",
+        "  padding: 16px;",
+        "  border-radius: 8px;",
+        "  color: #222;",
+        "}",
+        "",
+        ".card:hover {",
+        "  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);",
+        "}",
+        "",
+        "@media (max-width: 600px) {",
+        "  .card {",
+        "    padding: 8px;",
+        "  }",
+        "}",
+    ),
+    lf(
+        ".card {",
+        "  display: flex;",
+        "  gap: 12px;",
+        "  padding: 16px;",
+        "  border-radius: 12px;",
+        "  color: #222;",
+        "}",
+        "",
+        ".card:hover,",
+        ".card:focus-visible {",
+        "  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);",
+        "}",
+        "",
+        "@media (max-width: 600px) {",
+        "  .card {",
+        "    padding: 8px;",
+        "  }",
+        "}",
+    ),
+    opts(context=1),
+    "A CSS file (`mediaType: \"text/css\"`) with a new property, a changed radius and a "
+    "selector split over two lines, with `context: 1`. A correct result has two hunks: h1 "
+    "with equal L2, `insert` R3, equal L3, `replace` L4/R5, equal L5; h2 with equal L7, "
+    "`replace` L8/R9-10, equal L9. The `@media` block is unchanged. Stats: "
+    "`linesAdded: 4`, `linesRemoved: 2`, `linesUnchanged: 14`.",
+)
+
+# 057 -------------------------------------------------------------------------
+_sh_lines = [
+    "#!/bin/sh",
+    "set -eu",
+    "",
+    "backup_dir=/var/backups/app",
+    "mkdir -p \"$backup_dir\"",
+    "tar -czf \"$backup_dir/app-$(date +%F).tgz\" /srv/app",
+    "find \"$backup_dir\" -name '*.tgz' -mtime +14 -delete",
+]
+case(
+    "057-shell-crlf-trailing",
+    "sh",
+    lf(*_sh_lines),
+    crlf(
+        *[line + ("  " if i in (1, 4) else "") for i, line in enumerate(_sh_lines[:-1])],
+        "find \"$backup_dir\" -name '*.tgz' -mtime +30 -delete",
+    ),
+    opts(whitespace="trailing"),
+    "A shell script saved with CRLF line endings and trailing spaces on two lines, plus a "
+    "real change (keep 30 days of backups instead of 14). Under `ignore.whitespace: "
+    "\"trailing\"` trailing whitespace is dropped and the terminator is not part of the "
+    "key, so only the last line differs. A correct result has one hunk: equal L4-6, "
+    "`replace` L7/R7; the left side reports `lineTerminator: \"lf\"`, the right side "
+    "`\"crlf\"`, `linesUnchanged: 6`.",
+)
+
+# 058 -------------------------------------------------------------------------
+_log_rng = park_miller(58)
+_services = ["api", "worker", "scheduler", "billing", "search", "mailer", "auth", "cache"]
+_events = [
+    "request handled in {n} ms",
+    "job {n} finished",
+    "cache hit ratio {n} percent",
+    "connection pool at {n} of 64",
+    "queued {n} messages",
+    "retrying upstream call, attempt {n}",
+]
+
+
+def _log_line(i: int) -> str:
+    service = _services[_log_rng(len(_services))]
+    event = _events[_log_rng(len(_events))].format(n=_log_rng(1000))
+    return f"2026-04-{1 + i // 400:02d} {i % 24:02d}:{i % 60:02d}:{(i * 7) % 60:02d} seq={i:05d} {service:<9} INFO {event}"
+
+
+_log_left = [_log_line(i) for i in range(1150)]
+_log_right = list(_log_left)
+_log_right[905] = _log_right[905].replace(" INFO ", " WARN ")
+_log_right[612] = _log_right[612] + " (slow)"
+del _log_right[777]
+_log_right[450:450] = [
+    "2026-04-02 marker: configuration reloaded by operator",
+    "2026-04-02 marker: feature flag search.v2 enabled",
+]
+_log_right[333] = _log_right[333].replace(" INFO ", " ERROR ")
+_log_right[334] = _log_right[334].replace(" INFO ", " ERROR ")
+_log_right[97] = _log_right[97].replace("seq=00097", "seq=00097 retry=1")
+case(
+    "058-large-log-scattered-edits",
+    "log",
+    lf(*_log_left),
+    lf(*_log_right),
+    opts(),
+    "A generated service log of 1150 lines (about 81 KB per side) with six scattered edits: "
+    "a field added on "
+    "L98, two lines upgraded to `ERROR` at L334-335, two marker lines inserted after L450, "
+    "a suffix on L613, L778 deleted and `INFO` changed to `WARN` on L906. Every generated "
+    "line has a unique sequence number. A correct result has six hunks, one per edit, with "
+    "`linesAdded: 7`, `linesRemoved: 6`, `linesUnchanged: 1144`.",
+    max_bytes=LARGE_FILE_BYTES,
+)
+
+# 059 -------------------------------------------------------------------------
+_csv_rng = park_miller(59)
+_cities = ["Lisbon", "Porto", "Braga", "Faro", "Coimbra", "Aveiro", "Evora", "Viseu"]
+_names = ["Ana", "Rui", "Ines", "Joao", "Marta", "Tiago", "Sofia", "Pedro", "Rita", "Nuno"]
+
+
+def _csv_row(i: int) -> str:
+    name = _names[_csv_rng(len(_names))] + " " + _names[_csv_rng(len(_names))][0] + "."
+    city = _cities[_csv_rng(len(_cities))]
+    return f"{100000 + i},{name},{city},{_csv_rng(100000) / 100:.2f}"
+
+
+_csv_left = ["id,name,city,amount"] + [_csv_row(i) for i in range(1700)]
+_csv_right = list(_csv_left)
+del _csv_right[1201:1206]
+_csv_right[701:701] = [f"{200000 + k},New Customer {k},Lisbon,0.00" for k in range(10)]
+_csv_right[51] = _csv_right[51].rsplit(",", 1)[0] + ",0.00"
+case(
+    "059-large-csv-myers",
+    "csv",
+    lf(*_csv_left),
+    lf(*_csv_right),
+    opts(algorithm="myers"),
+    "A generated CSV export of 1701 lines (about 48 KB), run with `algorithm: \"myers\"`: "
+    "the amount on row L52 changes, ten new rows are inserted after L701 and rows L1202-1206 "
+    "are deleted. Every row has a unique id. A correct result has three hunks: a "
+    "one-line `replace` at L52, an `insert` of ten lines after L701 and a `delete` of five "
+    "lines at L1202; `linesAdded: 11`, `linesRemoved: 6`, `linesUnchanged: 1695`, and "
+    "`mediaType: \"text/csv\"` on both sides.",
+    max_bytes=LARGE_FILE_BYTES,
+)
+
+# 060 -------------------------------------------------------------------------
+_js_rng = park_miller(60)
+_verbs = ["load", "save", "parse", "render", "check", "merge", "split", "count"]
+_nouns = ["user", "order", "invoice", "report", "session", "token", "page", "rule"]
+
+
+def _js_function(i: int, edit: str = "") -> list[str]:
+    verb, noun = _verbs[i % 8], _nouns[(i // 8) % 8]
+    limit = _js_rng(90) + 10
+    body = [
+        f"export function {verb}{noun.capitalize()}{i}(input, options = {{}}) {{",
+        f"  const limit = options.limit ?? {limit};",
+        "  const result = [];",
+        "  for (const item of input) {",
+        f"    if (result.length >= limit) break;",
+        f"    result.push({edit or 'item'});",
+        "  }",
+        "  return result;",
+        "}",
+        "",
+    ]
+    return body
+
+
+_js_left: list[str] = []
+_js_right: list[str] = []
+for _i in range(360):
+    _fn = _js_function(_i)
+    _js_left += _fn
+    if _i == 120:
+        continue
+    if _i == 50:
+        _fn = [line.replace("result.push(item)", "result.push({ ...item, seen: true })") for line in _fn]
+    if _i == 250:
+        _fn = [line.replace("break;", "return result;") for line in _fn]
+        _fn = [line.replace("options.limit ??", "options.max ??") for line in _fn]
+    _js_right += _fn
+    if _i == 200:
+        _js_right += [
+            "export function auditTrail(events) {",
+            "  return events.filter((event) => event.kind === \"audit\");",
+            "}",
+            "",
+        ]
+case(
+    "060-large-js-patience",
+    "js",
+    lf(*_js_left),
+    lf(*_js_right),
+    opts(algorithm="patience"),
+    "A generated JavaScript module of 360 small functions (3600 lines, about 82 KB), run with "
+    "`algorithm: \"patience\"`. Most lines repeat in every function (`const result = [];`, "
+    "`  }`, `return result;`, blank lines), and only the header and the `limit` line of each "
+    "function are unique, which is where patience anchors. Edits: one line of function 50 "
+    "changed, function 120 deleted, a new function inserted after function 200, and two "
+    "lines of function 250 changed. A correct result has four hunks with five change ops "
+    "(the two edits of function 250 are separate `replace` ops around one equal line); the "
+    "deletion takes the whole function with its blank line (L1201-1210) and the insertion "
+    "is 4 lines, as git's patience diff gives. Stats: `linesAdded: 7`, `linesRemoved: 13`, "
+    "`linesUnchanged: 3587`.",
+    max_bytes=LARGE_FILE_BYTES,
+)
+
+# 061 -------------------------------------------------------------------------
+case(
+    "061-c-patience-vs-braces",
+    "c",
+    lf(
+        "#include <stdio.h>",
+        "",
+        "static int add(int a, int b)",
+        "{",
+        "    return a + b;",
+        "}",
+        "",
+        "static int sub(int a, int b)",
+        "{",
+        "    return a - b;",
+        "}",
+        "",
+        "int main(void)",
+        "{",
+        "    printf(\"%d\\n\", add(2, 3));",
+        "    return 0;",
+        "}",
+    ),
+    lf(
+        "#include <stdio.h>",
+        "",
+        "static int add(int a, int b)",
+        "{",
+        "    return a + b;",
+        "}",
+        "",
+        "static int mul(int a, int b)",
+        "{",
+        "    return a * b;",
+        "}",
+        "",
+        "static int sub(int a, int b)",
+        "{",
+        "    return a - b;",
+        "}",
+        "",
+        "int main(void)",
+        "{",
+        "    printf(\"%d\\n\", mul(add(2, 3), sub(7, 4)));",
+        "    return 0;",
+        "}",
+    ),
+    opts(algorithm="patience"),
+    "C functions in Allman style, where `{`, `}` and blank lines repeat after every "
+    "header; a function `mul` is inserted between `add` and `sub` and `main` calls it. Run "
+    "with `algorithm: \"patience\"`. A correct result has two hunks, because seven equal "
+    "lines (L8-14) separate the changes: h1 with an `insert` of R8-12 (the header of `mul` "
+    "through the blank line after it, placed at the header by slider compaction), h2 with "
+    "a `replace` of L15/R20, as git's patience diff gives. Stats: `linesAdded: 6`, "
+    "`linesRemoved: 1`, `linesUnchanged: 16`.",
+)
+
+# 062 -------------------------------------------------------------------------
+_kv_left = [f"option.{n:02d} = {n * 3}" for n in range(1, 25)]
+_kv_right = [f"option.{n:02d} = {n * 3 + (1 if n % 4 == 0 else 0)}" for n in range(1, 25)]
+case(
+    "062-context-zero-many-hunks",
+    "properties",
+    lf(*_kv_left),
+    lf(*_kv_right),
+    opts(context=0),
+    "Every fourth line of a 24-line properties file changes its value, with `context: 0`. "
+    "Each change op is then its own hunk and holds no equal op (spec 7.4). A correct result "
+    "has six hunks, h1-h6, each a single one-line `replace` at L4, L8, L12, L16, L20 and "
+    "L24, `hunkCount: 6`, `changeCount: 6` and `linesUnchanged: 18`.",
+)
+
+# 063 -------------------------------------------------------------------------
+_notes = [f"Note {n}: the {['north', 'east', 'south', 'west'][n % 4]} gate closes at {17 + n % 4}:00." for n in range(1, 31)]
+_notes_right = list(_notes)
+_notes_right[4] = _notes_right[4].replace("closes", "opens")
+_notes_right[20] = _notes_right[20].replace("closes", "opens")
+case(
+    "063-context-eight-joins-hunks",
+    "txt",
+    lf(*_notes),
+    lf(*_notes_right),
+    opts(context=8),
+    "Two one-line edits fifteen lines apart (L5 and L21) in a 30-line file, with "
+    "`context: 8`. Fifteen equal lines between them are at most 2 x 8, so they stay in one "
+    "hunk: a correct result has one hunk covering L1-29 (four equal lines before L5, the "
+    "fifteen between, eight after L21), `hunkCount: 1`, `changeCount: 2` and "
+    "`linesUnchanged: 28`.",
+)
+
+# 064 -------------------------------------------------------------------------
+case(
+    "064-all-ignore-options",
+    "log",
+    lf(
+        "2026-06-01T10:00:00Z  Service STARTED on port 8080",
+        "",
+        "2026-06-01T10:00:02Z  Loaded 12 plugins",
+        "2026-06-01T10:00:03Z  Cache   warm",
+        "2026-06-01T10:00:09Z  Listening",
+    ),
+    lf(
+        "2026-06-02T08:30:00Z service started on port 8080",
+        "2026-06-02T08:30:01Z loaded 12 Plugins",
+        "",
+        "",
+        "2026-06-02T08:30:01Z cache warm",
+        "2026-06-02T08:30:07Z listening on 0.0.0.0",
+    ),
+    opts(whitespace="all", case=True, blank_lines=True, regex=[r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"]),
+    "Every ignore option at once: `ignore.regex` masks the leading timestamps, "
+    "`ignore.whitespace: \"all\"` removes the spacing differences, `ignore.case: true` folds "
+    "the capitalization and `ignore.blankLines: true` turns blank-only changes into "
+    "`ignored` ops. Only the last line has a real change (`on 0.0.0.0` appended). A correct "
+    "result has one hunk: equal L1/R1, `ignored` L2 (a blank line removed), equal L3/R2, "
+    "`ignored` R3-4 (two blank lines added), equal L4/R5 and `replace` L5/R6. Stats: "
+    "`changeCount: 1`, `linesUnchanged: 3` and `similarity: 0.75` = 2 x 3 / ((5 - 1) + "
+    "(6 - 2)), the ignored lines left out of the denominator.",
+)
+
+# 065 -------------------------------------------------------------------------
+case(
+    "065-regex-commit-ids-word",
+    "md",
+    lf(
+        "## 2.3.0",
+        "- 3f9a2c1 fix crash when the cache folder is missing",
+        "- b81d0e4 add a --quiet flag to the sync command",
+        "- 77c3aa9 speed up startup by loading plugins lazily",
+    ),
+    lf(
+        "## 2.3.0",
+        "- 1e0c5bd fix crash when the cache directory is missing",
+        "- 9a2f4c8 add a --quiet flag to the sync command",
+        "- 04be71d speed up startup by loading plugins on demand",
+    ),
+    opts(granularity="word", regex=[r"\b[0-9a-f]{7}\b"]),
+    "A changelog whose commit ids all changed after a rebase, with `ignore.regex` masking "
+    "seven-digit hexadecimal ids and `granularity: \"word\"`. L3 differs only in its masked "
+    "id, so it is equal; L2 and L4 form two `replace` ops. Masked ids get no span (moves "
+    "spec 3.2), so a correct result has word spans only on `folder`/`directory` (L2/R2) and "
+    "`lazily`/`on demand` (L4/R4).",
+)
+
+# 066 -------------------------------------------------------------------------
+case(
+    "066-char-utf16-astral",
+    "txt",
+    lf(
+        "𝑓(𝑥) = 𝑥² + 1",
+        "名前: 𠀋太郎",
+        "mood: 🙂 fine",
+    ),
+    lf(
+        "𝑓(𝑦) = 𝑦² + 1",
+        "名前: 𠀋次郎",
+        "mood: 🙃 fine",
+    ),
+    opts(granularity="char", position="utf-16"),
+    "Characters outside the Basic Multilingual Plane, which take two UTF-16 code units: "
+    "mathematical italic letters, a CJK Extension B ideograph and emoji, with `granularity: "
+    "\"char\"` and `positionEncoding: \"utf-16\"`. A correct result has one `replace` of "
+    "L1-3/R1-3 with grapheme spans of two units for each changed astral character "
+    "(`𝑥`/`𝑦` at units 3 and 9 of L1/R1, `🙂`/`🙃` at unit 6 of L3/R3) and one unit for "
+    "`太`/`次` at unit 6 of L2/R2 (after `𠀋`, which counts two).",
+)
+
+# 067 -------------------------------------------------------------------------
+case(
+    "067-smart-utf16-typescript",
+    "ts",
+    lf(
+        "export const messages = {",
+        "  saved: \"✅ Saved\",",
+        "  failed: \"❌ Could not save the document\",",
+        "  offline: \"📴 You are offline\",",
+        "};",
+    ),
+    lf(
+        "export const messages = {",
+        "  saved: \"✅ Saved\",",
+        "  failed: \"❌ Could not save the file\",",
+        "  offline: \"📶 Reconnecting…\",",
+        "};",
+    ),
+    opts(granularity="smart", position="utf-16"),
+    "TypeScript UI strings with emoji, run with `granularity: \"smart\"` and "
+    "`positionEncoding: \"utf-16\"`. L3 changes one word (`document` -> `file`), L4 replaces "
+    "its emoji (`📴`, two UTF-16 units) and most of its text. A correct result has one "
+    "`replace` of L3-4/R3-4 with word spans on `document`/`file` at unit 32 of L3/R3 (`❌` "
+    "is one unit), and on L4/R4 one span per side from the emoji to the end of the "
+    "string, `📴 You are offline` and `📶 Reconnecting…`, at unit 12: the changed words "
+    "are joined across the single spaces between them. The lines keep enough equal text "
+    "that the noise cutoff does not apply.",
+)
+
+# 068 -------------------------------------------------------------------------
+case(
+    "068-smart-codepoint-french",
+    "txt",
+    lf(
+        "L'élève a répondu à la question.",
+        "Le résumé est très bien écrit.",
+        "Rendez-vous à la bibliothèque.",
+    ),
+    lf(
+        "L'éleve a répondu à la question.",
+        "Le résumé est très bien rédigé.",
+        "Rendez-vous à la bibliothèque.",
+    ),
+    opts(granularity="smart", position="codepoint"),
+    "French prose with `granularity: \"smart\"` and `positionEncoding: \"codepoint\"`: an "
+    "accent is lost (`élève` -> `éleve`) and a word is replaced (`écrit` -> `rédigé`). A "
+    "correct result has one `replace` of L1-2/R1-2. The accent change is a one-word swap of "
+    "at least 4 graphemes, so the sub-word pass marks only `è`/`e` at code point 4 of L1/R1; "
+    "`écrit`/`rédigé` is not similar enough and keeps whole-word spans at code point 24.",
+)
+
+# 069 -------------------------------------------------------------------------
+case(
+    "069-word-codepoint-cyrillic-greek",
+    "txt",
+    lf(
+        "Москва — столица России.",
+        "Αθήνα είναι η πρωτεύουσα της Ελλάδας.",
+        "Kyiv is the capital of Ukraine.",
+    ),
+    lf(
+        "Санкт-Петербург — город в России.",
+        "Αθήνα είναι η μεγαλύτερη πόλη της Ελλάδας.",
+        "Kyiv is the capital of Ukraine.",
+    ),
+    opts(granularity="word", position="codepoint"),
+    "Cyrillic and Greek sentences with `granularity: \"word\"` and `positionEncoding: "
+    "\"codepoint\"` (every letter here is one code point but two UTF-8 bytes). A correct "
+    "result has one `replace` of L1-2/R1-2 with spans on the replaced words: on L1/R1 "
+    "`Москва` [0, 6) / `Санкт-Петербург` [0, 15) (the hyphen is inserted too) and `столица` "
+    "[9, 16) / ` город в` [17, 25); on L2/R2 `πρωτεύουσα` [14, 24) / ` μεγαλύτερη πόλη` "
+    "[13, 29). A right span may start with a space: the token diff pairs the left space "
+    "with a later right one, and two right spans one space apart are merged (moves spec "
+    "3.2). L3 is equal.",
+)
+
+# 070 -------------------------------------------------------------------------
+case(
+    "070-char-utf8-versions",
+    "toml",
+    lf(
+        "[dependencies]",
+        "serde = \"1.0.219\"",
+        "regex = \"1.11.1\"",
+        "smallvec = \"1.15.0\"",
+    ),
+    lf(
+        "[dependencies]",
+        "serde = \"1.0.228\"",
+        "regex = \"1.12.2\"",
+        "smallvec = \"1.15.0\"",
+    ),
+    opts(granularity="char", position="utf-8"),
+    "Two dependency version bumps in a TOML file, with `granularity: \"char\"` and "
+    "`positionEncoding: \"utf-8\"`: characters are graphemes, so a span can cover one digit. "
+    "A correct result has one `replace` of L2-3/R2-3 with character spans on the changed "
+    "digits only (`19`/`28` at the end of the serde version, and the two changed digits of "
+    "the regex version), and equal L1 and L4.",
+)
+
+# 071 -------------------------------------------------------------------------
+case(
+    "071-csharp-crlf-refactor",
+    "cs",
+    crlf(
+        "public sealed class Thermostat",
+        "{",
+        "    private double target = 20.0;",
+        "",
+        "    public void Raise() { target = target + 0.5; }",
+        "    public void Lower() { target = target - 0.5; }",
+        "",
+        "    public double Target => target;",
+        "}",
+    ),
+    crlf(
+        "public sealed class Thermostat",
+        "{",
+        "    private const double Step = 0.5;",
+        "    private double target = 20.0;",
+        "",
+        "    public void Raise() => target += Step;",
+        "    public void Lower() => target -= Step;",
+        "",
+        "    public double Target => target;",
+        "}",
+    ),
+    opts(),
+    "A C# class with CRLF line endings on both sides: a constant is introduced and two "
+    "methods become expression-bodied. Both sides use CRLF throughout, so the terminator "
+    "never makes a line differ. A correct result has one hunk: equal L1-2, `insert` R3, "
+    "equal L3-4, `replace` L5-6/R6-7, equal L7-9; both sides `lineTerminator: \"crlf\"`, "
+    "`linesAdded: 3`, `linesRemoved: 2`, `linesUnchanged: 7`.",
+)
+
+# 072 -------------------------------------------------------------------------
+_fn_a = [
+    "function formatDate(date) {",
+    "  return date.toISOString().slice(0, 10);",
+    "}",
+]
+_fn_b = [
+    "function formatMoney(cents, currency) {",
+    "  return (cents / 100).toFixed(2) + \" \" + currency;",
+    "}",
+]
+_fn_c = [
+    "function formatPercent(ratio) {",
+    "  return Math.round(ratio * 100) + \"%\";",
+    "}",
+]
+case(
+    "072-js-functions-reordered-no-moves",
+    "js",
+    lf(*_fn_a, "", *_fn_b, "", *_fn_c),
+    lf(*_fn_c, "", *_fn_a, "", *_fn_b),
+    opts(),
+    "Three JavaScript functions reordered (the last one moved to the top), with "
+    "`detectMoves: false`. The line diff keeps the two functions that stay in order and "
+    "reports the moved one as a deletion at the end and an insertion at the top. The seven "
+    "equal lines between them are more than 2 x 3, so a correct result has two hunks: h1 "
+    "with `insert` R1-4 (the function and a blank line) and equal L1-3/R5-7, h2 with equal "
+    "L5-7/R9-11 and `delete` L8-11 (the blank line and the function). `moves: []`, "
+    "`linesAdded: 4`, `linesRemoved: 4`, `linesUnchanged: 7`.",
+)
+
+# 073 -------------------------------------------------------------------------
+case(
+    "073-myers-repeated-lines",
+    "txt",
+    lf("begin", "step", "end", "begin", "step", "end", "begin", "step", "end"),
+    lf("begin", "step", "end", "begin", "step", "check", "end", "begin", "step", "end", "end"),
+    opts(algorithm="myers"),
+    "Lines that repeat three times, run with `algorithm: \"myers\"`: a `check` line is "
+    "inserted into the second group and an extra `end` is appended. Many alignments are "
+    "minimal; slider compaction puts each insertion in its canonical place. A correct "
+    "result is a minimal edit script with two one-line inserts (`check` at R6 and `end` "
+    "at R11), `linesAdded: 2`, `linesRemoved: 0`, `linesUnchanged: 9`, and the same hunks "
+    "as `git diff --diff-algorithm=myers`.",
+)
+
+# 074-080: the smart granularity cases of moves spec section 3.5 (subword, noise
+# and too-big are already covered by 033, 034 and 035).
+
+# 074 -------------------------------------------------------------------------
+case(
+    "074-smart-identifier",
+    "py",
+    lf("name = user.getUserName()", "print(name)"),
+    lf("name = user.getUsername()", "print(name)"),
+    opts(granularity="smart"),
+    "Moves spec 3.5 `identifier`: `getUserName()` -> `getUsername()` with `granularity: "
+    "\"smart\"`. The word pass sees one changed word-like token on each side "
+    "(`user.getUserName` / `user.getUsername`: UAX #29 joins letters across the full "
+    "stop), long and similar enough for the sub-word pass. A correct result has one "
+    "`replace` of L1/R1 with char spans `N` (left) and `n` (right) at byte 19, and equal L2.",
+)
+
+# 075 -------------------------------------------------------------------------
+case(
+    "075-smart-short-word",
+    "txt",
+    lf("foo bar"),
+    lf("foo baz"),
+    opts(granularity="smart"),
+    "Moves spec 3.5 `short-word`: `foo bar` -> `foo baz`. The changed words have 3 "
+    "graphemes, fewer than `SMART_SUBWORD_MIN_GRAPHEMES` (4), so the sub-word pass does not "
+    "run. A correct result has one `replace` of L1/R1 with whole-word spans `bar` / `baz` at "
+    "`[4, 7)`.",
+)
+
+# 076 -------------------------------------------------------------------------
+case(
+    "076-smart-two-words",
+    "txt",
+    lf("I ate a red apple"),
+    lf("I ate a green pear"),
+    opts(granularity="smart"),
+    "Moves spec 3.5 `two-words`: `I ate a red apple` -> `I ate a green pear`. Two changed "
+    "words in a row form one change region with more than one token, so the sub-word pass "
+    "does not apply, and the two spans of each side, one space apart, are merged. A correct "
+    "result has one `replace` of L1/R1 with spans `red apple` `[8, 17)` (left) and "
+    "`green pear` `[8, 18)` (right).",
+)
+
+# 077 -------------------------------------------------------------------------
+case(
+    "077-smart-cjk",
+    "txt",
+    lf("我喜欢猫"),
+    lf("我喜欢狗"),
+    opts(granularity="smart"),
+    "Moves spec 3.5 `cjk`: `我喜欢猫` -> `我喜欢狗`. Every grapheme is Han, a spaceless "
+    "script, so `smart` refines at `char` level (moves spec 3.3 step 1). A correct result "
+    "has one `replace` of L1/R1 with char spans `猫` / `狗` at bytes `[9, 12)`.",
+)
+
+# 078 -------------------------------------------------------------------------
+case(
+    "078-smart-thai",
+    "txt",
+    lf("ฉันชอบแมว"),
+    lf("ฉันชอบหมา"),
+    opts(granularity="smart"),
+    "Moves spec 3.5 `thai`: one Thai word changes (`แมว`, cat, -> `หมา`, dog) in a "
+    "sentence written without spaces. Thai is a spaceless script, so `smart` refines at "
+    "`char` level, where tokens are graphemes. A correct result has one `replace` of L1/R1 "
+    "with two char spans per side, `แ`/`ห` at bytes `[18, 21)` and `ว`/`า` at `[24, 27)`: "
+    "the unchanged `ฉันชอบ` (bytes 0-17) and the `ม` the two words share stay equal.",
+)
+
+# 079 -------------------------------------------------------------------------
+case(
+    "079-smart-emoji-zwj",
+    "txt",
+    lf("\U0001F469‍\U0001F4BB ok"),
+    lf("\U0001F468‍\U0001F4BB ok"),
+    opts(granularity="smart"),
+    "Moves spec 3.5 `emoji`: `👩‍💻 ok` -> `👨‍💻 ok`. The ZWJ sequence is one grapheme, so "
+    "a span never splits it. A correct result has one `replace` of L1/R1 with one span per "
+    "side covering the whole cluster, bytes `[0, 11)` on both sides, and no span on ` ok`.",
+)
+
+# 080 -------------------------------------------------------------------------
+case(
+    "080-smart-insert-only",
+    "txt",
+    lf("alpha", "gamma"),
+    lf("alpha", "beta", "gamma"),
+    opts(granularity="smart"),
+    "Moves spec 3.5 `insert-only`: a pure insertion with `granularity: \"smart\"`. Only "
+    "`replace` ops are refined, so a correct result has one hunk with equal L1, an `insert` "
+    "of R2 with `inline: []`, and equal L2/R3; no warnings.",
+)
+
 
 def write_case(entry: dict) -> None:
     directory = ROOT / entry["slug"]
@@ -1295,8 +2433,8 @@ def write_case(entry: dict) -> None:
 
 def self_check() -> None:
     slugs = [entry["slug"] for entry in CASES]
-    if len(slugs) != 43 or len(set(slugs)) != 43:
-        raise SystemExit(f"expected 43 unique cases, found {len(slugs)}")
+    if len(slugs) != 80 or len(set(slugs)) != 80:
+        raise SystemExit(f"expected 80 unique cases, found {len(slugs)}")
     for number, slug in enumerate(slugs, start=1):
         if not slug.startswith(f"{number:03d}-"):
             raise SystemExit(f"case {slug} is out of order")

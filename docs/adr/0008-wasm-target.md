@@ -5,7 +5,8 @@
 
 ## Context
 
-diffyman ships a browser and edge build (`@diffyman/wasm`) from the same Rust core (ADR 0001, ADR 0007),
+diffyman ships a browser and edge build (`diffyman-wasm`, the package wasm-pack builds from
+`bindings/wasm`, used by `@diffyman/react`) from the same Rust core (ADR 0001, ADR 0007),
 and later a `wasm32-wasip1` build for Go and Java without native code. Spike B proved the WASM binding
 returns the same document as the CLI. Spike C ([results](../spikes/C-wasm-build.md)) measured size,
 speed and browsers, and checked the planned crates on `wasm32-unknown-unknown`:

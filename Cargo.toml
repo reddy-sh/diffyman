@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "bindings/python", "bindings/wasm"]
+members = ["crates/*", "bindings/python", "bindings/wasm", "bindings/java", "bindings/node"]
 exclude = ["spikes", "fuzz"]
 
 [workspace.package]
@@ -86,10 +86,19 @@ clap = { version = "=4.6.7", features = ["derive"] }
 # Bindings (thin JSON-in/JSON-out wrappers, docs/adr/0007-binding-strategy.md)
 pyo3 = { version = "=0.30.1", features = ["abi3-py311"] }
 wasm-bindgen = "=0.2.130"
+jni = "=0.22.4"
+# Node.js (bindings/node): napi4 is the Node-API level the addon needs;
+# `dyn-symbols` resolves Node-API from the loading process on every platform.
+napi = { version = "=3.16.1", default-features = false, features = ["napi4", "dyn-symbols"] }
+napi-derive = "=3.7.0"
+napi-build = "=2.6.0"
+# Generates the C header of diffyman-ffi in a test; never linked into a library.
+cbindgen = { version = "=0.29.4", default-features = false }
 
 [workspace.lints.rust]
-# Denied everywhere. The one exception is the CLI's memory map of input files
-# (`#[allow(unsafe_code)]` on that function, with its safety argument).
+# Denied everywhere. The exceptions are the CLI's memory map of input files
+# (`#[allow(unsafe_code)]` on that function, with its safety argument) and
+# the C ABI in diffyman-ffi, whose exported functions take raw pointers.
 unsafe_code = "deny"
 unused_qualifications = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }

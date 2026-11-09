@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 3,
+        "count": 5
+      },
+      "right": {
+        "start": 8,
+        "count": 6
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "The per-client query moved below the per-status one; on the way it gained a column and its parameter was renamed. Every unchanged line inside the block stands alone between edits and is below the minimum move size on its own (the join line has 37 alphanumeric characters, under the 40 a single line needs), so only an edited move describes it."
+}

@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 4,
+        "count": 2
+      },
+      "right": {
+        "start": 7,
+        "count": 2
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "The boundary twin of 064: the two moved lines have exactly 20 alphanumeric characters and both are non-trivial, so they meet the minimum move size and form a pure move."
+}

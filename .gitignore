@@ -6,7 +6,15 @@ target/
 node_modules/
 # wasm-pack output (pkg/, pkg-web/, pkg-node/, ...) is never committed.
 /bindings/wasm/pkg*/
+# Node addon and the native type stubs written by `napi build` (bindings/node)
+/bindings/node/*.node
+/bindings/node/native.d.ts
 dist/
+coverage/
+*.tsbuildinfo
+# `npm pack` tarballs (a corpus input may still be a .tgz)
+*.tgz
+!/tests/corpus/**/*.tgz
 
 # Python
 __pycache__/
@@ -15,6 +23,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 # Native extension copied in by `maturin develop`
 /bindings/python/python/diffyman/*.so
 /bindings/python/python/diffyman/*.pyd

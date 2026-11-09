@@ -1,0 +1,3 @@
+# 049-java-imports-sorted
+
+The import block of a Java class is sorted and one import (`java.util.Objects`) is added. Every import line still exists on both sides, but the order changed, so a line diff must give up some of them: histogram keeps the longest run it can anchor and reports the rest as removed and added. A correct result is one hunk covering L1-10: equal L1-2, `delete` L3-5 (`Map`, `Instant`, `List`), equal L6/R3 (`IOException`), `insert` R4 (`Instant`), equal L7/R5 (`HashMap`), `insert` R6-8 (`List`, `Map`, `Objects`) and equal L8-10/R9-11, as git's histogram diff gives. Two of the five old imports stay unchanged: `linesAdded: 4`, `linesRemoved: 3`, `linesUnchanged: 8`; without `detectMoves` there are no moves.

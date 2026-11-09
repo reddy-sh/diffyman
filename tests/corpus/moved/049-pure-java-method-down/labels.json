@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 10,
+        "count": 4
+      },
+      "right": {
+        "start": 17,
+        "count": 4
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A Java class: toString() with its @Override annotation moved below plus(), to the end of the class. The label runs from the annotation to the method's closing brace."
+}

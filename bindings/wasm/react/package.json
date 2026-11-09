@@ -1,0 +1,60 @@
+{
+  "name": "@diffyman/react",
+  "version": "0.0.1",
+  "description": "React hook for the diffyman diff engine: runs the WASM build in a Web Worker",
+  "license": "MIT OR Apache-2.0",
+  "author": "Sankara Reddy Telukutla <sankara@reddy.sh> (https://reddy.sh)",
+  "homepage": "https://reddy.sh",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/reddy-sh/diffyman",
+    "directory": "bindings/wasm/react"
+  },
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "./dist/worker.js"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "default": "./dist/worker.js"
+    },
+    "./worker-runtime": {
+      "types": "./dist/worker-runtime.d.ts",
+      "default": "./dist/worker-runtime.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "gen:types": "node scripts/gen-types.mjs",
+    "check:types": "node scripts/gen-types.mjs --check"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "diffyman-wasm": "file:../pkg-web",
+    "happy-dom": "21.0.4",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}

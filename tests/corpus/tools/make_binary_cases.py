@@ -340,6 +340,195 @@ case(
 )
 
 
+# --- 018-029: file formats by magic number, extension fallback, canonical ---
+# --- positions, empty inputs, the chunked path and the control-byte rule. ---
+
+
+def flip(data: bytes, start: int, length: int) -> bytes:
+    """`data` with `length` bytes from `start` inverted (every byte differs)."""
+    out = bytearray(data)
+    for i in range(start, start + length):
+        out[i] ^= 0xFF
+    return bytes(out)
+
+
+# 018 -------------------------------------------------------------------------
+_gif = b"GIF89a" + struct.pack("<HHBBB", 32, 32, 0xF7, 0, 0) + noise(18, 768) + b"\x2c" + noise(180, 600) + b"\x3b"
+case(
+    "018-gif-palette-edit",
+    ("gif", _gif),
+    ("gif", flip(_gif, 13 + 3 * 5, 3)),
+    opts(),
+    "A GIF (`GIF89a` magic, logical screen descriptor, a 256-colour palette and image bytes) "
+    "whose palette entry 5 changed colour: three bytes at offset 28. A correct result is "
+    "`mediaType: \"image/gif\"` on both sides (by magic) and exactly one `replace` range "
+    "`{leftOffset: 28, leftLength: 3, rightOffset: 28, rightLength: 3}`.",
+)
+
+# 019 -------------------------------------------------------------------------
+_pdf = (
+    b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"
+    + b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+    + b"2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n"
+    + b"3 0 obj << /Length 512 >> stream\n" + noise(19, 512) + b"\nendstream endobj\n"
+    + b"trailer << /Root 1 0 R >>\n%%EOF\n"
+)
+_pdf_update = (
+    b"4 0 obj << /Producer (diffyman corpus) >> endobj\n"
+    + b"trailer << /Root 1 0 R /Info 4 0 R /Prev 0 >>\n%%EOF\n"
+)
+case(
+    "019-pdf-incremental-update",
+    ("pdf", _pdf),
+    ("pdf", _pdf + _pdf_update),
+    opts(),
+    "A PDF and the same file after an incremental update, which appends a new object and "
+    "trailer and never rewrites earlier bytes. The binary comment on line 2 and the "
+    "stream make it binary. A correct result is `mediaType: \"application/pdf\"` on both "
+    f"sides and one `insert` range at the end: `{{leftOffset: {len(_pdf)}, leftLength: 0, "
+    f"rightOffset: {len(_pdf)}, rightLength: {len(_pdf_update)}}}`.",
+)
+
+# 020 -------------------------------------------------------------------------
+_wasm_head = b"\x00asm\x01\x00\x00\x00"
+_wasm_types = b"\x01\x05\x01\x60\x00\x01\x7f"
+# Section sizes are unsigned LEB128: 300 is 0xAC 0x02.
+_wasm_code = b"\x0a\xac\x02" + noise(20, 300)
+# A custom section (id 0, 13 bytes): the name `name`, then the function-names
+# subsection (id 1, 6 bytes) naming function 0 `run`.
+_wasm_custom = b"\x00\x0d\x04name" + b"\x01\x06\x01\x00\x03run"
+assert len(_wasm_custom) == 15
+case(
+    "020-wasm-section-inserted",
+    ("wasm", _wasm_head + _wasm_types + _wasm_code),
+    ("wasm", _wasm_head + _wasm_types + _wasm_custom + _wasm_code),
+    opts(),
+    "A WebAssembly module (`\\0asm` magic) that gained a 15-byte custom `name` section "
+    "between its type and code sections. A correct result is `mediaType: "
+    "\"application/wasm\"` on both sides and one `insert` range of 15 bytes at left offset "
+    "15 (after the 8-byte header and the 7-byte type section), with "
+    "`stats.bytes.added: 15`.",
+)
+
+# 021 -------------------------------------------------------------------------
+_sqlite = b"SQLite format 3\x00" + struct.pack(">H", 4096) + noise(21, 4 * 4096 - 18)
+case(
+    "021-sqlite-page-overwrite",
+    ("db", _sqlite),
+    ("db", flip(_sqlite, 2 * 4096 + 100, 100)),
+    opts(),
+    "A 16 KiB SQLite database file (`SQLite format 3` magic, 4 KiB pages) in which 100 bytes "
+    "of page 3 were rewritten in place. The extension `.db` is not in the table, so the "
+    "media type comes from the magic: `application/vnd.sqlite3`. A correct result is one "
+    "`replace` range `{leftOffset: 8292, leftLength: 100, rightOffset: 8292, rightLength: 100}`.",
+)
+
+# 022 -------------------------------------------------------------------------
+_elf = b"\x7fELF\x02\x01\x01\x00" + bytes(8) + b"\x03\x00\x3e\x00" + noise(22, 20000)
+case(
+    "022-elf-two-patches",
+    ("so", _elf),
+    ("so", flip(flip(_elf, 1000, 4), 15000, 4)),
+    opts(),
+    "A shared library (`\\x7fELF` magic) with two 4-byte patches far apart, as a binary "
+    "patch tool writes them. A correct result has `mediaType: \"application/x-executable\"` "
+    "from the magic on both sides (the `.so` extension is not in the table) and exactly "
+    "two `replace` ranges, 4 bytes at offset 1000 and 4 bytes at offset 15000, the same "
+    "offsets on both sides.",
+)
+
+# 023 -------------------------------------------------------------------------
+_body = noise(23, 6000)
+_header = b"HDR1" + noise(230, 60)
+case(
+    "023-prepended-header",
+    ("bin", _body),
+    ("bin", _header + _body),
+    opts(),
+    "6000 random bytes, and the same bytes with a 64-byte header in front. Nothing is "
+    "common at the start, so the common suffix carries the match. A correct result is one "
+    "`insert` range `{leftOffset: 0, leftLength: 0, rightOffset: 0, rightLength: 64}`.",
+)
+
+# 024 -------------------------------------------------------------------------
+case(
+    "024-both-empty-forced-binary",
+    ("bin", b""),
+    ("bin", b""),
+    opts(adapter="binary"),
+    "Two empty inputs with `adapter: \"binary\"`. A correct result is `kind: \"binary\"`, "
+    "`status: \"identical\"`, `bytes: []`, `stats.bytes` all zero and `similarity: 1` "
+    "(L + R = 0); both sides report `size: 0` and the media type of the `.bin` extension.",
+)
+
+# 025 -------------------------------------------------------------------------
+_large = noise(25, 192 * 1024)
+case(
+    "025-large-delete-chunked",
+    ("bin", _large),
+    ("bin", _large[:50_000] + _large[120_000:]),
+    opts(),
+    "192 KiB of random bytes with 70000 bytes cut out at offset 50000. The inputs are over "
+    "the byte-alignment limit, so the chunked path finds the cut. A correct result is "
+    "exactly one `delete` range of 70000 bytes near offset 50000, `stats.bytes.removed: "
+    "70000`, and no `bytes-coarse-limit`.",
+)
+
+# 026 -------------------------------------------------------------------------
+case(
+    "026-periodic-delete-canonical",
+    ("bin", b"\x00\x01" * 2048),
+    ("bin", b"\x00\x01" * 2047),
+    opts(),
+    "A periodic input (the two bytes 00 01, 2048 times) and the same with one period "
+    "removed. Any period could be the one removed; the common prefix is set aside first "
+    "(spec 17), so the answer is canonical: a correct result is one `delete` range at the "
+    "end, `{leftOffset: 4094, leftLength: 2, rightOffset: 4094, rightLength: 0}`.",
+)
+
+# 027 -------------------------------------------------------------------------
+case(
+    "027-binary-vs-empty",
+    ("bin", _blob[:300]),
+    ("bin", b""),
+    opts(),
+    "300 random bytes against an empty file. The empty side is compatible with both "
+    "adapters, so the document is binary because of the left side. A correct result is one "
+    "`delete` range `{leftOffset: 0, leftLength: 300, rightOffset: 0, rightLength: 0}`, "
+    "`stats.similarity: 0`, and the empty side reports `encoding: \"utf-8\"`.",
+)
+
+# 028 -------------------------------------------------------------------------
+_ctrl_line = "\x01key\x02value\x03\n"  # 3 control bytes in 12 bytes: over 10 %
+assert len(_ctrl_line) == 12
+case(
+    "028-control-bytes-over-limit",
+    ("txt", (_ctrl_line * 40).encode("utf-8")),
+    ("txt", (_ctrl_line * 20 + _ctrl_line.replace("value", "VALUE") + _ctrl_line * 19).encode("utf-8")),
+    opts(),
+    "Valid UTF-8 without NUL bytes, named `.txt`: 40 records of 12 bytes, each with three "
+    "control bytes (U+0001-U+0003), so 25 % of the sniff window (the whole 480-byte input) "
+    "is control bytes, more than the 10 % a text input may have (spec 16.1). Both sides are "
+    "binary, so there is no `binary-fallback`, and the `txt` extension applies to text only: "
+    "a correct result has `mediaType: \"application/octet-stream\"` and `encoding: null` on "
+    "both sides, and one `replace` range of 5 bytes at offset 245 (`value` -> `VALUE` in "
+    "record 21).",
+)
+
+# 029 -------------------------------------------------------------------------
+_nomagic = b"\x00" + noise(29, 2999)
+case(
+    "029-extension-fallback-media",
+    ("jpg", _nomagic),
+    ("jpg", flip(_nomagic, 2000, 1)),
+    opts(),
+    "Binary data named `.jpg` that does not start with a JPEG signature (it starts with a "
+    "NUL byte). No magic number matches, so the binary entry of the extension table gives "
+    "the media type: a correct result has `mediaType: \"image/jpeg\"` on both sides and one "
+    "`replace` range of 1 byte at offset 2000.",
+)
+
+
 def write_case(entry: dict) -> None:
     directory = ROOT / entry["slug"]
     directory.mkdir(parents=True, exist_ok=True)

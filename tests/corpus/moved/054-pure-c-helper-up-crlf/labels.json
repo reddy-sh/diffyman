@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 16,
+        "count": 9
+      },
+      "right": {
+        "start": 4,
+        "count": 9
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A C file with CRLF line endings on both sides: the static helper node_new() moved above list_push(), which calls it, so no forward declaration is needed. Both blocks share `{`, `}` and `return` shapes; the label covers the helper from its signature to its closing brace."
+}

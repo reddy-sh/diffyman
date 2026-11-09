@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 8,
+        "count": 8
+      },
+      "right": {
+        "start": 17,
+        "count": 8
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "The impl block moved below fill(), and the field cap was renamed to capacity on every line that names it (the struct definition changes in place). The unchanged runs inside the block are single lines or the two-line `}` / `pub fn is_full` run with 19 alphanumeric characters, so no part of the block is a pure move on its own. fill() is longer than the unchanged lines of the block, so the line diff keeps fill() in place."
+}

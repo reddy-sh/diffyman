@@ -34,7 +34,8 @@ Byte-identical output held for all 60 cases, and for 40 more line diffs.
    `status: "error"`.
 6. **Conformance gates every binding.** `tests/conformance/run_bindings.py` runs every corpus case
    through the CLI and every binding and requires byte-identical documents, with `provenance` removed.
-   It runs in CI on Linux and macOS. A new binding joins it before it ships.
+   It runs in CI on Linux, macOS and Windows, and CI compares the per-case SHA-256 of every
+   surface's document across the three. A new binding joins it before it ships.
 7. **Next bindings follow the same shape.** Node (napi-rs), Java (JNI) and the C ABI expose
    `diff(left, right, optionsJson[, leftName, rightName]) -> string` first and add typed wrappers on top.
 

@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 8,
+        "count": 3
+      },
+      "right": {
+        "start": 3,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A Markdown README: the Installation section (heading and two lines) moved above Usage. Usage is one line longer, so the line diff keeps it in place and Installation is the moved block."
+}

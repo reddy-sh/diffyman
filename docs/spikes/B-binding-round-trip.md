@@ -121,8 +121,8 @@ for the Rust crates.
 4. **Golden files for line-only moved inputs.** The 40 extra cases are checked only across surfaces.
    When move detection ships, the moved cases get real `moves[]` and these extra cases can be dropped
    or given their own golden files.
-5. **Node and Java.** napi-rs (`@diffyman/core`) and JNI join `run_bindings.py` as two more columns
-   when they are built.
+5. **Node and Java.** napi-rs (`@diffyman/node`) and JNI join `run_bindings.py` as two more columns
+   when they are built. (Done in Phase 2; the Node.js package was first planned as `@diffyman/core`.)
 
 ## Reproduce
 

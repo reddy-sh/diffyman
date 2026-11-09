@@ -1,0 +1,16 @@
+name: ci
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: make build
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: make lint
+  test:
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - run: make test
+      - run: make integration

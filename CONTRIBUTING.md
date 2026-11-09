@@ -62,24 +62,13 @@ Exit codes: `0` identical, `1` different, `2` error.
 
 ## Bindings
 
-Bindings are thin: bytes and an options JSON string go in, the engine's canonical JSON comes out ([ADR 0007](docs/adr/0007-binding-strategy.md)). `tests/conformance/run_bindings.py` checks that the CLI, the Python binding and the WASM binding return byte-identical documents for every corpus case. It needs [uv](https://docs.astral.sh/uv/), Node.js 22+, maturin 1.16.0 and wasm-pack 0.15.1:
+Bindings are thin: bytes and an options JSON string go in, the engine's canonical JSON comes out ([ADR 0007](docs/adr/0007-binding-strategy.md)). `tests/conformance/run_bindings.py` checks in one run that the CLI, the Python binding, the WASM binding (with and without archive support, [ADR 0008](docs/adr/0008-wasm-target.md)), the Node.js binding, the Java binding and the C ABI return byte-identical documents for every corpus case, equal to `expected.json` with `provenance` removed. [tests/conformance/README.md](tests/conformance/README.md) lists the build commands for every surface and the runner's flags (`--surfaces`, `--skip`, `--hashes`):
 
 ```sh
-cargo build --release -p diffyman-cli
-uv venv --python 3.12 bindings/python/.venv
-uv pip install --python bindings/python/.venv/bin/python maturin==1.16.0 pytest==9.2.0
-VIRTUAL_ENV=$PWD/bindings/python/.venv bindings/python/.venv/bin/maturin develop --uv --release -m bindings/python/Cargo.toml
-bindings/python/.venv/bin/python -m pytest -q bindings/python/tests
-wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node
-uv run --no-project --python 3.12 python tests/conformance/run_bindings.py
+uv run --no-project --python 3.12 python tests/conformance/run_bindings.py --cli target/release/diffyman
 ```
 
-The WASM package without archive support (feature `archives` off, [ADR 0008](docs/adr/0008-wasm-target.md)) must refuse the cases of [spec §19.7](docs/spec/diff-document.md) with an `unsupported` error and match on all others:
-
-```sh
-wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node-slim -- --no-default-features
-uv run --no-project --python 3.12 python tests/conformance/run_bindings.py --wasm-pkg bindings/wasm/pkg-node-slim
-```
+CI runs it on Linux, macOS and Windows and compares the per-case SHA-256 tables of the three runs, so the documents are also identical across operating systems.
 
 ## Golden corpus
 

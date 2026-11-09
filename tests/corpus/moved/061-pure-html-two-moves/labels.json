@@ -1,0 +1,27 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 5,
+        "count": 2
+      },
+      "right": {
+        "start": 20,
+        "count": 2
+      },
+      "kind": "pure"
+    },
+    {
+      "left": {
+        "start": 19,
+        "count": 3
+      },
+      "right": {
+        "start": 8,
+        "count": 3
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "Two independent moves in one HTML page: the two script tags moved from the head to the end of the body, and the footer moved above the header. The script tags change indentation context but not indentation, so both moves are pure."
+}

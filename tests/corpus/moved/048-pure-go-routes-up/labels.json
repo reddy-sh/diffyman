@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 26,
+        "count": 4
+      },
+      "right": {
+        "start": 8,
+        "count": 4
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A Go file: Routes() moved from the end of the file to just below the imports, above the handlers it registers. The two handlers stay in place."
+}

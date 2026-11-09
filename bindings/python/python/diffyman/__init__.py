@@ -27,6 +27,11 @@ the limit raises :class:`OSError` (``limit-exceeded: ...``).
 Options may be a mapping (serialized to JSON), a JSON string, or ``None`` for
 the defaults. Invalid options raise :class:`DiffymanError` (a ``ValueError``)
 and produce no document.
+
+:func:`diff_document` returns a plain ``dict`` typed as
+:class:`diffyman.types.DiffDocument`; the ``TypedDict`` classes in
+:mod:`diffyman.types` are generated from the JSON Schema
+(:func:`document_schema`, the same text as ``diffyman schema``).
 """
 
 from __future__ import annotations
@@ -39,18 +44,22 @@ from typing import Any, Union
 from ._native import ENGINE_VERSION, MAX_STREAM_BYTES, SCHEMA_VERSION, DiffymanError
 from ._native import diff as _native_diff
 from ._native import diff_paths as _native_diff_paths
+from ._native import document_schema as _native_document_schema
 from ._native import read_path as _native_read_path
+from .types import DiffDocument
 
 __all__ = [
     "ENGINE_VERSION",
     "MAX_STREAM_BYTES",
     "SCHEMA_VERSION",
+    "DiffDocument",
     "DiffymanError",
     "Options",
     "Source",
     "__version__",
     "diff",
     "diff_document",
+    "document_schema",
 ]
 
 __version__ = ENGINE_VERSION
@@ -155,9 +164,13 @@ def diff_document(
     left_name: str | None = None,
     right_name: str | None = None,
     max_input_size: int | None = None,
-) -> dict[str, Any]:
-    """Like :func:`diff`, but return the parsed document as a ``dict``."""
-    result: dict[str, Any] = json.loads(
+) -> DiffDocument:
+    """Like :func:`diff`, but return the parsed document as a ``dict``.
+
+    The ``dict`` is what :func:`json.loads` gives; its type
+    :class:`~diffyman.types.DiffDocument` only guides a type checker.
+    """
+    result: DiffDocument = json.loads(
         diff(
             left,
             right,
@@ -168,3 +181,9 @@ def diff_document(
         )
     )
     return result
+
+
+def document_schema() -> dict[str, Any]:
+    """The JSON Schema (2020-12) of the Diff Document, as ``diffyman schema`` prints it."""
+    schema: dict[str, Any] = json.loads(_native_document_schema())
+    return schema

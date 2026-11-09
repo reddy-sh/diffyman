@@ -1,0 +1,3 @@
+# 030-folder-many-files
+
+Two folders of 21 files in five folders. On the right two modules changed (`pkg/net/beta.js` gets a new id, `pkg/ui/omega.js` a new id and an added line), `pkg/util/gamma.js` was removed, and `pkg/util/epsilon.js` and `pkg/extra/zeta.js` (in a new folder) were added. A correct result lists every path once, sorted: the two edited files `modified` with text child documents, `pkg/util/gamma.js` `removed`, `pkg/extra` and both new files `added`, and the other 18 files and the five folders `unchanged` (`entriesLeft: 26`, `entriesRight: 28`). No entry is `moved`: every added file has content no removed file had.

@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "Six import lines in reverse order. Every line exists on both sides, but no two lines that were next to each other are still next to each other in the same order, so every candidate block is a single line, and each has fewer than 40 alphanumeric characters (the longest has 32). A reader would call this a reorder, not a move."
+}

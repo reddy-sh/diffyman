@@ -78,6 +78,100 @@ SPANS: dict[str, list[tuple[str, int, str]]] = {
         ("right", 1, "02"),
         ("right", 2, "9"),
     ],
+    # UAX #29 keeps letters joined by a full stop in one word segment.
+    "045-js-rename-word-utf16": [
+        ("left", 2, "usr"),
+        ("left", 3, "usr.name"),
+        ("left", 4, "usr.locale"),
+        ("right", 2, "user"),
+        ("right", 3, "user.name"),
+        ("right", 4, "user.locale"),
+    ],
+    "047-go-smart-error-wrap": [
+        ("right", 4, 'fmt.Errorf("read %s: %w", path, '),
+        ("right", 4, ")"),
+        ("right", 8, 'fmt.Errorf("parse %s: %w", path, '),
+        ("right", 8, ")"),
+    ],
+    "048-rust-char-utf8": [
+        ("left", 3, "z"),
+        ("right", 3, "f"),
+        ("left", 5, "9"),
+        ("left", 6, "ö"),
+        ("right", 5, "7"),
+        ("right", 6, "ő"),
+    ],
+    "054-markdown-smart-codepoint": [
+        ("left", 3, "8"),
+        ("left", 3, "00"),
+        ("left", 4, "û"),
+        ("right", 3, "7"),
+        ("right", 3, "30"),
+        ("right", 4, "u"),
+    ],
+    "055-html-word-codepoint": [
+        ("left", 2, "en"),
+        ("right", 2, "sv"),
+        ("left", 6, "length"),
+        ("right", 5, " warning"),
+        ("right", 6, "size"),
+    ],
+    # Masked commit ids never get a span.
+    "065-regex-commit-ids-word": [
+        ("left", 2, "folder"),
+        ("right", 2, "directory"),
+        ("left", 4, "lazily"),
+        ("right", 4, "on demand"),
+    ],
+    "066-char-utf16-astral": [
+        ("left", 1, "\U0001D465"),
+        ("left", 1, "\U0001D465"),
+        ("left", 2, "太"),
+        ("left", 3, "\U0001F642"),
+        ("right", 1, "\U0001D466"),
+        ("right", 1, "\U0001D466"),
+        ("right", 2, "次"),
+        ("right", 3, "\U0001F643"),
+    ],
+    "067-smart-utf16-typescript": [
+        ("left", 3, "document"),
+        ("left", 4, "\U0001F4F4 You are offline"),
+        ("right", 3, "file"),
+        ("right", 4, "\U0001F4F6 Reconnecting…"),
+    ],
+    "068-smart-codepoint-french": [
+        ("left", 1, "è"),
+        ("left", 2, "écrit"),
+        ("right", 1, "e"),
+        ("right", 2, "rédigé"),
+    ],
+    "069-word-codepoint-cyrillic-greek": [
+        ("left", 1, "Москва"),
+        ("left", 1, "столица"),
+        ("left", 2, "πρωτεύουσα"),
+        ("right", 1, "Санкт-Петербург"),
+        ("right", 1, " город в"),
+        ("right", 2, " μεγαλύτερη πόλη"),
+    ],
+    "070-char-utf8-versions": [
+        ("left", 2, "19"),
+        ("left", 3, "1"),
+        ("left", 3, "1"),
+        ("right", 2, "28"),
+        ("right", 3, "2"),
+        ("right", 3, "2"),
+    ],
+    # The smart cases of moves spec section 3.5.
+    "074-smart-identifier": [("left", 1, "N"), ("right", 1, "n")],
+    "075-smart-short-word": [("left", 1, "bar"), ("right", 1, "baz")],
+    "076-smart-two-words": [("left", 1, "red apple"), ("right", 1, "green pear")],
+    "077-smart-cjk": [("left", 1, "猫"), ("right", 1, "狗")],
+    "078-smart-thai": [("left", 1, "แ"), ("left", 1, "ว"), ("right", 1, "ห"), ("right", 1, "า")],
+    "079-smart-emoji-zwj": [
+        ("left", 1, "\U0001F469‍\U0001F4BB"),
+        ("right", 1, "\U0001F468‍\U0001F4BB"),
+    ],
+    "080-smart-insert-only": [],
 }
 
 # Cases whose ignore.regex must fail, with the expected `side: null` codes. The
@@ -216,9 +310,25 @@ def decode(raw: bytes) -> str | None:
         return None
 
 
-# Media types of the extensions used under text/ (diff-document.md section 16.1).
-# Any other extension of a text input gives text/plain.
-TEXT_MEDIA_TYPES = {"csv": "text/csv", "yaml": "application/yaml"}
+# Media types of the text extensions (diff-document.md section 16.1, the text
+# entries of the detect.sniff@1 table). Any other extension of a text input
+# (.py, .go, .rs, .ts, .sql, .sh, ...) gives text/plain; no text/ input starts
+# like XML or HTML without one of these extensions.
+TEXT_MEDIA_TYPES = {
+    "css": "text/css",
+    "csv": "text/csv",
+    "htm": "text/html",
+    "html": "text/html",
+    "js": "text/javascript",
+    "json": "application/json",
+    "markdown": "text/markdown",
+    "md": "text/markdown",
+    "mjs": "text/javascript",
+    "tsv": "text/tab-separated-values",
+    "xml": "application/xml",
+    "yaml": "application/yaml",
+    "yml": "application/yaml",
+}
 
 
 def is_utf16_text(raw: bytes) -> bool:

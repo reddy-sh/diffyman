@@ -1,0 +1,30 @@
+[package]
+name = "diffyman-node"
+description = "Node.js binding for the diffyman diff engine (napi-rs)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+# `napi build` (package.json) copies this library to `diffyman.<platform>.node`.
+name = "diffyman_node"
+crate-type = ["cdylib"]
+# The unit tests in src/lib.rs cover the Rust core; the JavaScript API is
+# tested with node:test (test/), against the built addon.
+doctest = false
+
+[dependencies]
+diffyman = { workspace = true, features = ["fs"] }
+napi.workspace = true
+napi-derive.workspace = true
+
+[build-dependencies]
+napi-build.workspace = true
+
+[lints]
+workspace = true

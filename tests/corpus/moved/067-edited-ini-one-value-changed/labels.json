@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 5,
+        "count": 5
+      },
+      "right": {
+        "start": 12,
+        "count": 5
+      },
+      "kind": "edited"
+    }
+  ],
+  "notes": "The counterpart of 045: the [cache] section moved to the end of the file and kept four of its five lines, changing only the last value; a reader sees one edited move of the whole section. The [queue] section it moved past is longer, so the line diff keeps [queue] in place. text.moves@1 reports the first four lines as a pure move: joining (moves spec 4.3 step 4) only absorbs edited lines up to the next pure piece, so an edit on the last line of a block is left out, and one line alone is below the edited minimum. The match still counts (Jaccard 0.8), with the wrong kind and boundaries."
+}

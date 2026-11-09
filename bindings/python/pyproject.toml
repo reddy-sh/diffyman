@@ -8,27 +8,62 @@ description = "Headless diff engine: compare two inputs and get one canonical JS
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT OR Apache-2.0"
+# PEP 639: copies of the files at the repository root (a test checks they match).
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
 authors = [{ name = "Sankara Reddy Telukutla", email = "sankara@reddy.sh" }]
-keywords = ["diff", "text", "json", "compare"]
+keywords = ["diff", "compare", "json", "text", "binary", "archive"]
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Rust",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Version Control",
     "Topic :: Text Processing",
+    "Topic :: Utilities",
+    "Typing :: Typed",
 ]
 dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://reddy.sh"
 Repository = "https://github.com/reddy-sh/diffyman"
+Documentation = "https://github.com/reddy-sh/diffyman/tree/main/bindings/python"
+Issues = "https://github.com/reddy-sh/diffyman/issues"
 
-[project.optional-dependencies]
+# Development only (PEP 735): never part of the published metadata.
+[dependency-groups]
 test = ["pytest==9.2.0"]
+typecheck = ["mypy==2.4.0"]
+dev = [{ include-group = "test" }, { include-group = "typecheck" }, "maturin==1.16.0"]
 
 [tool.maturin]
 python-source = "python"
 module-name = "diffyman._native"
 features = ["extension-module"]
+# The extension a local `maturin develop` leaves next to the sources is not
+# part of an sdist.
+exclude = [{ path = "python/diffyman/*.so", format = "sdist" }, { path = "python/diffyman/*.pyd", format = "sdist" }]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = [
+    "$MYPY_CONFIG_FILE_DIR/python/diffyman",
+    "$MYPY_CONFIG_FILE_DIR/tests",
+    "$MYPY_CONFIG_FILE_DIR/tools",
+]
+mypy_path = "$MYPY_CONFIG_FILE_DIR/python"
+warn_unreachable = true

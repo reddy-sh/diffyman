@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 4,
+        "count": 62
+      },
+      "right": {
+        "start": 100,
+        "count": 62
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A 62-line class moved below twelve report functions (94 lines) that use it. The class repeats the same method shape eight times and shares lines such as `    return self` and blank lines; the whole class is one pure move."
+}

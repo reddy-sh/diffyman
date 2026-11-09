@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 8,
+        "count": 5
+      },
+      "right": {
+        "start": 18,
+        "count": 5
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A JSON array of service objects (diffed as text): the search object moved two places down. It stays in the middle of the array, so its trailing comma is unchanged and the five lines are equal. The braces it shares with every other object are where slider compaction may put the boundaries; the label is the whole object."
+}

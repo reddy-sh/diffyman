@@ -10,11 +10,13 @@ from __future__ import annotations
 import json
 import pathlib
 import threading
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
 
 import diffyman
+import diffyman.types as dt
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 CORPUS = REPO / "tests" / "corpus"
@@ -26,8 +28,14 @@ RIGHT = b"apple\nblueberry\ncherry\ndate\nelderberry\nfig"
 WORKED_EXAMPLE_ID = "sha256:f221a785d0e51a6a0ab0887619d144522fd921910db3b2460b4865712f8de99e"
 
 
-def without_provenance(doc: dict[str, Any]) -> dict[str, Any]:
+def without_provenance(doc: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in doc.items() if k != "provenance"}
+
+
+def stats_of(doc: dt.DiffDocument) -> dt.Stats:
+    stats = doc["stats"]
+    assert stats is not None
+    return stats
 
 
 def corpus_cases() -> list[pathlib.Path]:
@@ -83,11 +91,12 @@ def test_corpus_case(case: pathlib.Path) -> None:
 
 def test_input_kinds_agree() -> None:
     reference = without_provenance(diffyman.diff_document(LEFT, RIGHT))
-    for left, right in [
+    pairs: list[tuple[diffyman.Source, diffyman.Source]] = [
         (LEFT.decode(), RIGHT.decode()),
         (bytearray(LEFT), bytearray(RIGHT)),
         (memoryview(LEFT), memoryview(RIGHT)),
-    ]:
+    ]
+    for left, right in pairs:
         assert without_provenance(diffyman.diff_document(left, right)) == reference
 
 
@@ -133,7 +142,7 @@ def test_invalid_options_raise(options: Any) -> None:
 def test_ignore_options() -> None:
     blank = diffyman.diff_document(b"a\n\nb\n", b"a\nb\n\n", {"ignore": {"blankLines": True}})
     assert blank["status"] == "identical"
-    assert blank["stats"]["similarity"] == 1
+    assert stats_of(blank)["similarity"] == 1
     masked = diffyman.diff_document(b"t=1 ok\n", b"t=22 ok\n", {"ignore": {"regex": [r"\d+"]}})
     assert masked["status"] == "identical"
     assert masked["options"]["ignore"]["regex"] == [r"\d+"]
@@ -159,7 +168,7 @@ def test_binary_inputs_give_byte_ranges() -> None:
     assert doc["bytes"] == [
         {"leftOffset": 1, "leftLength": 1, "rightOffset": 1, "rightLength": 1, "op": "replace"}
     ]
-    assert doc["stats"]["bytes"] == {"left": 3, "right": 3, "added": 1, "removed": 1, "unchanged": 2}
+    assert stats_of(doc)["bytes"] == {"left": 3, "right": 3, "added": 1, "removed": 1, "unchanged": 2}
 
 
 @pytest.mark.parametrize("bad", [123, None, ["a"], 1.5])
@@ -199,10 +208,13 @@ def test_folders_and_archives_give_tree_documents(tmp_path: pathlib.Path) -> Non
     doc = diffyman.diff_document(left, right)
     assert (doc["kind"], doc["status"]) == ("tree", "different")
     assert doc["provenance"]["binding"] == "python"
+    assert doc["tree"] is not None
     (entry,) = [e for e in doc["tree"]["entries"] if e["path"] == "sub/a.txt"]
     assert entry["status"] == "modified"
-    assert entry["childDocument"]["kind"] == "text"
-    assert "provenance" not in entry["childDocument"]
+    child = entry["childDocument"]
+    assert child is not None
+    assert child["kind"] == "text"
+    assert "provenance" not in child
     with pytest.raises(TypeError):
         diffyman.diff(left, right, left_name="x")
     with pytest.raises(OSError):

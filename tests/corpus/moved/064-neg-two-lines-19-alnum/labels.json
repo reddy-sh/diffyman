@@ -1,0 +1,4 @@
+{
+  "moves": [],
+  "notes": "Two settings lines moved from the app section to the end of the file. Together they have 19 alphanumeric characters, one below the minimum move size of 20 (moves spec 4.2), so a correct result has no move. Case 065 is the same with 20."
+}

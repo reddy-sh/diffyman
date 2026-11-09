@@ -1,0 +1,29 @@
+{
+  "services": [
+    {
+      "name": "api",
+      "port": 8080,
+      "replicas": 4
+    },
+    {
+      "name": "search",
+      "port": 9200,
+      "replicas": 2
+    },
+    {
+      "name": "worker",
+      "port": 9000,
+      "replicas": 6
+    },
+    {
+      "name": "mailer",
+      "port": 2525,
+      "replicas": 1
+    },
+    {
+      "name": "gateway",
+      "port": 443,
+      "replicas": 3
+    }
+  ]
+}

@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# End-to-end benchmark: the release `diffyman` CLI against `git diff --no-index`
-# and `diff` on generated inputs. Prints a markdown table on stdout (progress
-# goes to stderr).
+# End-to-end benchmark: the release `diffyman` CLI against `git diff --no-index`,
+# `diff` and, when it is installed, difftastic (`difft`) on generated inputs.
+# Prints a markdown table on stdout (progress goes to stderr).
 #
-#   scripts/bench.sh [--bin PATH] [--data DIR] [--sizes "N ..."] [--runs N]
+#   scripts/bench.sh [--bin PATH] [--difft PATH] [--data DIR] [--sizes "N ..."] [--runs N]
 #
 #   --bin PATH    the CLI to measure. Default: build it with
 #                 `cargo build --release --locked -p diffyman-cli` and use
 #                 target/release/diffyman.
+#   --difft PATH  the difftastic binary. Default: `difft` on PATH; without one
+#                 the difftastic rows are left out.
 #   --data DIR    where inputs and outputs go. Default: $TMPDIR/diffyman-bench.
 #                 Inputs are generated once and reused while their file exists.
 #   --sizes LIST  line counts per side. Default: "10000 100000 1000000".
@@ -19,6 +21,9 @@
 #             0.5% inserted (the same edit rates as the criterion benchmarks).
 #   moved-N   the same edits, and pairs of 6 to 20 line blocks swapped (one
 #             pair per 4000 lines).
+#   js-N      about N lines of generated JavaScript per side (8-line
+#             functions), named `.js`; about 2% of functions get a changed
+#             constant, 0.5% are deleted and 0.5% are new.
 # and once:
 #   binary-10m  10 MiB of AES-CTR keystream (fixed key, so the same bytes on
 #               every machine) with 256 bytes overwritten in place.
@@ -31,6 +36,18 @@
 # `--binary` only report that binary files differ, so for binary-10m they do
 # much less work than a byte diff.
 #
+# difftastic is a structural diff: it parses both sides with tree-sitter and
+# aligns syntax trees, which is more work than a line diff and gives a
+# different kind of answer, so only its wall time and memory are comparable.
+# It does that only for a language it recognizes and within its own limits:
+# the text-*, moved-* and binary-* inputs have no extension, so it uses its
+# line-oriented text diff (and only reports that binary files differ), and an
+# input over its default --byte-limit (1,000,000 bytes) also falls back to the
+# line-oriented diff. So js-N is structural only while each side stays under
+# 1 MB (js-10000 is about 0.15 MB, js-100000 about 1.5 MB). It runs with
+# `--display inline --color never --syntax-highlight off --width 120
+# --exit-code`, so it writes plain text and exits 1 when the files differ.
+#
 # Wall time comes from bash's `time` (millisecond resolution). Peak memory is
 # the macOS "peak memory footprint" of `/usr/bin/time -l`, or the maximum
 # resident set size of GNU `/usr/bin/time -v` on Linux; it is "-" when
@@ -39,6 +56,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 bin=
+difft=
 data=${TMPDIR:-/tmp}
 data=${data%/}/diffyman-bench
 sizes="10000 100000 1000000"
@@ -47,6 +65,7 @@ runs=3
 while [ "$#" -gt 0 ]; do
   case $1 in
     --bin) bin=$2; shift 2 ;;
+    --difft) difft=$2; shift 2 ;;
     --data) data=$2; shift 2 ;;
     --sizes) sizes=$2; shift 2 ;;
     --runs) runs=$2; shift 2 ;;
@@ -71,6 +90,13 @@ if [ -z "$bin" ]; then
 fi
 if [ ! -x "$bin" ]; then
   echo "not an executable: $bin" >&2
+  exit 2
+fi
+if [ -z "$difft" ]; then
+  difft=$(command -v difft 2>/dev/null || true)
+  [ -n "$difft" ] || echo "difft not found: difftastic is left out (see --difft)" >&2
+elif [ ! -x "$difft" ]; then
+  echo "not an executable: $difft" >&2
   exit 2
 fi
 
@@ -119,6 +145,33 @@ gen_text() {
     }'
 }
 
+# gen_js N LEFT RIGHT: about N lines of JavaScript per side, in 8-line functions.
+gen_js() {
+  awk -v n="$1" -v left="$2" -v right="$3" '
+    function rnd(k) { seed = (seed * 16807) % 2147483647; return seed % k }
+    function fn(out, id, k1, k2, k3, k4) {
+      printf "export function f%06d(a, b) {\n", id > out
+      printf "  const x = a * %d + b;\n", k1 > out
+      printf "  if (x > %d) {\n", k2 > out
+      printf "    return x - %d;\n", k3 > out
+      printf "  }\n" > out
+      printf "  return x + %d;\n", k4 > out
+      printf "}\n\n" > out
+    }
+    BEGIN {
+      seed = 7919 + n
+      for (i = 0; i < int(n / 8); i++) {
+        k1 = rnd(100); k2 = rnd(10000); k3 = rnd(100); k4 = rnd(100)
+        r = rnd(400)
+        fn(left, i, k1, k2, k3, k4)
+        if (r < 8) fn(right, i, k1, k2 + 1, k3, k4)
+        else if (r < 10) { }
+        else if (r < 12) { fn(right, i, k1, k2, k3, k4); fn(right, 900000 + i, k3, k4, k1, k2) }
+        else fn(right, i, k1, k2, k3, k4)
+      }
+    }'
+}
+
 # gen_binary SIZE LEFT RIGHT
 gen_binary() {
   if command -v openssl >/dev/null 2>&1; then
@@ -156,6 +209,14 @@ for n in $sizes; do
     fi
     cases="$cases $name"
   done
+  name=js-$n
+  if [ ! -s "$data/in/$name.$gv.left.js" ] || [ ! -s "$data/in/$name.$gv.right.js" ]; then
+    echo "generating $name" >&2
+    gen_js "$n" "$data/in/$name.$gv.left.js.tmp" "$data/in/$name.$gv.right.js.tmp"
+    mv "$data/in/$name.$gv.left.js.tmp" "$data/in/$name.$gv.left.js"
+    mv "$data/in/$name.$gv.right.js.tmp" "$data/in/$name.$gv.right.js"
+  fi
+  cases="$cases $name"
 done
 name=binary-10m
 if [ ! -s "$data/in/$name.$gv.left" ] || [ ! -s "$data/in/$name.$gv.right" ]; then
@@ -170,10 +231,21 @@ cases="$cases $name"
 
 # tools_for CASE: the tools measured for a case.
 tools_for() {
+  local extra=
+  [ -n "$difft" ] && extra=" difft"
   case $1 in
-    text-*) echo "dm-json dm-text dm-unified git git-histogram diff" ;;
-    moved-*) echo "dm-json dm-json-moves dm-unified git git-histogram git-color-moved diff" ;;
-    binary-*) echo "dm-json git git-binary diff" ;;
+    text-*) echo "dm-json dm-text dm-unified git git-histogram diff$extra" ;;
+    moved-*) echo "dm-json dm-json-moves dm-unified git git-histogram git-color-moved diff$extra" ;;
+    js-*) echo "dm-json dm-unified git-histogram diff$extra" ;;
+    binary-*) echo "dm-json git git-binary diff$extra" ;;
+  esac
+}
+
+# inputs CASE: sets LEFT and RIGHT.
+inputs() {
+  case $1 in
+    js-*) LEFT=$data/in/$1.$gv.left.js; RIGHT=$data/in/$1.$gv.right.js ;;
+    *) LEFT=$data/in/$1.$gv.left; RIGHT=$data/in/$1.$gv.right ;;
   esac
 }
 
@@ -189,6 +261,7 @@ label() {
     git-color-moved) echo 'git diff --no-index --color=always --color-moved' ;;
     git-binary) echo 'git diff --no-index --binary' ;;
     diff) echo 'diff -u' ;;
+    difft) echo 'difft --display inline' ;;
   esac
 }
 
@@ -205,6 +278,7 @@ set_cmd() {
     git-color-moved) CMD=("${g[@]}" --color=always --color-moved=default "$2" "$3") ;;
     git-binary) CMD=("${g[@]}" --no-color --binary "$2" "$3") ;;
     diff) CMD=(diff -u "$2" "$3") ;;
+    difft) CMD=("$difft" --display inline --color never --syntax-highlight off --width 120 --exit-code "$2" "$3") ;;
   esac
 }
 
@@ -245,17 +319,20 @@ machine="$(uname -sm)"
 git_version=$(git --version 2>/dev/null || echo "git: not found")
 diff_version=$(diff --version 2>/dev/null | head -n 1 || true)
 [ -n "$diff_version" ] || diff_version="diff (no --version)"
+tools_line="$("$bin" --version); $git_version; $diff_version"
+[ -n "$difft" ] && tools_line="$tools_line; $("$difft" --version | head -n 1)"
 
 printf '## diffyman end-to-end benchmark\n\n'
 printf -- '- Machine: %s\n' "$machine"
-printf -- '- Tools: %s; %s; %s\n' "$("$bin" --version)" "$git_version" "$diff_version"
+printf -- '- Tools: %s\n' "$tools_line"
 printf -- '- Runs per command: %s (median wall time, largest peak memory)\n\n' "$runs"
 printf '| Case | Input MB (both sides) | Command | Exit | Wall s | Peak MB | Output MB |\n'
 printf '|---|--:|---|--:|--:|--:|--:|\n'
 
 for name in $cases; do
-  left=$data/in/$name.$gv.left
-  right=$data/in/$name.$gv.right
+  inputs "$name"
+  left=$LEFT
+  right=$RIGHT
   in_mb=$(cat "$left" "$right" | wc -c | awk '{ printf "%.1f", $1 / 1048576 }')
   for tool in $(tools_for "$name"); do
     echo "running $name: $(label "$tool")" >&2

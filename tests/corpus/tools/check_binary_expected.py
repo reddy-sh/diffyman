@@ -68,6 +68,29 @@ CASES = {
                         ("application/zip", None), None),
     "017-dense-overwrites": ("binary", "different", [], (OCTET, None), (OCTET, None),
                              [(k * 4228, 8, k * 4228, 8, "replace") for k in range(1, 31)]),
+    "018-gif-palette-edit": ("binary", "different", [], ("image/gif", None), ("image/gif", None),
+                             [(28, 3, 28, 3, "replace")]),
+    "019-pdf-incremental-update": ("binary", "different", [], ("application/pdf", None),
+                                   ("application/pdf", None), [(711, 0, 711, 101, "insert")]),
+    "020-wasm-section-inserted": ("binary", "different", [], ("application/wasm", None),
+                                  ("application/wasm", None), [(15, 0, 15, 15, "insert")]),
+    "021-sqlite-page-overwrite": ("binary", "different", [], ("application/vnd.sqlite3", None),
+                                  ("application/vnd.sqlite3", None), [(8292, 100, 8292, 100, "replace")]),
+    "022-elf-two-patches": ("binary", "different", [], ("application/x-executable", None),
+                            ("application/x-executable", None),
+                            [(1000, 4, 1000, 4, "replace"), (15000, 4, 15000, 4, "replace")]),
+    "023-prepended-header": ("binary", "different", [], (OCTET, None), (OCTET, None),
+                             [(0, 0, 0, 64, "insert")]),
+    "024-both-empty-forced-binary": ("binary", "identical", [], (OCTET, "utf-8"), (OCTET, "utf-8"), []),
+    "025-large-delete-chunked": ("binary", "different", [], (OCTET, None), (OCTET, None), None),
+    "026-periodic-delete-canonical": ("binary", "different", [], (OCTET, None), (OCTET, None),
+                                      [(4094, 2, 4094, 0, "delete")]),
+    "027-binary-vs-empty": ("binary", "different", [], (OCTET, None), (OCTET, "utf-8"),
+                            [(0, 300, 0, 0, "delete")]),
+    "028-control-bytes-over-limit": ("binary", "different", [], (OCTET, None), (OCTET, None),
+                                     [(245, 5, 245, 5, "replace")]),
+    "029-extension-fallback-media": ("binary", "different", [], ("image/jpeg", None), ("image/jpeg", None),
+                                     [(2000, 1, 2000, 1, "replace")]),
 }
 
 # Shapes checked by hand where the exact offsets depend on where a common
@@ -76,6 +99,7 @@ SHAPES = {
     "002-inserted-bytes": [("insert", 0, 16)],
     "007-random-1mb-insertion": [("insert", 0, 100)],
     "013-chunked-two-edits": [("insert", 0, 32), ("replace", 40, 40)],
+    "025-large-delete-chunked": [("delete", 70000, 0)],
 }
 
 
@@ -129,7 +153,7 @@ def check_case(directory: Path) -> list[str]:
     doc = json.loads((directory / "expected.json").read_text(encoding="utf-8"))
     options = json.loads((directory / "options.json").read_text(encoding="utf-8"))
     raws = {side: next(directory.glob(f"{side}.*")).read_bytes() for side in ("left", "right")}
-    c.eq("schemaVersion", doc["schemaVersion"], "0.3.0")
+    c.eq("schemaVersion", doc["schemaVersion"], "0.4.0")
     c.eq("kind", doc["kind"], kind)
     c.eq("status", doc["status"], status)
     c.eq("options", doc["options"], options)

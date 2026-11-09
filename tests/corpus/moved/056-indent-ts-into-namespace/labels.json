@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 1,
+        "count": 4
+      },
+      "right": {
+        "start": 4,
+        "count": 4
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A TypeScript function moved from the top level into a namespace below it, gaining two spaces on every line. The indentation delta is the same on every line, so it is a pure move (moves spec 4.4)."
+}

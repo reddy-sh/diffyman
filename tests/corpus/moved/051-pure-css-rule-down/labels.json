@@ -1,0 +1,16 @@
+{
+  "moves": [
+    {
+      "left": {
+        "start": 7,
+        "count": 4
+      },
+      "right": {
+        "start": 13,
+        "count": 4
+      },
+      "kind": "pure"
+    }
+  ],
+  "notes": "A stylesheet: the .button:disabled rule moved below .button:hover, so it wins when both apply. The hover rule is one line longer, so the line diff keeps it in place and reports the disabled rule as the moved block."
+}

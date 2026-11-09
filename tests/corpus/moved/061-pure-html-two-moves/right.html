@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Status board</title>
+  <link rel="stylesheet" href="/static/board.css">
+</head>
+<body>
+  <footer>
+    <a href="/history">History of incidents</a>
+  </footer>
+  <header>
+    <h1>Status board</h1>
+    <p class="updated">Updated every minute</p>
+  </header>
+  <section id="grid">
+    <div class="tile" data-service="api"></div>
+    <div class="tile" data-service="worker"></div>
+    <div class="tile" data-service="search"></div>
+  </section>
+  <script src="/static/board.js" defer></script>
+  <script src="/static/charts.js" defer></script>
+</body>
+</html>

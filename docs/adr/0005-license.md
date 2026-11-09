@@ -17,6 +17,7 @@ diffyman's core (engine, CLI, bindings and the REST API service) is open source 
 - **Allowed with care: MPL-2.0.** It is file-level copyleft. A runtime dependency under MPL-2.0 (such as `uniffi`) means we ship its notices and publish any changes to its files. Build-time-only tools (such as `cbindgen`) are fine.
 - **Denied in shipped code:** GPL, AGPL, LGPL (all versions), SSPL and BUSL. Copyleft programs (for example FFmpeg or diffoscope) may only run as optional external processes, never bundled or linked.
 - **Unknown or unlicensed crates are denied** until reviewed.
+- **Test-only and build-only exceptions (never shipped).** Development dependencies of the bindings that never reach a published jar, wheel or npm tarball may use these weak or non-copyleft licenses: EPL-2.0 for JUnit 5 (`junit-jupiter`, `junit-platform`; Maven `test` scope in `bindings/java`), PSF-2.0 (`typing_extensions` under mypy, `argparse` under the napi-rs CLI) and MPL-2.0 build tools (`lightningcss` under Vite, `pathspec` under mypy). A runtime dependency under any of them is still reviewed under the rules above.
 
 **License-risk register.** Known copyleft projects are studied for behavior only, never copied, and each has a permissive replacement:
 

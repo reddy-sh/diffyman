@@ -1,0 +1,24 @@
+{
+  "algorithm": "histogram",
+  "granularity": "word",
+  "ignore": {
+    "whitespace": "none",
+    "case": false,
+    "blankLines": false,
+    "regex": [
+      "\\b[0-9a-f]{7}\\b"
+    ]
+  },
+  "context": 3,
+  "positionEncoding": "utf-8",
+  "detectMoves": false,
+  "adapter": "auto",
+  "tree": {
+    "followSymlinks": false,
+    "ignoreFiles": false,
+    "exclude": [],
+    "detectMoves": true,
+    "maxDepth": 3,
+    "childBudget": 16777216
+  }
+}

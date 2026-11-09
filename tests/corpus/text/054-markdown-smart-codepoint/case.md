@@ -1,0 +1,3 @@
+# 054-markdown-smart-codepoint
+
+A Markdown page (`mediaType: "text/markdown"`) with two edits, run with `granularity: "smart"` and `positionEncoding: "codepoint"`: an opening time changes and an accent is dropped. A correct result has one `replace` of L3-4/R3-4. `brûlée`/`brulée` is a one-word swap of at least 4 graphemes and similar enough for the sub-word pass, so only `û`/`u` is marked, at code point 12 of L4/R4 (`è` before it counts as one code point). A colon joins only letters in UAX #29, so `8:00` is three segments and the spans are `8`/`7` at 11 and `00`/`30` at 13, with the colon equal.

@@ -1,0 +1,3 @@
+# 069-word-codepoint-cyrillic-greek
+
+Cyrillic and Greek sentences with `granularity: "word"` and `positionEncoding: "codepoint"` (every letter here is one code point but two UTF-8 bytes). A correct result has one `replace` of L1-2/R1-2 with spans on the replaced words: on L1/R1 `Москва` [0, 6) / `Санкт-Петербург` [0, 15) (the hyphen is inserted too) and `столица` [9, 16) / ` город в` [17, 25); on L2/R2 `πρωτεύουσα` [14, 24) / ` μεγαλύτερη πόλη` [13, 29). A right span may start with a space: the token diff pairs the left space with a later right one, and two right spans one space apart are merged (moves spec 3.2). L3 is equal.

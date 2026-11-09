@@ -1,0 +1,14 @@
+name: build
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: unit tests
+        run: make test
+      - name: lint
+        run: make lint
+      - name: upload coverage
+        run: make coverage
