@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s AS \"sha256!\" FROM unnest($1::text[]) AS s\n         WHERE pg_try_advisory_lock(diffyman_blob_lock_key(s))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sha256!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "01ac6ff09cabdeda6535e7c499e66d0c3f47029d01677fa59360f71816bf28b2"
+}

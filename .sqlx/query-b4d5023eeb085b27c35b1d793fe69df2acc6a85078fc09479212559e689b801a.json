@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT b.sha256, b.size, b.media_type, b.created_at, b.expires_at\n         FROM blobs b JOIN blob_grants g ON g.sha256 = b.sha256\n         WHERE b.sha256 = $1 AND g.api_key_id IS NOT DISTINCT FROM $2 AND g.expires_at > now()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sha256",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "sha256"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "size",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "size"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "media_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "media_type"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b4d5023eeb085b27c35b1d793fe69df2acc6a85078fc09479212559e689b801a"
+}

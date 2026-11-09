@@ -31,6 +31,13 @@ allow = [
 confidence-threshold = 0.93
 unused-allowed-license = "allow"
 
+# Root certificate data (no code) under a permissive data license, reached only
+# through the S3 client of diffyman-storage's optional `s3` feature, and only on
+# wasm32 targets, which the server is never built for.
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
+
 [licenses.private]
 # Workspace crates with `publish = false` (such as the conformance runner).
 ignore = true

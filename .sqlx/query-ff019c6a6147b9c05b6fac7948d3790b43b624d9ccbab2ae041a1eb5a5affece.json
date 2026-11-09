@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT sha256, size, media_type, created_at, expires_at FROM blobs WHERE sha256 = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sha256",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "sha256"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "size",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "size"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "media_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "media_type"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "ff019c6a6147b9c05b6fac7948d3790b43b624d9ccbab2ae041a1eb5a5affece"
+}

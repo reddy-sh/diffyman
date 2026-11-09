@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO blob_grants (sha256, api_key_id, media_type, expires_at)\n         VALUES ($1, $2, $3, $4)\n         ON CONFLICT ON CONSTRAINT blob_grants_once DO UPDATE\n             SET expires_at = GREATEST(blob_grants.expires_at, EXCLUDED.expires_at),\n                 -- An expired hold that is taken up again counts as new.\n                 created_at = CASE WHEN blob_grants.expires_at <= now() THEN now()\n                                   ELSE blob_grants.created_at END\n         RETURNING sha256, api_key_id, media_type, created_at, expires_at,\n                   (xmax = 0 OR created_at = now()) AS \"inserted!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sha256",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "blob_grants",
+            "name": "sha256"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "api_key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "blob_grants",
+            "name": "api_key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "media_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "blob_grants",
+            "name": "media_type"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "blob_grants",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "blob_grants",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "inserted!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "5c7a52d0f5da21166635e8ee7f22e3a2b70bb22c73158f68ea122f3ff3387c87"
+}

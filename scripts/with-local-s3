@@ -1,0 +1,19 @@
+#!/usr/bin/env zsh
+# Runs a command against the local S3-compatible server (compose profile `s3`).
+#
+# Usage: scripts/with-local-s3 COMMAND [ARGS...]
+#   scripts/with-local-s3 scripts/with-rustup cargo run -p diffyman-server --features s3 -- serve
+#
+# Exports AWS_ENDPOINT_URL_S3=http://127.0.0.1:9000, AWS_ALLOW_HTTP=true,
+# AWS_REGION=us-east-1 and the test credentials from .env.local, ignores the
+# shared AWS profile files, and sets DIFFYMAN_STORE_URL=s3://diffyman-test
+# unless it is already set. Nothing is printed.
+set -euo pipefail
+
+repo_root=${0:A:h:h}
+source "$repo_root/scripts/lib/ops.zsh"
+
+(( $# )) || { ops_usage "$0"; exit 2; }
+ops_local_s3_env
+export DIFFYMAN_STORE_URL=${DIFFYMAN_STORE_URL:-s3://diffyman-test}
+exec "$@"

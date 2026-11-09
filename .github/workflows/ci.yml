@@ -25,6 +25,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # The server crates compile from the offline query data in .sqlx/. No
+      # database runs here, so their database tests skip with a note; the
+      # database job runs them, and the server end to end, on Linux.
+      SQLX_OFFLINE: "true"
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -238,6 +243,138 @@ jobs:
 
       - name: Compare
         run: python3 tests/conformance/compare_hashes.py conformance-hashes
+
+  database:
+    # diffyman-db and diffyman-server against a real PostgreSQL 18
+    # (docs/adr/0012-local-service-architecture.md): the offline query data in
+    # .sqlx/ must match the queries and migrations, the integration tests must
+    # run (DIFFYMAN_TEST_DB_REQUIRED turns their skip into a failure), and a
+    # real diffyman-server process must pass tests/server/run_e2e.py and the
+    # server surface of the conformance runner. The service is a throwaway
+    # container on 127.0.0.1; its bootstrap password is replaced by a random
+    # one before anything else connects, so no secret is needed.
+    name: database and server (PostgreSQL 18)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18.6-trixie
+        env:
+          POSTGRES_USER: diffyman
+          POSTGRES_DB: diffyman
+          POSTGRES_PASSWORD: bootstrap-only
+        ports: ["127.0.0.1:5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U diffyman -d diffyman"
+          --health-interval 5s --health-retries 20
+    env:
+      DIFFYMAN_TEST_DB_REQUIRED: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Random database password
+        # Masked in the log; the SQL goes to psql on standard input, never on
+        # a command line.
+        run: |
+          command -v psql >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq postgresql-client; }
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          printf "ALTER ROLE diffyman PASSWORD '%s';\n" "$password" \
+            | PGPASSWORD=bootstrap-only psql -h 127.0.0.1 -U diffyman -d postgres -X -q -v ON_ERROR_STOP=1
+          {
+            echo "DIFFYMAN_TEST_DB_URL=postgres://diffyman:$password@127.0.0.1:5432/postgres"
+            echo "DIFFYMAN_CI_DB_URL=postgres://diffyman:$password@127.0.0.1:5432/diffyman"
+          } >> "$GITHUB_ENV"
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Install sqlx-cli
+        run: cargo install --locked sqlx-cli --version 0.9.0 --no-default-features --features postgres,rustls,sqlx-toml
+
+      - name: Offline query data is current
+        # The macros and `migrate` read DIFFYMAN_DB_URL (crates/diffyman-db/
+        # sqlx.toml); `prepare` runs at the workspace root, where sqlx-cli
+        # reads only DATABASE_URL.
+        env:
+          DIFFYMAN_DB_URL: ${{ env.DIFFYMAN_CI_DB_URL }}
+          DATABASE_URL: ${{ env.DIFFYMAN_CI_DB_URL }}
+        run: |
+          (cd crates/diffyman-db && cargo sqlx migrate run)
+          cargo sqlx prepare --workspace --check -- --all-targets
+
+      - name: Integration tests
+        env:
+          SQLX_OFFLINE: "true"
+        run: cargo test --locked -p diffyman-db -p diffyman-storage -p diffyman-server
+
+      - name: Build the server and the CLI
+        env:
+          SQLX_OFFLINE: "true"
+          # Behaviour, not the shipped binary: optimized without LTO.
+          CARGO_PROFILE_RELEASE_LTO: "off"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+        run: cargo build --locked --release -p diffyman-server -p diffyman-cli
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Server end to end (a real diffyman-server process)
+        # Its own database (diffyman_e2e) and blob folder, a random port on
+        # 127.0.0.1: every file case of the corpus, 30 jobs, saved diffs and
+        # deletion, keys, Host, Origin and limits, a 200 MB pair, throughput.
+        run: >-
+          uv run --no-project --python 3.12 python tests/server/run_e2e.py
+          --server target/release/diffyman-server --cli target/release/diffyman
+          --workdir-root "$RUNNER_TEMP" --min-free-gb 3 --report "$RUNNER_TEMP/server-e2e.json"
+
+      - name: Server request validation (a real diffyman-server process)
+        # Its own database (diffyman_e2e_validation): keys and scopes, other
+        # keys' IDs, Host and Origin, malformed IDs, hostile names, options
+        # and query parameters, and no secret in errors, OpenAPI or the log.
+        run: >-
+          uv run --no-project --python 3.12 python tests/server/test_validation.py
+          --server target/release/diffyman-server --workdir-root "$RUNNER_TEMP"
+
+      - name: Server limits (a real diffyman-server process)
+        # Its own database (diffyman_limits) and a server per group: bodies
+        # over their limits (declared, chunked, understated), multipart bodies
+        # with thousands of parts, slow bodies and headers, 40 parallel
+        # synchronous diffs within the memory budget, archive bombs and deep
+        # nesting run as jobs, cancelling a running job. Smaller inputs here.
+        run: >-
+          uv run --no-project --python 3.12 python tests/server/test_limits.py
+          --server target/release/diffyman-server --scale ci
+          --workdir-root "$RUNNER_TEMP" --min-free-gb 3 --report "$RUNNER_TEMP/server-limits.json"
+
+      - name: Conformance, server surface (POST /v1/diff and the CLI)
+        run: >-
+          uv run --no-project --python 3.12 python tests/server/harness.py
+          --server target/release/diffyman-server --workdir-root "$RUNNER_TEMP" --
+          python tests/conformance/run_bindings.py --surfaces cli,server
+          --cli target/release/diffyman --quiet
+
+      - name: API reference and REST quickstart examples (curl against a real server)
+        run: >-
+          uv run --no-project --python 3.12 python docs/api/check_examples.py
+          --workdir-root "$RUNNER_TEMP"
+
+      - name: Upload the server measurements
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-e2e
+          path: |
+            ${{ runner.temp }}/server-e2e.json
+            ${{ runner.temp }}/server-limits.json
+          if-no-files-found: warn
+          retention-days: 30
 
   deny:
     name: cargo-deny

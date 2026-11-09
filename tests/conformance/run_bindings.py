@@ -12,6 +12,11 @@ and tests/corpus/tree this gets the canonical Diff Document from each surface
   java       Diffyman.diffPaths() and Diffyman.diff(), through JavaDiff.java
   c          diffyman_diff_paths() and diffyman_diff() of the C ABI, through
              the C test program (tests/ffi/run.sh) or ctypes
+  server     POST /v1/diff of a running diffyman-server, as JSON (base64)
+             and as multipart; only when a server URL is given (--server-url
+             or DIFFYMAN_SERVER_URL, with the API key in DIFFYMAN_SERVER_KEY),
+             otherwise skipped with a note. tests/server/harness.py starts
+             one on a test database and sets both variables.
 
 A binding with both APIs runs twice per case: `paths` (the binding reads the
 files or walks the folders) and `bytes` (two files read here and passed with
@@ -58,6 +63,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import platform
 import sys
@@ -73,7 +79,7 @@ import surfaces as sf  # noqa: E402
 REPO = sf.REPO
 CORPUS = REPO / "tests" / "corpus"
 GROUPS = ("text", "moved", "binary", "tree")
-ALL_SURFACES = ("cli", "python", "wasm", "wasm-slim", "node", "java", "c")
+ALL_SURFACES = ("cli", "python", "wasm", "wasm-slim", "node", "java", "c", "server")
 EXIT_CODES = {"identical": 0, "different": 1, "partial": 1, "error": 2}
 
 
@@ -140,7 +146,8 @@ def line_only_variants(cases: list[sf.Case], workdir: pathlib.Path) -> list[sf.C
 
 
 def build_surfaces(args: argparse.Namespace, names: list[str]) -> list[sf.Surface]:
-    made: dict[str, sf.Surface] = {
+    made: dict[str, sf.Surface | None] = {
+        "server": sf.Server(args.server_url) if args.server_url else None,
         "cli": sf.Cli(args.cli),
         "python": sf.Python(args.venv.resolve()),
         "wasm": sf.Wasm(
@@ -167,7 +174,16 @@ def build_surfaces(args: argparse.Namespace, names: list[str]) -> list[sf.Surfac
             args.c_library.resolve() if args.c_library else None,
         ),
     }
-    return [made[name] for name in names]
+    surfaces = []
+    for name in names:
+        surface = made[name]
+        if surface is None:
+            if args.surfaces:
+                raise SystemExit(f"{name}: selected, but no server URL is given (--server-url or DIFFYMAN_SERVER_URL)")
+            print(f"{name}: skipped, no server URL given (--server-url or DIFFYMAN_SERVER_URL)")
+            continue
+        surfaces.append(surface)
+    return surfaces
 
 
 def label(surface: sf.Surface, mode: str) -> str:
@@ -378,6 +394,12 @@ def main() -> int:
     )
     parser.add_argument("--c-program", type=pathlib.Path, help="the program built by tests/ffi/run.sh")
     parser.add_argument("--c-library", type=pathlib.Path, help="the diffyman_ffi shared library (ctypes driver)")
+    parser.add_argument(
+        "--server-url",
+        default=os.environ.get("DIFFYMAN_SERVER_URL"),
+        help="a running diffyman-server, http://127.0.0.1:PORT (default: DIFFYMAN_SERVER_URL; the key is read "
+        "from DIFFYMAN_SERVER_KEY). Without one the server surface is skipped",
+    )
     parser.add_argument("--hashes", type=pathlib.Path, help="write the per-case, per-surface SHA-256 table here")
     parser.add_argument("--quiet", action="store_true", help="print only the failing cases and the summary")
     parser.add_argument(
@@ -397,6 +419,8 @@ def main() -> int:
     if not golden:
         raise SystemExit(f"no cases under {args.corpus}")
     surfaces = build_surfaces(args, names)
+    if not surfaces:
+        raise SystemExit("no surface left to run")
     for surface in surfaces:
         surface.prepare()
 

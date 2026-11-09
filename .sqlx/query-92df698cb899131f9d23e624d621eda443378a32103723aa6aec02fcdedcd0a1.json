@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO blobs (sha256, size, media_type, expires_at)\n         VALUES ($1, $2, $3, $4)\n         ON CONFLICT (sha256) DO UPDATE\n             SET expires_at = GREATEST(blobs.expires_at, EXCLUDED.expires_at)\n         RETURNING sha256, size, media_type, created_at, expires_at, (xmax = 0) AS \"inserted!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sha256",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "sha256"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "size",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "size"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "media_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "media_type"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "inserted!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "92df698cb899131f9d23e624d621eda443378a32103723aa6aec02fcdedcd0a1"
+}

@@ -1,0 +1,21 @@
+# sqlx configuration for the query macros and sqlx-cli
+# (docs/adr/0012-local-service-architecture.md).
+
+[common]
+# Queries are checked against the database named by this variable, or against
+# the offline data in .sqlx/ when it is unset or SQLX_OFFLINE=true. Using our
+# own name keeps an unrelated DATABASE_URL from being picked up.
+database-url-var = "DIFFYMAN_DB_URL"
+
+[macros.preferred-crates]
+date-time = "chrono"
+
+[migrate]
+# Relative to this crate (the leading ./ is required by the macro).
+migrations-dir = "./migrations"
+# Migration checksums must not depend on the checkout's line endings.
+ignored-chars = ["\r"]
+
+[migrate.defaults]
+migration-type = "simple"
+migration-versioning = "sequential"

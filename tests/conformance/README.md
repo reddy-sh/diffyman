@@ -17,6 +17,7 @@ its own surface in `provenance.binding`.
 | `node` | `diffPaths()` and `diff()` of `bindings/node` (`node_diff.mjs`) | paths, bytes |
 | `java` | `Diffyman.diffPaths()` and `Diffyman.diff()` from the binding jar (`JavaDiff.java`) | paths, bytes |
 | `c` | `diffyman_diff_paths()` and `diffyman_diff()`: the C test program built by `tests/ffi/run.sh`, or the shared library through `ctypes` (`--c-driver`) | paths, bytes |
+| `server` | `POST /v1/diff` of a running `diffyman-server` (`--server-url` or `DIFFYMAN_SERVER_URL`, API key in `DIFFYMAN_SERVER_KEY`); skipped with a note when no URL is given | json (base64), multipart |
 
 In `paths` mode the surface reads the inputs itself; in `bytes` mode two
 files are read first and passed as bytes with their final path components as
@@ -53,6 +54,15 @@ Useful flags:
 - `--c-driver program|ctypes` picks how the C ABI is reached (default: the
   compiled program when it exists, `ctypes` on Windows, where `run.sh` does
   not run).
+- `--server-url http://127.0.0.1:PORT` adds the server surface. To start a
+  server on a test database for one run (it needs PostgreSQL, see
+  [`tests/server`](../server/README.md)):
+
+  ```sh
+  cargo build --locked --release -p diffyman-server -p diffyman-cli
+  uv run --no-project --python 3.12 python tests/server/harness.py -- \
+    python tests/conformance/run_bindings.py --surfaces cli,server --cli target/release/diffyman
+  ```
 - `--quiet` prints only failing cases and the summary.
 - `--hashes FILE` writes a tab-separated table with the SHA-256 of every
   document (provenance removed) per case, surface and mode, plus that of

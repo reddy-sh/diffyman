@@ -19,6 +19,8 @@ comment on the line before it (GitHub does not show it):
     <!-- check: skip REASON -->   not run (a fragment shown for reference)
 
 A block without a directive is an error, so a new example cannot go unchecked.
+The REST quickstart (rest.md) needs a running server and database, so
+docs/api/check_examples.py checks it, with the same directives.
 
 Each quickstart runs in its own empty folder. DIFFYMAN_REPO is the repository,
 NO_COLOR is set, and PATH starts with target/release (the CLI), the Python
@@ -361,8 +363,13 @@ def run_shell(block: Block, cwd: Path, env: dict[str, str]) -> subprocess.Comple
     )
 
 
-def check_doc(doc: Path, root: Path, build: bool) -> tuple[int, int]:
-    """Runs one quickstart; returns (blocks checked, blocks skipped)."""
+def check_doc(
+    doc: Path, root: Path, build: bool, env: dict[str, str] | None = None
+) -> tuple[int, int]:
+    """Runs one quickstart; returns (blocks checked, blocks skipped).
+
+    `env` replaces the environment of its blocks (default: `base_env()`).
+    """
     blocks = parse(doc)
     name = doc.stem
     missing = missing_prerequisites(name, build)
@@ -370,7 +377,7 @@ def check_doc(doc: Path, root: Path, build: bool) -> tuple[int, int]:
         raise CheckError(f"{doc.relative_to(REPO)}: missing " + ", ".join(missing))
     workdir = root / name
     workdir.mkdir(parents=True)
-    env = base_env()
+    env = dict(env) if env is not None else base_env()
     if name == "browser-react":
         prepare_browser(workdir)
     last: str | None = None
@@ -451,8 +458,11 @@ def main() -> int:
     args = parser.parse_args()
 
     docs = sorted(HERE.glob("*.md"))
-    docs = [doc for doc in docs if doc.stem != "README"]
+    # rest.md needs a running server: docs/api/check_examples.py checks it.
+    docs = [doc for doc in docs if doc.stem not in ("README", "rest")]
     if args.only:
+        if "rest" in args.only:
+            parser.error("rest.md needs a server: run docs/api/check_examples.py --only rest")
         unknown = set(args.only) - {doc.stem for doc in docs}
         if unknown:
             parser.error(f"no quickstart named {', '.join(sorted(unknown))}")

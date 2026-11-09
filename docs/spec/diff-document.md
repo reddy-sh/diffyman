@@ -427,7 +427,7 @@ All of these are warnings: the document stays valid, and its `status` is `identi
 
 ## 11. Provenance
 
-Provenance is audit data. It is left out of `id` and of conformance, and it may differ between runs. Writers MUST include `engine` `{name, version}`, `algorithm` (§12), `adapter` `{id, version}` (`id` is `text`, `binary` or `tree`), `binding` (`rust`, `cli`, `python`, `node`, `wasm`, `java`, `c`), `platform` `{os, arch}` and `timing` `{totalMicros}`. Timing values appear only here. Writers MAY add more keys, such as library versions, the Unicode version or the detection ID (`detect.sniff@1`, §16.1). Readers MUST NOT use provenance to interpret the rest of the document.
+Provenance is audit data. It is left out of `id` and of conformance, and it may differ between runs. Writers MUST include `engine` `{name, version}`, `algorithm` (§12), `adapter` `{id, version}` (`id` is `text`, `binary` or `tree`), `binding` (`rust`, `cli`, `python`, `node`, `wasm`, `java`, `c`, `server`), `platform` `{os, arch}` and `timing` `{totalMicros}`. Timing values appear only here. Writers MAY add more keys, such as library versions, the Unicode version or the detection ID (`detect.sniff@1`, §16.1). Readers MUST NOT use provenance to interpret the rest of the document.
 
 ## 12. Algorithm IDs
 

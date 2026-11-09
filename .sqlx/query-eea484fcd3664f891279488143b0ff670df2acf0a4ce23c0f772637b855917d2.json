@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs\n         SET status = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'succeeded' END,\n             result_blob = CASE WHEN cancel_requested THEN NULL ELSE $3::text END,\n             diff_id = CASE WHEN cancel_requested THEN NULL ELSE $4::uuid END,\n             finished_at = now(), lease_owner = NULL, lease_expires_at = NULL\n         WHERE id = $1 AND status = 'running' AND lease_owner = $2\n         RETURNING status",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "eea484fcd3664f891279488143b0ff670df2acf0a4ce23c0f772637b855917d2"
+}

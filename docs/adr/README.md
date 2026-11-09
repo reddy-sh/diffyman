@@ -17,6 +17,7 @@ This folder records the decisions that shape diffyman: what we chose, why, and w
 | [0009](0009-type-detection-and-binary-diff.md) | Type detection and a byte-level binary diff | Accepted | 2026-11-08 |
 | [0010](0010-folders-and-archives.md) | Folders and archives as trees, read in memory with hard limits | Accepted | 2026-11-08 |
 | [0011](0011-inline-spans-in-edited-moves.md) | Inline spans inside edited moves | Accepted | 2026-11-08 |
+| [0012](0012-local-service-architecture.md) | Local service architecture | Accepted | 2026-11-08 |
 
 ## Numbering rules
 

@@ -1,0 +1,65 @@
+[package]
+name = "diffyman-server"
+description = "Local REST service for the diffyman diff engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "diffyman-server"
+path = "src/main.rs"
+
+[features]
+default = []
+# s3:// store URLs.
+s3 = ["diffyman-storage/s3"]
+
+[dependencies]
+# Archives compare as trees from bytes; without `fs`, the server never reads
+# a path on disk (docs/adr/0012-local-service-architecture.md).
+diffyman = { workspace = true, features = ["archives"] }
+# Algorithm and detection IDs for GET /v1/formats.
+diffyman-algo.workspace = true
+diffyman-detect.workspace = true
+diffyman-adapter-binary.workspace = true
+diffyman-adapter-tree.workspace = true
+diffyman-storage.workspace = true
+diffyman-db.workspace = true
+serde.workspace = true
+# raw_value: request options are kept as their JSON text, so the engine's
+# strict parser sees a key given twice instead of serde keeping the last one.
+serde_json = { workspace = true, features = ["raw_value"] }
+toml.workspace = true
+url.workspace = true
+thiserror.workspace = true
+clap.workspace = true
+axum.workspace = true
+http-body.workspace = true
+tokio ={ workspace = true, features = ["rt-multi-thread", "net", "signal", "time", "sync", "macros"] }
+futures.workspace = true
+bytes.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+utoipa.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+base64.workspace = true
+governor.workspace = true
+
+# mmap and munmap for the large blocks of the global allocator (src/alloc.rs).
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tower = { workspace = true, features = ["util"] }
+# The test-database harness shared with diffyman-db (tests/common).
+sqlx.workspace = true
+getrandom.workspace = true
+
+[lints]
+workspace = true

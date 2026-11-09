@@ -4,7 +4,7 @@
 
 diffyman is an open-source, headless diff engine. One Rust core compares two files or folders and always returns the same versioned JSON result, the **Diff Document**. You get that result from a command-line tool, from language bindings (Python, Java, JavaScript/WASM and more), and from a local REST API.
 
-> **Status:** early development — the engine compares text, binary files, folders and archives, with a CLI, bindings for Python, Node.js, Java and the browser (WASM and React), and a C ABI. Nothing is published to a package registry yet; see [Usage](#usage) and [Use it from your language](#use-it-from-your-language) to build from source, and [docs/STATUS.md](docs/STATUS.md).
+> **Status:** early development — the engine compares text, binary files, folders and archives, with a CLI, bindings for Python, Node.js, Java and the browser (WASM and React), a C ABI, and a local REST service. Nothing is published to a package registry yet; see [Usage](#usage) and [Use it from your language](#use-it-from-your-language) to build from source, and [docs/STATUS.md](docs/STATUS.md).
 
 ## Why
 
@@ -39,7 +39,7 @@ See the [command-line reference](docs/cli.md) for every command, flag and output
 
 ## Use it from your language
 
-Every surface returns the same Diff Document, byte for byte apart from `provenance`. Each quickstart builds from source, diffs two files, prints the status and the changed lines, and handles errors; [`docs/quickstart/check_examples.py`](docs/quickstart/check_examples.py) runs every example in them against local builds.
+Every surface returns the same Diff Document, byte for byte apart from `provenance`. Each quickstart builds from source, diffs two files, prints the status and the changed lines, and handles errors; [`docs/quickstart/check_examples.py`](docs/quickstart/check_examples.py) runs every example in them against local builds, and [`docs/api/check_examples.py`](docs/api/check_examples.py) runs the REST examples against a real server.
 
 | Language | Quickstart | Package (not published yet) | Reference |
 |---|---|---|---|
@@ -49,6 +49,7 @@ Every surface returns the same Diff Document, byte for byte apart from `provenan
 | Java 17+ | [Java](docs/quickstart/java.md) | `sh.reddy.diffyman:diffyman` (JNI) | [bindings/java](bindings/java/README.md) |
 | Browser, React | [Browser and React](docs/quickstart/browser-react.md) | `@diffyman/react` over the WASM build | [bindings/wasm/react](bindings/wasm/react/README.md), [example app](examples/amplify-react) |
 | C, and Go, C#, Zig, Swift through C | [C](docs/quickstart/c.md) | `diffyman-ffi` (shared or static library) | [crates/diffyman-ffi](crates/diffyman-ffi/README.md) |
+| Any language over HTTP | [REST API](docs/quickstart/rest.md) | crate `diffyman-server` (a local service) | [API reference](docs/api/README.md), [OpenAPI 3.1](docs/api/openapi.json), [server guide](docs/server.md) |
 
 The document's fields, options and warnings are defined in the [Diff Document specification](docs/spec/diff-document.md).
 

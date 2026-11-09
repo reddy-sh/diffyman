@@ -1,0 +1,143 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO diffs (api_key_id, document_blob, left_blob, right_blob, status, kind, stats,\n                            expires_at)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n         RETURNING *",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "api_key_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "api_key_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "document_blob",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "document_blob"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "left_blob",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "left_blob"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "right_blob",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "right_blob"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "stats",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "stats"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "76e59ab533e62fad100508c8906cb55905ba05aab6f9f74522054e1c7ec08320"
+}

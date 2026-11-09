@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT document_blob, left_blob, right_blob FROM diffs WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "document_blob",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "document_blob"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "left_blob",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "left_blob"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "right_blob",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "diffs",
+            "name": "right_blob"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "978ca652ed99f639409a135d97fa1818c686e944ca5c6ed58b9ad60f649c477d"
+}

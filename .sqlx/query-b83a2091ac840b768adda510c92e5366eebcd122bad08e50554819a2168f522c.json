@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs\n         SET status = CASE WHEN $5::float8 IS NOT NULL AND attempts < max_attempts\n                           THEN 'queued' ELSE 'failed' END,\n             run_after = CASE WHEN $5::float8 IS NOT NULL AND attempts < max_attempts\n                              THEN now() + make_interval(secs => $5::float8) ELSE run_after END,\n             finished_at = CASE WHEN $5::float8 IS NOT NULL AND attempts < max_attempts\n                                THEN NULL ELSE now() END,\n             error_code = $3,\n             error_message = $4,\n             lease_owner = NULL,\n             lease_expires_at = NULL\n         WHERE id = $1 AND status = 'running' AND lease_owner = $2\n         RETURNING status",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b83a2091ac840b768adda510c92e5366eebcd122bad08e50554819a2168f522c"
+}

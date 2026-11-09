@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH expired AS (\n             SELECT id FROM jobs\n             WHERE status = 'running' AND lease_expires_at < now()\n             ORDER BY lease_expires_at\n             LIMIT $1\n             FOR UPDATE SKIP LOCKED\n         )\n         UPDATE jobs AS j\n         SET status = CASE WHEN j.cancel_requested THEN 'cancelled'\n                           WHEN j.attempts < j.max_attempts THEN 'queued'\n                           ELSE 'failed' END,\n             error_code = CASE WHEN NOT j.cancel_requested AND j.attempts >= j.max_attempts\n                               THEN 'lease-expired' ELSE j.error_code END,\n             error_message = CASE WHEN NOT j.cancel_requested AND j.attempts >= j.max_attempts\n                                  THEN 'the worker stopped renewing its lease'\n                                  ELSE j.error_message END,\n             finished_at = CASE WHEN j.cancel_requested OR j.attempts >= j.max_attempts\n                                THEN now() ELSE NULL END,\n             run_after = now(),\n             lease_owner = NULL,\n             lease_expires_at = NULL\n         FROM expired\n         WHERE j.id = expired.id\n         RETURNING j.status",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2d299c3c23afe249227fb3eaa92df1ea02aab476b905cd8f2557819889386b9d"
+}

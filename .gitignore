@@ -37,6 +37,11 @@ __pycache__/
 .env.*
 !.env.example
 *.local.json
+# diffyman-server's own configuration file (it may hold a database URL)
+/diffyman.toml
+# Database backups (scripts/backup-db.sh) if their folder is inside the repository
+*.dump
+*.dump.sha256
 
 # Editors and OS
 .idea/

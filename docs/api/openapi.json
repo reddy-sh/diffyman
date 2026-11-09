@@ -1,0 +1,1116 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "diffyman-server",
+    "description": "Local REST service for the diffyman diff engine. Every `/v1` route needs `Authorization: Bearer <API key>`. Diff results are canonical Diff Documents (docs/spec/diff-document.md). Errors are `{\"error\": {\"code\", \"message\"}}` with stable codes.",
+    "license": {
+      "name": "MIT OR Apache-2.0",
+      "identifier": "MIT OR Apache-2.0"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Reports whether the server can reach its database and blob store. Needs\nno API key.",
+        "operationId": "healthz",
+        "responses": {
+          "200": {
+            "description": "Healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A dependency is down",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "The OpenAPI 3.1 document of this API. Needs no API key.",
+        "operationId": "openapi",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/blobs": {
+      "post": {
+        "tags": [
+          "blobs"
+        ],
+        "summary": "Uploads a blob. The body is streamed to the store while it is hashed;\nthe blob ID is its SHA-256. Blobs belong to the key that uploaded them:\nonly it can start jobs on them, and the answer never shows whether\nanother key stored the same bytes.",
+        "operationId": "upload_blob",
+        "parameters": [
+          {
+            "name": "sha256",
+            "in": "query",
+            "description": "Expected SHA-256 (64 lowercase hex digits); the upload is refused unless the bytes match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The bytes, at most the blob limit (1 GiB by default). Content-Type is recorded as the media type.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "This key had already uploaded these bytes; the expiry is extended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlobView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Stored for this key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlobView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid `sha256`, hash mismatch or a broken body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Larger than the blob limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A dependency is down",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/diff": {
+      "post": {
+        "tags": [
+          "diffs"
+        ],
+        "summary": "Diffs two inputs sent in the request and returns the Diff Document.",
+        "operationId": "create_diff",
+        "parameters": [
+          {
+            "name": "save",
+            "in": "query",
+            "description": "Also save the document and both inputs for `GET /v1/diffs/{id}` and for jobs (they expire after the diff retention period)",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Two small inputs (each at most the synchronous input limit, 8 MiB by default) and an options object",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiffRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/DiffForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The canonical Diff Document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffDocument"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Saved; `Location` is the saved diff",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`/v1/diffs/{id}`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body or an input is too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Not JSON or multipart",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The build cannot compare these inputs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Every synchronous diff slot or the shared memory budget stayed taken (`busy`), the request timed out, or a dependency is down",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/diffs/{id}": {
+      "get": {
+        "tags": [
+          "diffs"
+        ],
+        "summary": "Returns a saved Diff Document.",
+        "operationId": "get_diff",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Saved diff ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The canonical Diff Document, as saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiffDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such diff, or it has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "diffs"
+        ],
+        "summary": "Deletes a saved diff, the job that produced it, and every blob that\nnothing else holds any more: no other job or saved diff uses it and no\nkey's upload of it is still live.",
+        "operationId": "delete_diff",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Saved diff ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted. A stored object the blob store could not delete at once has no record left and is removed by a later sweep"
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such diff",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A dependency is down; nothing was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/formats": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Lists what the server compares and its limits.",
+        "operationId": "formats",
+        "responses": {
+          "200": {
+            "description": "Kinds, adapters, algorithm IDs, input formats and limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Formats"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/jobs": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Creates a job that diffs two stored inputs.",
+        "operationId": "create_job",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued; poll `Location`",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`/v1/jobs/{id}`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A blob this key uploaded, or a diff, does not exist",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The inputs are over the job memory budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A dependency is down",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/jobs/{id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Returns a job's status and, once it succeeded, the link to its result.",
+        "operationId": "get_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/jobs/{id}/cancel": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Cancels a job: a queued job at once, a running one at its worker's next\nheartbeat.",
+        "operationId": "cancel_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Running; it stops at its next heartbeat",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job has already finished",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BinaryBody": {
+        "type": "string",
+        "format": "binary",
+        "description": "Raw bytes."
+      },
+      "BlobView": {
+        "type": "object",
+        "description": "A stored blob.",
+        "required": [
+          "blobId",
+          "size",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "blobId": {
+            "type": "string",
+            "description": "The blob ID: the lowercase hex SHA-256 of its bytes.",
+            "example": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this key first uploaded these bytes."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this key's upload expires: after that the key can no longer\nstart jobs on it, and it is removed unless a job, a saved diff or\nanother key's upload still holds it. Uploading the same bytes again\nextends it."
+          },
+          "mediaType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Media type given at this key's first upload of these bytes."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size in bytes.",
+            "minimum": 0
+          }
+        }
+      },
+      "DiffDocument": {
+        "type": "object",
+        "description": "A Diff Document (schema 0.4.0) as canonical JSON (RFC 8785): the bytes\nthe engine wrote, identical to `diffyman diff --json` for the same inputs,\nnames and options except `provenance` (whose `binding` is `server`). See\n`docs/spec/diff-document.md`."
+      },
+      "DiffForm": {
+        "type": "object",
+        "description": "A synchronous diff as `multipart/form-data`.",
+        "required": [
+          "left",
+          "right"
+        ],
+        "properties": {
+          "left": {
+            "type": "string",
+            "format": "binary",
+            "description": "The left input; its file name is its name."
+          },
+          "options": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An options object as JSON text."
+          },
+          "right": {
+            "type": "string",
+            "format": "binary",
+            "description": "The right input."
+          }
+        }
+      },
+      "DiffRequest": {
+        "type": "object",
+        "description": "Two inputs and the options of a synchronous diff.",
+        "required": [
+          "left",
+          "right"
+        ],
+        "properties": {
+          "left": {
+            "$ref": "#/components/schemas/InputBody",
+            "description": "The left (old) input."
+          },
+          "options": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "An options object (`docs/spec/diff-document.md` §9); `{}` when absent."
+          },
+          "right": {
+            "$ref": "#/components/schemas/InputBody",
+            "description": "The right (new) input."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorBody": {
+        "type": "object",
+        "description": "Body of every error response.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail",
+            "description": "The error."
+          }
+        }
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "description": "An error code and message.",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable kebab-case code, such as `unauthorized` or `input-too-large`.\nNew codes may be added; treat unknown ones by their HTTP status.",
+            "example": "input-too-large"
+          },
+          "message": {
+            "type": "string",
+            "description": "Explanation for people; never parse it."
+          }
+        }
+      },
+      "Formats": {
+        "type": "object",
+        "description": "What this server compares and its limits."
+      },
+      "Health": {
+        "type": "object",
+        "description": "Health of the server and its dependencies.",
+        "required": [
+          "status",
+          "checks"
+        ],
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/HealthChecks",
+            "description": "Each dependency: `ok` or `unavailable`."
+          },
+          "status": {
+            "type": "string",
+            "description": "`ok`, or `unavailable` when a dependency is down.",
+            "example": "ok"
+          }
+        }
+      },
+      "HealthChecks": {
+        "type": "object",
+        "description": "Dependency checks.",
+        "required": [
+          "database",
+          "storage"
+        ],
+        "properties": {
+          "database": {
+            "type": "string",
+            "description": "The database."
+          },
+          "storage": {
+            "type": "string",
+            "description": "The blob store."
+          }
+        }
+      },
+      "InputBody": {
+        "type": "object",
+        "description": "One input: exactly one of `text` or `base64`, and an optional name.",
+        "properties": {
+          "base64": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The content as standard base64 (with padding)."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "File name; only its final component is kept. Used for type detection\nby extension and recorded in the document."
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The content as UTF-8 text."
+          }
+        },
+        "additionalProperties": false
+      },
+      "JobInput": {
+        "type": "object",
+        "description": "One input of a job: an uploaded blob (`blob`), or one side of a saved\ndiff (`diff` and `side`), with an optional name.",
+        "properties": {
+          "blob": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A blob ID from this key's `POST /v1/blobs`."
+          },
+          "diff": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A saved diff whose input to use."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "File name; only its final component is kept."
+          },
+          "side": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Side",
+                "description": "Which input of `diff`."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "JobRequest": {
+        "type": "object",
+        "description": "A diff of two stored inputs, run in the background.",
+        "required": [
+          "left",
+          "right"
+        ],
+        "properties": {
+          "left": {
+            "$ref": "#/components/schemas/JobInput",
+            "description": "The left (old) input."
+          },
+          "options": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "An options object (`docs/spec/diff-document.md` §9); `{}` when absent."
+          },
+          "right": {
+            "$ref": "#/components/schemas/JobInput",
+            "description": "The right (new) input."
+          }
+        },
+        "additionalProperties": false
+      },
+      "JobSide": {
+        "type": "object",
+        "description": "A job's input as stored.",
+        "required": [
+          "blob"
+        ],
+        "properties": {
+          "blob": {
+            "type": "string",
+            "description": "Blob ID."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name, if given."
+          }
+        }
+      },
+      "JobState": {
+        "type": "string",
+        "description": "Where a job is in its life.",
+        "enum": [
+          "queued",
+          "running",
+          "succeeded",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "JobView": {
+        "type": "object",
+        "description": "A job.",
+        "required": [
+          "id",
+          "status",
+          "left",
+          "right",
+          "attempts",
+          "maxAttempts",
+          "cancelRequested",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Attempts started so far."
+          },
+          "cancelRequested": {
+            "type": "boolean",
+            "description": "Whether a cancel was requested while it ran."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was created."
+          },
+          "diffId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The saved diff with the result, once succeeded."
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetail",
+                "description": "The last attempt's error."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job record is removed."
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it finished."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Job ID (UUIDv7)."
+          },
+          "left": {
+            "$ref": "#/components/schemas/JobSide",
+            "description": "Left input."
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Attempts allowed (infrastructure errors are retried; input errors are not)."
+          },
+          "result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Link to the Diff Document, once succeeded.",
+            "example": "/v1/diffs/0190f0c4-7b9a-7cc0-8000-000000000000"
+          },
+          "right": {
+            "$ref": "#/components/schemas/JobSide",
+            "description": "Right input."
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When its first attempt started."
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobState",
+            "description": "Status."
+          }
+        }
+      },
+      "Side": {
+        "type": "string",
+        "description": "A side of a saved diff.",
+        "enum": [
+          "left",
+          "right"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "dmk_ followed by 64 hex digits"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "diffs",
+      "description": "Synchronous diffs and saved Diff Documents"
+    },
+    {
+      "name": "blobs",
+      "description": "Content-addressed uploads for jobs"
+    },
+    {
+      "name": "jobs",
+      "description": "Asynchronous diffs of uploaded blobs"
+    },
+    {
+      "name": "meta",
+      "description": "Formats, health and this document"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs\n         SET status = CASE WHEN status = 'queued' THEN 'cancelled' ELSE status END,\n             finished_at = CASE WHEN status = 'queued' THEN now() ELSE finished_at END,\n             cancel_requested = cancel_requested OR status IN ('queued', 'running')\n         WHERE id = $1\n         RETURNING status",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e673ea347d075011e80af54fecb79851cd67e076fce68437f32d0bb578034d79"
+}

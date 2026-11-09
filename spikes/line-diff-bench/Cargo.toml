@@ -4,6 +4,8 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/reddy-sh/diffyman"
+homepage = "https://reddy.sh"
 description = "Spike A: compare the similar and imara-diff line diff crates on large and pathological inputs"
 
 # Standalone project: not part of the root workspace.

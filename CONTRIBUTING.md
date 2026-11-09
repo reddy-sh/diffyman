@@ -59,6 +59,11 @@ Exit codes: `0` identical, `1` different, `2` error.
 | `crates/diffyman-conformance` | Golden-corpus runner |
 | `bindings/python` | Python package `diffyman` (PyO3 + maturin, abi3 for CPython 3.11+) |
 | `bindings/wasm` | WebAssembly package (wasm-bindgen + wasm-pack) |
+| `crates/diffyman-storage` | Content-addressed blob store over `object_store` (`file://`, `memory://`, `s3://`) |
+| `crates/diffyman-db` | PostgreSQL schema, migrations and queries (`sqlx`, offline data in `.sqlx/`) |
+| `crates/diffyman-server` | The `diffyman-server` binary: the local REST service ([guide](docs/server.md), [API](docs/api/README.md)) |
+
+Only the three server crates use a database, the network or an async runtime; the engine, the CLI and the bindings must keep building without them.
 
 ## Bindings
 
@@ -69,6 +74,33 @@ uv run --no-project --python 3.12 python tests/conformance/run_bindings.py --cli
 ```
 
 CI runs it on Linux, macOS and Windows and compares the per-case SHA-256 tables of the three runs, so the documents are also identical across operating systems.
+
+## Server tests
+
+`cargo test --workspace` passes without a database: the tests of `diffyman-db`, `diffyman-storage` and `diffyman-server` that need PostgreSQL print why they skip and pass, so a machine without Docker can still run everything else. To run them all, start the local PostgreSQL 18 on `127.0.0.1:5433` (it writes a random password to the gitignored `.env.local`, which the tests read):
+
+```sh
+scripts/local-up.sh
+cargo test -p diffyman-db -p diffyman-storage -p diffyman-server
+cargo test -p diffyman-server -- --nocapture 2>&1 | grep skipping   # nothing printed: nothing skipped
+```
+
+- Every database test runs in a fresh schema of its own in a `diffyman_test` database; the main `diffyman` database is never used. `DIFFYMAN_TEST_DB_URL` points the tests at another PostgreSQL server (a URL to any database on it, usually `postgres`). `DIFFYMAN_TEST_DB_REQUIRED=1` turns a skip into a failure, as in CI.
+- Builds use the offline query data in `.sqlx/`, so they need no database (`SQLX_OFFLINE=true` in CI). After changing a migration or a query in `crates/diffyman-db`, refresh it with `scripts/db-prepare.sh` (it needs `sqlx-cli` 0.9.0; the script prints the install command) and commit `.sqlx/`; `scripts/db-prepare.sh --check` is what CI runs.
+- When the API changes, `cargo test -p diffyman-server --test openapi` rewrites `docs/api/openapi.json` and fails once; commit the new file.
+
+The built binary has its own checks, each on its own database, blob folder and random port on `127.0.0.1` (they need `psql`, and `curl` and `jq` for the last one):
+
+```sh
+cargo build --locked --release -p diffyman-server -p diffyman-cli
+uv run --no-project --python 3.12 python tests/server/run_e2e.py \
+  --server target/release/diffyman-server --cli target/release/diffyman   # end to end, about 1 GB free disk
+uv run --no-project --python 3.12 python tests/server/harness.py -- \
+  python tests/conformance/run_bindings.py --surfaces cli,server --cli target/release/diffyman
+uv run --no-project --python 3.12 python docs/api/check_examples.py      # the curl examples of the docs
+```
+
+[tests/server/README.md](tests/server/README.md) describes the end-to-end run and its options, including a run against the S3-compatible server of the `s3` profile. Keep secrets out of command lines and logs: the scripts read the database password from `.env.local` and pass it to child processes only through their environment, and the server never logs file content, file paths or keys.
 
 ## Golden corpus
 

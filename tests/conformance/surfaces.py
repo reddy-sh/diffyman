@@ -1,10 +1,14 @@
 """The surfaces run_bindings.py drives: how each one gets a Diff Document.
 
-A surface is the CLI or one binding. Each runs in one or two modes:
+A surface is the CLI, one binding or a running diffyman-server. Each runs in
+one or two modes:
 
   paths  the surface reads the inputs itself (files, folders, archives)
   bytes  the runner's helper reads two files and hands the surface their
          bytes and final path components as names
+
+The server's two modes are both bytes forms of POST /v1/diff: `json` and
+`multipart`.
 
 A surface that cannot run a case says why (`skip_reason`), and a build that
 must refuse a case with an `unsupported` error says so (`refuses`); nothing
@@ -17,13 +21,16 @@ Run as a script, this file is the Python binding's batch worker
 
 from __future__ import annotations
 
+import base64
 import ctypes
+import http.client
 import json
 import os
 import pathlib
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -543,6 +550,116 @@ def load_c_library(path: pathlib.Path) -> Any:
     lib.diffyman_engine_version.argtypes = []
     lib.diffyman_engine_version.restype = ctypes.c_char_p
     return lib
+
+
+# --- diffyman-server -----------------------------------------------------------
+
+
+SERVER_JSON = "json"
+SERVER_MULTIPART = "multipart"
+
+
+class Server(Surface):
+    """A running diffyman-server, through POST /v1/diff.
+
+    `json` sends both inputs base64-encoded in a JSON body, `multipart` as
+    multipart/form-data parts with the options as JSON text; both name the
+    inputs by their final path components. The API key comes from the
+    environment (DIFFYMAN_SERVER_KEY), never from the command line.
+    tests/server/harness.py starts a server and sets both variables.
+    """
+
+    name = binding = "server"
+    modes = (SERVER_JSON, SERVER_MULTIPART)
+
+    def __init__(self, url: str) -> None:
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != "http" or not parts.hostname or parts.path not in ("", "/"):
+            raise SystemExit(f"server: --server-url must be http://host:port, not {url!r}")
+        self.url = url.rstrip("/")
+        self.host = parts.hostname
+        self.port = parts.port or 80
+        self.key = os.environ.get("DIFFYMAN_SERVER_KEY", "")
+        self.conn: http.client.HTTPConnection | None = None
+        self.health: dict[str, Any] = {}
+
+    def request(self, method: str, path: str, body: bytes | None, headers: dict[str, str]) -> tuple[int, bytes]:
+        for attempt in (0, 1):
+            if self.conn is None:
+                self.conn = http.client.HTTPConnection(self.host, self.port, timeout=120)
+            try:
+                self.conn.request(method, path, body=body, headers=headers)
+                response = self.conn.getresponse()
+                return response.status, response.read()
+            except (ConnectionError, http.client.HTTPException):
+                self.conn.close()
+                self.conn = None
+                if attempt == 1:
+                    raise
+        raise AssertionError("unreachable")
+
+    def prepare(self) -> None:
+        if not self.key:
+            raise SystemExit("server: set DIFFYMAN_SERVER_KEY to an API key (tests/server/harness.py does)")
+        try:
+            status, body = self.request("GET", "/healthz", None, {})
+        except OSError as error:
+            raise SystemExit(f"server: nothing answers at {self.url} ({error})") from None
+        if status != 200:
+            raise SystemExit(f"server: GET /healthz answered HTTP {status}: {body[:200]!r}")
+        self.health = json.loads(body)
+
+    def describe(self) -> str:
+        return f"{self.url} (POST /v1/diff, health {self.health.get('status')})"
+
+    def skip_reason(self, case: Case, mode: str) -> str | None:
+        return "folder input: the HTTP API takes two files" if case.folder else None
+
+    def run(self, jobs: Sequence[Job]) -> list[Output]:
+        return [self.run_one(case, mode) for case, mode in jobs]
+
+    def run_one(self, case: Case, mode: str) -> Output:
+        left, right = case.left.read_bytes(), case.right.read_bytes()
+        options = case.options.read_text(encoding="utf-8")
+        if mode == SERVER_JSON:
+            body = json.dumps(
+                {
+                    "left": {"name": case.left.name, "base64": base64.b64encode(left).decode("ascii")},
+                    "right": {"name": case.right.name, "base64": base64.b64encode(right).decode("ascii")},
+                    "options": json.loads(options),
+                }
+            ).encode("utf-8")
+            content_type = "application/json"
+        else:
+            body, content_type = multipart_body(
+                [
+                    ("left", case.left.name, left),
+                    ("right", case.right.name, right),
+                    ("options", None, options.encode("utf-8")),
+                ]
+            )
+        headers = {"Content-Type": content_type, "Authorization": f"Bearer {self.key}"}
+        status, raw = self.request("POST", "/v1/diff", body, headers)
+        if status == 200:
+            return Output(raw=raw.decode("utf-8", errors="strict"))
+        try:
+            error = json.loads(raw)["error"]
+            return Output(error=f"HTTP {status} {error['code']}: {error['message']}", code=error["code"])
+        except (ValueError, KeyError, TypeError):
+            return Output(error=f"HTTP {status}: {raw[:200]!r}")
+
+
+MULTIPART_BOUNDARY = "diffyman-conformance-5b2e8c41"
+
+
+def multipart_body(parts: list[tuple[str, str | None, bytes]]) -> tuple[bytes, str]:
+    out = bytearray()
+    for name, filename, data in parts:
+        disposition = f'form-data; name="{name}"' + (f'; filename="{filename}"' if filename is not None else "")
+        out += f"--{MULTIPART_BOUNDARY}\r\nContent-Disposition: {disposition}\r\n\r\n".encode()
+        out += data + b"\r\n"
+    out += f"--{MULTIPART_BOUNDARY}--\r\n".encode()
+    return bytes(out), f"multipart/form-data; boundary={MULTIPART_BOUNDARY}"
 
 
 def which(name: str) -> str:

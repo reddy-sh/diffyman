@@ -1,0 +1,33 @@
+[package]
+name = "diffyman-storage"
+description = "Content-addressed blob storage for the diffyman server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+
+[features]
+default = []
+# s3:// store URLs (docs/adr/0004-object-storage.md). Credentials and the
+# endpoint come from the standard AWS_* environment variables.
+s3 = ["object_store/aws"]
+
+[dependencies]
+object_store.workspace = true
+futures.workspace = true
+bytes.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,17 @@
+# Build context of deploy/docker/Dockerfile, as an allowlist: local secrets
+# (.env.local, diffyman.toml), build output, caches and the toolchain file
+# never enter the build.
+*
+!Cargo.toml
+!Cargo.lock
+!.sqlx/
+!crates/
+!bindings/*/Cargo.toml
+!bindings/*/build.rs
+!bindings/*/src/
+!docs/spec/diff-document.md
+**/target/
+**/node_modules/
+**/.venv/
+**/*.node
+**/*.so

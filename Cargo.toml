@@ -95,10 +95,49 @@ napi-build = "=2.6.0"
 # Generates the C header of diffyman-ffi in a test; never linked into a library.
 cbindgen = { version = "=0.29.4", default-features = false }
 
+# Local REST service only: diffyman-server, diffyman-db and diffyman-storage
+# (docs/adr/0012-local-service-architecture.md). The engine, CLI and bindings
+# never depend on these.
+diffyman-storage = { path = "crates/diffyman-storage", version = "=0.0.1" }
+diffyman-db = { path = "crates/diffyman-db", version = "=0.0.1" }
+tokio = { version = "=1.54.1", default-features = false }
+futures = { version = "=0.3.34", default-features = false, features = ["std", "async-await"] }
+bytes = "=1.12.1"
+# `fs` for file:// stores; the server crate's `s3` feature adds `aws`.
+object_store = { version = "=0.14.2", default-features = false, features = ["fs"] }
+# PostgreSQL only, rustls with the platform's root certificates (webpki-roots
+# is CDLA-Permissive-2.0, outside the license allowlist), compile-time checked
+# queries with offline data in .sqlx/.
+sqlx = { version = "=0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-ring-native-roots", "macros", "migrate", "json", "uuid", "chrono", "sqlx-toml"] }
+uuid = { version = "=1.29.2", default-features = false, features = ["std", "v4", "v7", "serde"] }
+chrono = { version = "=0.4.45", default-features = false, features = ["std", "clock", "serde"] }
+toml = { version = "=1.2.1", default-features = false, features = ["parse", "serde"] }
+url = "=2.5.8"
+getrandom = "=0.4.3"
+# The HTTP layer of diffyman-server: HTTP/1.1 only, no TLS (it listens on
+# loopback; a deployment terminates TLS in front of it).
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio", "multipart", "matched-path"] }
+tower = { version = "=0.5.3", default-features = false }
+# The response-body trait, for the connection time limits (already in the
+# tree through axum and hyper).
+http-body = "=1.1.0"
+# OpenAPI 3.1 document served at /openapi.json and kept in docs/api/.
+utoipa = { version = "=6.0.0", default-features = false, features = ["macros", "uuid", "chrono"] }
+tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["std", "registry"] }
+base64 = "=0.22.1"
+# Per-key rate limits, without its default dashmap, quanta and jitter features.
+governor = { version = "=0.10.4", default-features = false, features = ["std"] }
+# mmap and munmap for the server's global allocator, which returns large
+# blocks to the system when they are freed (already in the tree through
+# tokio and others).
+libc = { version = "=0.2.191", default-features = false }
+
 [workspace.lints.rust]
 # Denied everywhere. The exceptions are the CLI's memory map of input files
-# (`#[allow(unsafe_code)]` on that function, with its safety argument) and
-# the C ABI in diffyman-ffi, whose exported functions take raw pointers.
+# (`#[allow(unsafe_code)]` on that function, with its safety argument), the
+# server's global allocator (crates/diffyman-server/src/alloc.rs) and the C
+# ABI in diffyman-ffi, whose exported functions take raw pointers.
 unsafe_code = "deny"
 unused_qualifications = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }

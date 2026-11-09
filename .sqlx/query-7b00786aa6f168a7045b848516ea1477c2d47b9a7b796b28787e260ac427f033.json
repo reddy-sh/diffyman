@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT sha256 FROM blobs\n         WHERE expires_at <= now() AND NOT diffyman_blob_held(sha256)\n         ORDER BY expires_at LIMIT $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sha256",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "blobs",
+            "name": "sha256"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7b00786aa6f168a7045b848516ea1477c2d47b9a7b796b28787e260ac427f033"
+}

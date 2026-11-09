@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT left_blob, right_blob, result_blob FROM jobs WHERE diff_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "left_blob",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "left_blob"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "right_blob",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "right_blob"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "result_blob",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "jobs",
+            "name": "result_blob"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "eba6aea805dd7907ef14d45053e3814c84a30d4f4ebc985315ea94790a20b839"
+}
