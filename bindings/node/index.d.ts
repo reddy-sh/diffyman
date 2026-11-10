@@ -117,7 +117,7 @@ export declare function diffPathsAsync(
   pathOptions?: PathOptions | null,
 ): Promise<string>;
 
-/** The engine version, such as `"0.0.1"`. */
+/** The engine version, such as `"0.1.0"`. */
 export declare const ENGINE_VERSION: string;
 /** The Diff Document schema version this build writes, such as `"0.4.0"`. */
 export declare const SCHEMA_VERSION: string;

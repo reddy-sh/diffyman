@@ -67,6 +67,18 @@ python -m venv .venv
 `dist/`; the wheel can also be built from the sdist alone
 (`pip install dist/diffyman-*.tar.gz`, which needs the Rust toolchain).
 
+Wheels meant for others are built with the Cargo home and the checkout
+remapped, so the extension names no folder of the build machine, then checked
+with `tools/check_dist.py` (metadata, the `cp311-abi3` tag, both license
+texts, no bytecode or test data, no build machine path):
+
+```sh
+RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo --remap-path-prefix=$PWD=." \
+  .venv/bin/maturin build --release --locked -m bindings/python/Cargo.toml --out dist
+.venv/bin/maturin sdist -m bindings/python/Cargo.toml --out dist
+.venv/bin/python bindings/python/tools/check_dist.py dist/*
+```
+
 ## Development
 
 From the repository root (`scripts/with-rustup` puts the pinned toolchain

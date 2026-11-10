@@ -4,9 +4,9 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    // @diffyman/react and diffyman-wasm are linked from this repository; use
+    // @diffyman/react and @diffyman/wasm are linked from this repository; use
     // one copy of React (and of the engine glue) for the whole app.
-    dedupe: ["react", "react-dom", "diffyman-wasm"],
+    dedupe: ["react", "react-dom", "@diffyman/wasm"],
   },
   // The diff worker is an ES module worker (all current browsers).
   worker: { format: "es" },

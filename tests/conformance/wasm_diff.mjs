@@ -1,4 +1,5 @@
-// Runs the diffyman WASM binding (wasm-pack --target nodejs) from Node.js.
+// Runs the diffyman WASM binding (@diffyman/wasm, built with wasm-pack
+// --target nodejs and bindings/wasm/scripts/finish-package.mjs) from Node.js.
 //
 // Single diff, printing the canonical Diff Document to stdout:
 //   node tests/conformance/wasm_diff.mjs [--pkg DIR] LEFT RIGHT [OPTIONS_JSON_FILE]
@@ -75,7 +76,7 @@ if (features) {
     process.stdout.write(runOne(positional[0], positional[1], positional[2]) + "\n");
   } catch (err) {
     const code = err?.code ? ` [${err.code}]` : "";
-    process.stderr.write(`diffyman-wasm: error${code}: ${err?.message ?? err}\n`);
+    process.stderr.write(`@diffyman/wasm: error${code}: ${err?.message ?? err}\n`);
     process.exit(2);
   }
 }

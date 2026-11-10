@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "diffyman-adapter-binary",
  "diffyman-adapter-tree",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-adapter-binary"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "diffyman-algo",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-adapter-tree"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flate2",
  "ignore",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-algo"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "diffyman-model",
  "foldhash 0.1.5",
@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-detect"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "infer",
 ]
@@ -236,7 +236,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-model"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "memchr",
  "ryu-js",

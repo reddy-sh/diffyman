@@ -5,7 +5,7 @@ Java binding for [diffyman](https://github.com/reddy-sh/diffyman), a headless
 one Rust core through JNI. It runs on Java 17 and newer and has no runtime
 dependencies.
 
-Maven coordinates: `sh.reddy.diffyman:diffyman:0.0.1` (not published yet;
+Maven coordinates: `sh.reddy.diffyman:diffyman:0.1.0` (not published yet;
 build it from source as below).
 
 ## Example
@@ -35,7 +35,7 @@ canonical (RFC 8785) Diff Document as a `String`. It is byte-identical to
 | `diff(left, right, optionsJson)`, `diff(left, right)` | The same without names, or with the default options. |
 | `diffPaths(Path left, Path right, String optionsJson, Long maxInputSize)` | Diffs two files, or a folder against a folder or an archive (a tree document), as the CLI does. Files are named by their final path component. `maxInputSize` is the CLI's `--max-input-size` (bytes per input read whole); `null` keeps the default rule (a regular file whole, a pipe or device up to 4 GiB). |
 | `diffPaths(left, right, optionsJson)` | The same with the default limit. |
-| `engineVersion()`, `schemaVersion()` | Such as `0.0.1` and `0.4.0`. |
+| `engineVersion()`, `schemaVersion()` | Such as `0.1.0` and `0.4.0`. |
 | `documentSchema()` | The document's JSON Schema, the text `diffyman schema` prints. |
 
 Options are an options object as JSON text (`docs/spec/diff-document.md`,
@@ -94,7 +94,7 @@ mvn -f bindings/java/pom.xml verify
 
 `bindings/java/build.sh` runs both (it honours `CARGO_TARGET_DIR`). Maven
 takes the library from `target/release` (`-Ddiffyman.native.dir=...` to
-change it), packs it into `bindings/java/target/diffyman-0.0.1.jar` and runs
+change it), packs it into `bindings/java/target/diffyman-0.1.0.jar` and runs
 the tests; `mvn install` puts the jar in your local Maven repository.
 
 ## Tests

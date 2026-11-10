@@ -114,6 +114,15 @@ cargo run -p diffyman-conformance -- --strict  # NEW cases fail
 
 Review every blessed file before committing it. Corpus files are stored byte for byte (see `.gitattributes`), so line endings and BOMs in them are part of the test. Every case must be original material: never copy another product's output.
 
+## Documentation site
+
+The site is an mdBook built from the Markdown in the repository (the README, this file and everything under `docs/`), with its table of contents in `book/SUMMARY.md`. A new page under `docs/` must be listed there. The build fails on a broken link or fragment, or on anything loaded from another origin; see [book/README.md](book/README.md).
+
+```sh
+cargo install --locked mdbook --version 0.5.4 --no-default-features --features search
+python3 book/build.py                  # writes and checks target/book/html
+```
+
 ## Pull requests
 
 - Keep each pull request focused, with tests for new behavior.

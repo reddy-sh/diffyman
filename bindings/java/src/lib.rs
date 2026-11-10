@@ -173,7 +173,7 @@ pub extern "system" fn Java_sh_reddy_diffyman_NativeLibrary_diffPaths<'local>(
         .resolve::<ThrowRuntimeExAndDefault>()
 }
 
-/// `NativeLibrary.engineVersion()`: the engine version, such as `0.0.1`.
+/// `NativeLibrary.engineVersion()`: the engine version, such as `0.1.0`.
 #[allow(
     unsafe_code,
     reason = "JNI looks native methods up by their exported, unmangled symbol name"

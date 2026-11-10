@@ -17,6 +17,7 @@ Node 22):
 ```sh
 # From the repository root
 wasm-pack build bindings/wasm --release --target web --out-dir pkg-web -- --locked
+node bindings/wasm/scripts/finish-package.mjs bindings/wasm/pkg-web     # names it @diffyman/wasm
 npm --prefix bindings/wasm/react ci
 npm --prefix bindings/wasm/react run build
 

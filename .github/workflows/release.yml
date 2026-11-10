@@ -1,0 +1,928 @@
+name: Release
+
+# Builds every release artifact and publishes only after an approval
+# (docs/release.md).
+#
+# Triggers: a run started by hand (workflow_dispatch, a dry run unless
+# dry_run is unticked) and a pushed tag vX.Y.Z (always a dry run that builds
+# everything and runs no publish job). Never on a branch push or a pull
+# request.
+#
+# Every run builds the CLI archives (cargo-auditable, path remapping, an
+# SBOM each), the Python wheels and sdist, the npm packages and the Maven
+# artifacts, and SHA256SUMS over all of them, as workflow artifacts; nothing
+# goes to a GitHub release. The publish jobs run only when started by hand,
+# and each needs an approval of the `release` environment (required
+# reviewers): with dry_run (the default) they run the registry's own dry run
+# (cargo publish --dry-run per crate in dependency order, twine check, npm
+# publish --dry-run, mvn verify with the release profile); only with dry_run
+# unticked, on the tag vX.Y.Z, do they publish and attest the artifacts'
+# build provenance.
+#
+# Hygiene: no caches (a release must not read what another run wrote), a
+# read-only token by default and id-token only on the jobs that use OIDC,
+# checkout without stored credentials, actions pinned by commit, and no
+# `${{ }}` inside run: scripts (values reach the shell through env:).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release; every manifest must already have it (scripts/release/set-version.sh)
+        required: true
+        type: string
+      dry_run:
+        description: Dry run (build and check everything, publish nothing)
+        required: true
+        type: boolean
+        default: true
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  plan:
+    # The version and the mode. A run publishes only when started by hand
+    # with dry_run unticked, on the tag v<version>, and every manifest has
+    # that version.
+    name: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+      source_date_epoch: ${{ steps.plan.outputs.source_date_epoch }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Version and mode
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            version=$INPUT_VERSION
+            # Anything but an explicit false is a dry run.
+            if [ "$INPUT_DRY_RUN" = false ]; then dry_run=false; else dry_run=true; fi
+          else
+            version=${REF_NAME#v}
+            dry_run=true
+          fi
+          # Fails unless the version is MAJOR.MINOR.PATCH and every manifest has it.
+          python3 scripts/release/versions.py check --expect "$version"
+          if [ "$dry_run" = false ] && { [ "$REF_TYPE" != tag ] || [ "$REF_NAME" != "v$version" ]; }; then
+            echo "::error::a run that publishes must start from the tag v$version"
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "dry_run=$dry_run"
+            echo "source_date_epoch=$(git log -1 --format=%ct)"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$dry_run" = true ]; then mode="dry run: nothing is published"; else mode="publishes after approval"; fi
+          echo "### diffyman $version ($mode)" >> "$GITHUB_STEP_SUMMARY"
+
+  cli:
+    # Static musl binaries on Linux, a static CRT on Windows.
+    name: cli (${{ matrix.target }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            smoke: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            smoke: false
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            smoke: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            smoke: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            smoke: true
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SOURCE_DATE_EPOCH: ${{ needs.plan.outputs.source_date_epoch }}
+      BIN: ${{ contains(matrix.target, 'windows') && 'diffyman.exe' || 'diffyman' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml) and the target
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - name: Install musl-tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -yq musl-tools
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install cargo-auditable and cargo-cyclonedx
+        run: cargo install --locked cargo-auditable@0.7.7 cargo-cyclonedx@0.5.9
+
+      - name: Remap build-machine paths (RUSTFLAGS)
+        run: uv run --no-project --python 3.12 python scripts/release/local_paths.py rustflags --target "$TARGET" --crt-static --github-env
+
+      - name: Build (cargo auditable)
+        run: cargo auditable build --release --locked -p diffyman-cli --target "$TARGET"
+
+      - name: Smoke test
+        if: matrix.smoke
+        run: |
+          bin="target/$TARGET/release/$BIN"
+          printed=$("$bin" --version)
+          if [ "$printed" != "diffyman $VERSION" ]; then
+            echo "::error::--version printed '$printed'"
+            exit 1
+          fi
+          printf 'a\nb\n' > "$RUNNER_TEMP/left.txt"
+          printf 'a\nc\n' > "$RUNNER_TEMP/right.txt"
+          status=0
+          "$bin" diff "$RUNNER_TEMP/left.txt" "$RUNNER_TEMP/right.txt" -f summary || status=$?
+          if [ "$status" != 1 ]; then
+            echo "::error::diff of two different files exited $status, expected 1"
+            exit 1
+          fi
+
+      - name: Statically linked (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          description=$(file -b "target/$TARGET/release/$BIN")
+          echo "$description"
+          case $description in
+            *"statically linked"*|*"static-pie linked"*) ;;
+            *) echo "::error::the musl binary is not static"; exit 1 ;;
+          esac
+
+      - name: Archive and SBOM
+        run: |
+          uv run --no-project --python 3.12 python scripts/release/package_cli.py \
+            --version "$VERSION" --target "$TARGET" --binary "target/$TARGET/release/$BIN" --out dist
+          uv run --no-project --python 3.12 python scripts/release/sbom.py \
+            --target "$TARGET" --out-dir dist --name "diffyman-$VERSION-$TARGET" crates/diffyman-cli
+
+      - name: No build-machine path in the binary, archive or SBOM
+        run: uv run --no-project --python 3.12 python scripts/release/local_paths.py check "target/$TARGET/release/$BIN" dist/*
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-cli-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  sbom:
+    # SBOMs of the binding packages (every target's dependencies).
+    name: sbom (bindings)
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.plan.outputs.source_date_epoch }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Install cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx@0.5.9
+
+      - name: SBOMs
+        run: |
+          python3 scripts/release/sbom.py --target all --out-dir sbom \
+            bindings/python bindings/node bindings/java bindings/wasm
+          python3 scripts/release/local_paths.py check sbom/*
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-sbom
+          path: sbom/*
+          if-no-files-found: error
+          retention-days: 30
+
+  python-wheels:
+    # abi3 wheels, one per platform for CPython 3.11+ (as ci.yml builds them),
+    # with build-machine paths remapped.
+    name: python wheel (${{ matrix.target }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            smoke: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            smoke: false
+          - os: ubuntu-latest
+            target: x86_64
+            manylinux: "2_28"
+            smoke: true
+          - os: ubuntu-latest
+            target: aarch64
+            manylinux: "2_28"
+            smoke: false
+          - os: windows-latest
+            target: x64
+            smoke: true
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      RUST_TARGET: ${{ matrix.target == 'x64' && 'x86_64-pc-windows-msvc' || matrix.target }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Remap build-machine paths (RUSTFLAGS)
+        # maturin-action passes RUSTFLAGS into its manylinux container, where
+        # the checkout has the same path.
+        run: uv run --no-project --python 3.12 python scripts/release/local_paths.py rustflags --target "$RUST_TARGET" --github-env
+
+      - name: Build the wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.16.0
+          command: build
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          args: --release --locked --out dist -m bindings/python/Cargo.toml
+
+      - name: No build-machine path in the wheel
+        run: uv run --no-project --python 3.12 python scripts/release/local_paths.py check dist/*.whl
+
+      - name: Smoke test (CPython 3.11 and 3.14)
+        if: matrix.smoke
+        run: |
+          wheels=(dist/*.whl)
+          for python in 3.11 3.14; do
+            uv run --no-project --python "$python" --with "${wheels[0]}" --with pytest==9.2.0 \
+              python -m pytest -q bindings/python/tests
+          done
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-python-wheel-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 30
+
+  python-sdist:
+    name: python sdist
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the sdist
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          maturin-version: v1.16.0
+          command: sdist
+          args: --out dist -m bindings/python/Cargo.toml
+
+      - name: No build-machine path in the sdist
+        run: python3 scripts/release/local_paths.py check dist/*.tar.gz
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-python-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  node-addons:
+    # The napi targets of bindings/node/package.json. The Linux addons are
+    # linked with Zig against glibc 2.28, like the manylinux_2_28 wheels.
+    name: node addon (${{ matrix.target }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            smoke: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            smoke: false
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            zig: true
+            smoke: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            zig: true
+            smoke: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            smoke: true
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      TARGET: ${{ matrix.target }}
+      ZIG: ${{ matrix.zig && 'true' || 'false' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml) and the target
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Install cargo-zigbuild and Zig (hash-checked)
+        if: matrix.zig
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/zig"
+          uv pip install --python "$RUNNER_TEMP/zig" --require-hashes -r scripts/release/zig-requirements.txt
+          echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
+
+      - name: Remap build-machine paths (RUSTFLAGS)
+        run: >-
+          uv run --no-project --python 3.12 python scripts/release/local_paths.py rustflags
+          --target "$TARGET" --crt-static --install-name libdiffyman_node.dylib --github-env
+
+      - name: Install the build tools
+        run: npm --prefix bindings/node ci
+
+      - name: Build the addon
+        working-directory: bindings/node
+        run: |
+          if [ "$ZIG" = true ]; then
+            set -- -x --target "$TARGET.2.28"
+          else
+            set -- --target "$TARGET"
+          fi
+          npx napi build --platform --release --no-js --no-dts-header --dts native.d.ts "$@" -- --locked
+
+      - name: glibc 2.28 at most (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          for addon in bindings/node/*.node; do
+            sh scripts/release/check-glibc.sh "$addon"
+          done
+
+      - name: No build-machine path in the addon
+        run: uv run --no-project --python 3.12 python scripts/release/local_paths.py check bindings/node/*.node
+
+      - name: Smoke test (node --test)
+        if: matrix.smoke
+        run: npm --prefix bindings/node test
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-node-addon-${{ matrix.target }}
+          path: bindings/node/*.node
+          if-no-files-found: error
+          retention-days: 30
+
+  npm-packages:
+    # @diffyman/node and its five platform packages (through
+    # bindings/node/scripts/stage-npm-packages.mjs), @diffyman/wasm and
+    # @diffyman/react, laid out and checked by scripts/release/stage_npm.py.
+    # Every package.json still says "private": true; the publish job removes it.
+    name: npm packages
+    needs: [plan, node-addons]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Install wasm-pack
+        run: cargo install --locked wasm-pack --version 0.15.1
+
+      - name: Remap build-machine paths (RUSTFLAGS)
+        run: python3 scripts/release/local_paths.py rustflags --target wasm32-unknown-unknown --github-env
+
+      - name: Build @diffyman/wasm
+        run: |
+          wasm-pack build bindings/wasm --release --target web --out-dir pkg-web -- --locked
+          node bindings/wasm/scripts/finish-package.mjs bindings/wasm/pkg-web
+          python3 scripts/release/local_paths.py check bindings/wasm/pkg-web/*
+
+      - name: Build and test @diffyman/react
+        run: |
+          npm --prefix bindings/wasm/react ci
+          npm --prefix bindings/wasm/react run build
+          npm --prefix bindings/wasm/react test
+
+      - name: Download the addons
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-node-addon-*
+          path: addons
+
+      - name: Lay out the packages
+        # bindings/node's stager runs `napi create-npm-dirs` (its build tools).
+        run: |
+          npm --prefix bindings/node ci
+          python3 scripts/release/stage_npm.py --version "$VERSION" --out npm \
+            --node-addons addons --wasm-pkg bindings/wasm/pkg-web
+          python3 scripts/release/local_paths.py check npm
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-npm
+          path: npm/
+          if-no-files-found: error
+          retention-days: 30
+
+  java-natives:
+    # The JNI library for each platform of the jar. The Linux libraries are
+    # linked with Zig against glibc 2.28.
+    name: java native (${{ matrix.platform }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos-aarch64
+            library: libdiffyman_java.dylib
+            smoke: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            platform: macos-x86_64
+            library: libdiffyman_java.dylib
+            smoke: false
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x86_64
+            library: libdiffyman_java.so
+            zig: true
+            smoke: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            platform: linux-aarch64
+            library: libdiffyman_java.so
+            zig: true
+            smoke: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows-x86_64
+            library: diffyman_java.dll
+            smoke: true
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      TARGET: ${{ matrix.target }}
+      PLATFORM: ${{ matrix.platform }}
+      LIBRARY: ${{ matrix.library }}
+      ZIG: ${{ matrix.zig && 'true' || 'false' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml) and the target
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install cargo-zigbuild and Zig (hash-checked)
+        if: matrix.zig
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/zig"
+          uv pip install --python "$RUNNER_TEMP/zig" --require-hashes -r scripts/release/zig-requirements.txt
+          echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
+
+      - name: Remap build-machine paths (RUSTFLAGS)
+        run: >-
+          uv run --no-project --python 3.12 python scripts/release/local_paths.py rustflags
+          --target "$TARGET" --crt-static --install-name "$LIBRARY" --github-env
+
+      - name: Build the library
+        run: |
+          if [ "$ZIG" = true ]; then
+            cargo zigbuild --release --locked -p diffyman-java --target "$TARGET.2.28"
+          else
+            cargo build --release --locked -p diffyman-java --target "$TARGET"
+          fi
+          mkdir -p "natives/$PLATFORM"
+          cp "target/$TARGET/release/$LIBRARY" "natives/$PLATFORM/"
+
+      - name: glibc 2.28 at most (Linux)
+        if: runner.os == 'Linux'
+        run: sh scripts/release/check-glibc.sh "natives/$PLATFORM/$LIBRARY"
+
+      - name: No build-machine path in the library
+        run: uv run --no-project --python 3.12 python scripts/release/local_paths.py check "natives/$PLATFORM/$LIBRARY"
+
+      - name: Set up Java
+        if: matrix.smoke
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Smoke test (mvn verify with this library)
+        if: matrix.smoke
+        run: mvn -B -ntp -f bindings/java/pom.xml verify "-Ddiffyman.native.dir=$GITHUB_WORKSPACE/natives/$PLATFORM"
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-java-native-${{ matrix.platform }}
+          path: natives/
+          if-no-files-found: error
+          retention-days: 30
+
+  java:
+    # One jar with all five native libraries, plus the sources and javadoc
+    # jars and the POM. Unsigned here: the Maven publish job signs.
+    name: java jar (all platforms)
+    needs: [plan, java-natives]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the native libraries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-java-native-*
+          path: natives
+          merge-multiple: true
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: mvn -P release verify (tests load the Linux x86_64 library from the jar)
+        run: >-
+          mvn -B -ntp -f bindings/java/pom.xml -P release verify -Dgpg.skip=true
+          "-Ddiffyman.release.natives=$GITHUB_WORKSPACE/natives"
+          "-Ddiffyman.native.dir=$GITHUB_WORKSPACE/natives/linux-x86_64"
+
+      - name: Check the jars
+        run: |
+          python3 scripts/release/check_jar.py --version "$VERSION" bindings/java/target
+          python3 scripts/release/local_paths.py check bindings/java/target/diffyman-"$VERSION"*.jar
+
+      - name: Collect
+        run: |
+          mkdir maven
+          cp bindings/java/target/diffyman-"$VERSION".jar \
+            bindings/java/target/diffyman-"$VERSION"-sources.jar \
+            bindings/java/target/diffyman-"$VERSION"-javadoc.jar maven/
+          cp bindings/java/pom.xml "maven/diffyman-$VERSION.pom"
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-maven
+          path: maven/*
+          if-no-files-found: error
+          retention-days: 30
+
+  checksums:
+    # SHA256SUMS over every release file of this run.
+    name: checksums
+    needs: [plan, cli, sbom, python-wheels, python-sdist, npm-packages, java]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download every release artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: release
+
+      - name: SHA256SUMS
+        working-directory: release
+        run: |
+          find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sed 's| \./| |' > "$RUNNER_TEMP/SHA256SUMS"
+          mv "$RUNNER_TEMP/SHA256SUMS" SHA256SUMS
+          wc -l < SHA256SUMS
+          cat SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-checksums
+          path: release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+
+  attest:
+    # Build provenance for every file in SHA256SUMS, stored with GitHub's
+    # attestations (`gh attestation verify FILE --repo reddy-sh/diffyman`).
+    # Only for a release that publishes: a dry run leaves no public record.
+    name: attest build provenance
+    needs: [plan, checksums]
+    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.dry_run == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # signs the attestations (Sigstore, via OIDC)
+      attestations: write # stores them with the repository
+    steps:
+      - name: Download the checksums
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-checksums
+          path: release
+
+      - name: Attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: release/SHA256SUMS
+
+  publish-crates:
+    # crates.io: every crate without `publish = false`, each after the crates
+    # it depends on. Trusted publishing (OIDC); the very first release of a
+    # crate needs the environment secret CARGO_REGISTRY_TOKEN instead.
+    name: publish crates.io
+    needs: [plan, checksums]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # crates.io trusted publishing (OIDC)
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      HAS_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Dry run (cargo publish --dry-run, in dependency order)
+        if: needs.plan.outputs.dry_run != 'false'
+        run: sh scripts/release/publish-crates.sh --dry-run
+
+      - name: crates.io token (trusted publishing)
+        id: auth
+        if: needs.plan.outputs.dry_run == 'false' && env.HAS_TOKEN != 'true'
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
+      - name: Publish
+        if: needs.plan.outputs.dry_run == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
+        run: sh scripts/release/publish-crates.sh --publish "$VERSION"
+
+  publish-pypi:
+    # PyPI by trusted publishing (no token), with PEP 740 attestations.
+    name: publish PyPI
+    needs: [plan, checksums]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # PyPI trusted publishing and attestations (OIDC)
+    steps:
+      - name: Download the wheels and the sdist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-python-*
+          path: dist
+          merge-multiple: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: twine check
+        run: |
+          ls -l dist
+          uvx --from twine==7.0.0 twine check --strict dist/*
+
+      - name: Publish
+        if: needs.plan.outputs.dry_run == 'false'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist/
+          # Files already on PyPI are skipped, so a stopped run can be repeated.
+          skip-existing: true
+
+  publish-npm:
+    # npm with provenance, by trusted publishing; the first release of each
+    # package needs the environment secret NPM_TOKEN instead. The platform
+    # packages go first, then @diffyman/node, @diffyman/wasm, @diffyman/react.
+    name: publish npm
+    needs: [plan, checksums]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing and provenance (OIDC)
+    steps:
+      - name: Download the packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-npm
+          path: npm
+
+      - name: Set up Node.js
+        # Node.js 24 comes with npm 11, which trusted publishing needs.
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: npm 11.5.1 or later (trusted publishing)
+        run: |
+          npm --version
+          node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$(npm --version)"
+
+      - name: Dry run (npm publish --dry-run)
+        if: needs.plan.outputs.dry_run != 'false'
+        run: |
+          while read -r package; do
+            (cd "npm/$package" && npm pkg delete private && npm publish --dry-run --access public)
+          done < npm/publish-order.txt
+
+      - name: Publish
+        # A package whose version is already on npm is skipped, so a run that
+        # stopped halfway can be repeated.
+        if: needs.plan.outputs.dry_run == 'false'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          while read -r package; do
+            name=$(node -p 'require(process.argv[1]).name' "$PWD/npm/$package/package.json")
+            if npm view "$name@$VERSION" version > /dev/null 2>&1; then
+              echo "$name $VERSION is already on npm; skipped"
+              continue
+            fi
+            (cd "npm/$package" && npm pkg delete private && npm publish --provenance --access public)
+          done < npm/publish-order.txt
+
+  publish-maven:
+    # Maven Central (Central Portal) through central-publishing-maven-plugin,
+    # signed with the environment's GPG key.
+    name: publish Maven Central
+    needs: [plan, checksums]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: release
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the native libraries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-java-native-*
+          path: natives
+          merge-multiple: true
+
+      - name: Set up Java
+        if: needs.plan.outputs.dry_run != 'false'
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Java, the Central token and the signing key
+        if: needs.plan.outputs.dry_run == 'false'
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      - name: Dry run (mvn -P release verify, no deploy)
+        run: |
+          mvn -B -ntp -f bindings/java/pom.xml -P release verify -Dgpg.skip=true \
+            "-Ddiffyman.release.natives=$GITHUB_WORKSPACE/natives" \
+            "-Ddiffyman.native.dir=$GITHUB_WORKSPACE/natives/linux-x86_64"
+          python3 scripts/release/check_jar.py --version "$VERSION" bindings/java/target
+
+      - name: Publish (signed)
+        if: needs.plan.outputs.dry_run == 'false'
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: |
+          mvn -B -ntp -f bindings/java/pom.xml -P release deploy \
+            "-Ddiffyman.release.natives=$GITHUB_WORKSPACE/natives" \
+            "-Ddiffyman.native.dir=$GITHUB_WORKSPACE/natives/linux-x86_64"

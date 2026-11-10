@@ -8,8 +8,13 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
+documentation.workspace = true
+readme = "README.md"
 keywords = ["diff", "unified", "html", "report"]
 categories = ["text-processing"]
+# Sources, README and license texts only (copies of the repository's); the
+# snapshot tests and tools read the corpus and stay here.
+include = ["/src/**", "/README.md", "/LICENSE-MIT", "/LICENSE-APACHE"]
 
 [lib]
 name = "diffyman_render"

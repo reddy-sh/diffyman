@@ -30,10 +30,10 @@ bindings must already be built:
     cli            target/release/diffyman, jq
     python         bindings/python/.venv with the binding installed (maturin develop)
     node           bindings/node/diffyman.<platform>.node (npm run build), npm
-    java           bindings/java/target/diffyman-0.0.1.jar and Jackson in ~/.m2
+    java           bindings/java/target/diffyman-0.1.0.jar and Jackson in ~/.m2
                    (mvn verify), java
     c              target/release/libdiffyman_ffi (cargo build --release -p diffyman-ffi), cc, jq
-    browser-react  bindings/wasm/pkg-web (wasm-pack), bindings/wasm/react (npm ci and
+    browser-react  bindings/wasm/pkg-web (wasm-pack and finish-package.mjs), bindings/wasm/react (npm ci and
                    npm run build), examples/amplify-react/node_modules (npm ci)
 
 The browser example does not install anything from npm: its folder gets
@@ -164,7 +164,7 @@ def missing_prerequisites(name: str, build: bool) -> list[str]:
         "cli": [RELEASE / "diffyman"],
         "python": [PY_VENV / "bin" / "python"],
         "node": [REPO / "bindings" / "node" / f"diffyman.{node_platform()}.node"],
-        "java": [REPO / "bindings" / "java" / "target" / "diffyman-0.0.1.jar"],
+        "java": [REPO / "bindings" / "java" / "target" / "diffyman-0.1.0.jar"],
         "c": [shared_library("diffyman_ffi")],
         "browser-react": [
             PKG_WEB / "diffyman_wasm_bg.wasm",
@@ -219,7 +219,7 @@ def prepare_browser(workdir: Path) -> None:
     ]:
         link(modules / name, REACT / "node_modules" / name)
     link(modules / "@diffyman" / "react", REACT)
-    link(modules / "diffyman-wasm", PKG_WEB)
+    link(modules / "@diffyman" / "wasm", PKG_WEB)
     for name in ["vite", "@vitejs/plugin-react"]:
         link(modules / name, AMPLIFY / "node_modules" / name)
     link(modules / ".bin" / "vite", AMPLIFY / "node_modules" / "vite" / "bin" / "vite.js")

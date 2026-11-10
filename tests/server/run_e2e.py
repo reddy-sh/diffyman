@@ -655,6 +655,7 @@ def main() -> int:
     parser.add_argument("--min-free-gb", type=float, default=15, help="refuse to run with less free disk (default 15)")
     parser.add_argument("--keep", action="store_true", help="keep the database and working folder (for a restore drill)")
     parser.add_argument("--report", type=pathlib.Path, help="write the measurements and results as JSON here")
+    parser.add_argument("--server-log", type=pathlib.Path, help="copy the server log here at the end, pass or fail")
     args = parser.parse_args()
 
     try:
@@ -682,8 +683,8 @@ def main() -> int:
         _, keys["main"] = server.create_key("e2e")
         _, keys["read"] = server.create_key("e2e-read", "read")
         _, keys["other"] = server.create_key("e2e-other")
-        client = hx.Client(server.port, keys["main"])
-        other = hx.Client(server.port, keys["other"])
+        client = hx.Client(server.port, keys["main"], log=server.log_path)
+        other = hx.Client(server.port, keys["other"], log=server.log_path)
         time.sleep(max(0.0, 2 - (time.monotonic() - started_at)))
         results.measurements["server_idle_rss_bytes"] = server.rss()
         print(f"idle RSS: {(server.rss() or 0) / MIB:.1f} MiB", flush=True)
@@ -701,8 +702,16 @@ def main() -> int:
         results.measurements["server_rss_after_bytes"] = server.rss()
         client.close()
         other.close()
+    except Exception:
+        # Whether the server was still up says whether it crashed; the
+        # working folder (and its server.log) is kept for inspection.
+        print(f"run_e2e: stopped by an error; the server {server.describe_exit()}; working folder {workdir}", file=sys.stderr, flush=True)
+        raise
     finally:
         server.stop()
+        if args.server_log and server.log_path.exists():
+            args.server_log.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(server.log_path, args.server_log)
     results.check("shutdown", server.exit_code == 0, f"graceful stop exit code {server.exit_code}")
     results.measurements["server_lifetime_peak_rss_bytes"] = server.max_rss
     forbidden = {

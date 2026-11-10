@@ -1,6 +1,6 @@
 {
   "name": "@diffyman/node",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Node.js binding for diffyman, a headless \"diff any file\" engine: one canonical JSON Diff Document for text, binary files, folders and archives.",
   "private": true,
   "license": "MIT OR Apache-2.0",

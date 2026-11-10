@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "criterion",
  "diffyman-adapter-binary",
@@ -676,7 +676,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-adapter-binary"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "diffyman-algo",
@@ -685,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-adapter-tree"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flate2",
  "ignore",
@@ -698,7 +698,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-algo"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "diffyman-model",
  "foldhash 0.1.5",
@@ -715,7 +715,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-cli"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "clap",
  "diffyman",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-conformance"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "clap",
  "diffyman",
@@ -742,7 +742,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-db"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -756,14 +756,14 @@ dependencies = [
 
 [[package]]
 name = "diffyman-detect"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "infer",
 ]
 
 [[package]]
 name = "diffyman-ffi"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "cbindgen",
  "diffyman",
@@ -772,7 +772,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-java"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "diffyman",
  "jni",
@@ -780,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-model"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "memchr",
  "ryu-js",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-node"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "diffyman",
  "napi",
@@ -803,7 +803,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-python"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "diffyman",
  "pyo3",
@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-render"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "diffyman",
  "diffyman-model",
@@ -821,7 +821,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-server"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-storage"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "diffyman-wasm"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "diffyman",
  "wasm-bindgen",

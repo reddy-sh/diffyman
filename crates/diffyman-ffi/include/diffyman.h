@@ -124,7 +124,7 @@ int diffyman_diff_paths(const char *left_path,
 void diffyman_free_string(char *s);
 
 /**
- * The engine version, such as `0.0.1`: a static NUL-terminated string that
+ * The engine version, such as `0.1.0`: a static NUL-terminated string that
  * must not be freed.
  */
 const char *diffyman_engine_version(void);

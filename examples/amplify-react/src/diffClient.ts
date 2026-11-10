@@ -4,7 +4,7 @@
 
 import { createDiffClient } from "@diffyman/react";
 import DiffWorker from "@diffyman/react/worker?worker";
-import wasmUrl from "diffyman-wasm/diffyman_wasm_bg.wasm?url";
+import wasmUrl from "@diffyman/wasm/diffyman_wasm_bg.wasm?url";
 
 export const diffClient = createDiffClient({
   createWorker: () => new DiffWorker(),

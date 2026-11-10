@@ -2,7 +2,7 @@
 //
 // A single-file program, started without a separate compile step:
 //
-//   java --enable-native-access=ALL-UNNAMED -cp bindings/java/target/diffyman-0.0.1.jar \
+//   java --enable-native-access=ALL-UNNAMED -cp bindings/java/target/diffyman-0.1.0.jar \
 //       tests/conformance/JavaDiff.java --batch
 //
 // Batch mode reads one job per line from stdin, as UTF-8 text with four

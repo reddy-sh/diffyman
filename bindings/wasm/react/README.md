@@ -1,7 +1,7 @@
 # @diffyman/react
 
 A React hook for the diffyman engine in the browser. `useDiff` loads the WASM build
-(`bindings/wasm/pkg-web`) once, runs every diff in a Web Worker so the UI thread never
+([`@diffyman/wasm`](../README.md), a peer dependency) once, runs every diff in a Web Worker so the UI thread never
 blocks, and cancels requests that are out of date. It returns the
 [Diff Document](../../../docs/spec/diff-document.md) parsed, plus its canonical JSON text.
 
@@ -15,8 +15,9 @@ Not published yet (`"private": true`); install it from source.
 ## Install from source
 
 ```sh
-# 1. The browser build of the engine (needs Rust and wasm-pack 0.15.1).
+# 1. The browser build of the engine, @diffyman/wasm (needs Rust and wasm-pack 0.15.1).
 wasm-pack build bindings/wasm --release --target web --out-dir pkg-web -- --locked
+node bindings/wasm/scripts/finish-package.mjs bindings/wasm/pkg-web
 
 # 2. This package.
 cd bindings/wasm/react
@@ -33,7 +34,7 @@ In an app, depend on it and on the WASM package with `file:` links, as
 ```tsx
 import { createDiffClient, DiffProvider, useDiff } from "@diffyman/react";
 import DiffWorker from "@diffyman/react/worker?worker";              // Vite syntax
-import wasmUrl from "diffyman-wasm/diffyman_wasm_bg.wasm?url";
+import wasmUrl from "@diffyman/wasm/diffyman_wasm_bg.wasm?url";
 
 const client = createDiffClient({ createWorker: () => new DiffWorker(), wasm: wasmUrl });
 
@@ -74,7 +75,7 @@ export const App = () => <DiffProvider client={client}><Diff left={"a\nb\n"} rig
     `{ json, document }`; `client.diffJson(...)` only the canonical text.
   - `client.info()` gives `{ engineVersion, schemaVersion, features }`.
   - `client.dispose()` stops the worker and rejects what is pending.
-- `@diffyman/react/worker`: the worker entry, wired to `diffyman-wasm`.
+- `@diffyman/react/worker`: the worker entry, wired to `@diffyman/wasm`.
   `@diffyman/react/worker-runtime` exports `serveDiffWorker(engine)` for a worker of your own,
   for example around a build without the `archives` feature.
 - Types: `DiffDocument`, `OptionsInput` and the rest are generated from `diffyman schema` and

@@ -65,7 +65,7 @@ int main(void) {
 | `diffyman_diff(left, left_len, right, right_len, options_json, left_name, right_name, &out_json, &out_error)` | Diffs two byte buffers. |
 | `diffyman_diff_paths(left_path, right_path, options_json, max_input_size, &out_json, &out_error)` | Diffs two paths: files, folders or archives, as the CLI does. `max_input_size` is the read limit in bytes for every input read whole (the CLI's `--max-input-size`); 0 keeps the default. |
 | `diffyman_free_string(s)` | Frees a string returned through `out_json` or `out_error`. NULL is ignored. |
-| `diffyman_engine_version()` | The engine version, such as `0.0.1`. |
+| `diffyman_engine_version()` | The engine version, such as `0.1.0`. |
 | `diffyman_schema_version()` | The schema version of the documents, such as `0.4.0`. |
 
 `options_json` is an options object (spec §9 in

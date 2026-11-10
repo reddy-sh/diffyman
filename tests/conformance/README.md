@@ -39,6 +39,7 @@ VIRTUAL_ENV=$PWD/bindings/python/.venv uv pip install maturin==1.16.0 pytest==9.
 VIRTUAL_ENV=$PWD/bindings/python/.venv bindings/python/.venv/bin/maturin develop --uv --release --locked -m bindings/python/Cargo.toml
 wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node -- --locked
 wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node-slim -- --locked --no-default-features
+node bindings/wasm/scripts/finish-package.mjs bindings/wasm/pkg-node bindings/wasm/pkg-node-slim
 npm --prefix bindings/node ci && npm --prefix bindings/node run build
 mvn -B -f bindings/java/pom.xml verify
 PROFILE=release PYTHON=bindings/python/.venv/bin/python bash tests/ffi/run.sh

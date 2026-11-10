@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import pathlib
 import shutil
@@ -249,7 +250,8 @@ def test_multipart_with_thousands_of_parts_is_rejected(ctx: Ctx) -> None:
 
 def one_byte_a_second(ctx: Ctx, path: str, media: str, length: int = 400) -> Answer:
     start = ctx.head("POST", path, {"Content-Type": media, "Content-Length": str(length)})
-    return exchange(ctx.port, start, [b"{"] + [b" "] * (length - 1), pace=1.0, timeout=ctx.limits["requestTimeoutSecs"] + 30)
+    pieces = itertools.chain([b"{"], itertools.repeat(b" ", length - 1))
+    return exchange(ctx.port, start, pieces, pace=1.0, timeout=ctx.limits["requestTimeoutSecs"] + 30)
 
 
 def test_slow_body_is_ended_within_the_request_timeout(ctx: Ctx) -> None:
@@ -279,8 +281,11 @@ def test_slow_bodies_on_every_diff_slot_leave_other_routes_served(ctx: Ctx) -> N
     slots = int(ctx.env["DIFFYMAN_MAX_PARALLEL_DIFFS"])
     limit = ctx.limits["requestTimeoutSecs"]
     answers: list[Answer] = []
+    # Larger than the 64 KiB the server reads before a request is handled,
+    # so each slow body reaches the diff and holds a slot.
+    length = 64 * KIB + 1
     threads = [
-        threading.Thread(target=lambda: answers.append(one_byte_a_second(ctx, "/v1/diff", "application/json")))
+        threading.Thread(target=lambda: answers.append(one_byte_a_second(ctx, "/v1/diff", "application/json", length)))
         for _ in range(slots + 1)
     ]
     for thread in threads:

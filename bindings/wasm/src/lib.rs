@@ -91,7 +91,7 @@ pub fn diff(
     })
 }
 
-/// The engine version, such as `0.0.1`.
+/// The engine version, such as `0.1.0`.
 #[wasm_bindgen(js_name = engineVersion)]
 pub fn engine_version() -> String {
     diffyman::ENGINE_VERSION.to_owned()

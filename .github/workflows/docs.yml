@@ -1,0 +1,111 @@
+name: Docs
+
+# The documentation site (book/, mdBook): on every push and pull request it is
+# built from the repository's Markdown, link-checked (book/build.py) and
+# uploaded as an artifact. It is published to GitHub Pages
+# (https://reddy-sh.github.io/diffyman) only when someone runs this workflow
+# by hand on main with `deploy` set to true; nothing else deploys it.
+#
+# Hygiene: no pull_request_target, no secrets, a read-only token everywhere
+# except the deploy job (pages: write and id-token: write only), checkout
+# without stored credentials, actions pinned by commit, and no `${{ }}`
+# expressions inside `run:` scripts.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Publish the built site to GitHub Pages (main only)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # By event too, so a push to main never cancels a deploy run.
+  group: docs-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build and link-check the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Cache
+        # Only ~/.cargo (the installed mdbook); this job builds no crate.
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: docs
+          cache-targets: "false"
+
+      - name: Install mdBook
+        # Search, without the `serve` and `watch` features (a static build only).
+        run: cargo install --locked mdbook --version 0.5.4 --no-default-features --features search
+
+      - name: Build script tests
+        run: python3 -m unittest discover -s book -p "test_*.py"
+
+      - name: Build and link-check
+        # Every local link and fragment must resolve, every link to another
+        # file of the repository must name a file git knows, and no page,
+        # style sheet or script may load anything from another origin.
+        run: python3 book/build.py --out target/book
+
+      - name: Upload the site
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-site
+          path: target/book/html/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload the Pages artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.deploy && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: target/book/html/
+
+  deploy:
+    # Runs only by hand, on main, with `deploy: true`. Pages must also be set
+    # to "GitHub Actions" in the repository settings, and the `github-pages`
+    # environment can require a reviewer.
+    name: deploy to GitHub Pages
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write # deploy-pages publishes the uploaded site
+      id-token: write # deploy-pages proves the run's identity to Pages (OIDC)
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -18,8 +18,9 @@ applications:
             - . "$HOME/.cargo/env"
             - (cd ../.. && rustup toolchain install)
             - cargo install --locked wasm-pack --version 0.15.1
-            # The browser build of the engine (bindings/wasm/pkg-web).
+            # The browser build of the engine, @diffyman/wasm (bindings/wasm/pkg-web).
             - (cd ../.. && wasm-pack build bindings/wasm --release --target web --out-dir pkg-web -- --locked)
+            - (cd ../.. && node bindings/wasm/scripts/finish-package.mjs bindings/wasm/pkg-web)
             # The React hook package (bindings/wasm/react/dist).
             - npm --prefix ../../bindings/wasm/react ci
             - npm --prefix ../../bindings/wasm/react run build

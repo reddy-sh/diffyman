@@ -1,6 +1,6 @@
 {
   "name": "@diffyman/react",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "React hook for the diffyman diff engine: runs the WASM build in a Web Worker",
   "license": "MIT OR Apache-2.0",
   "author": "Sankara Reddy Telukutla <sankara@reddy.sh> (https://reddy.sh)",
@@ -43,13 +43,14 @@
     "check:types": "node scripts/gen-types.mjs --check"
   },
   "peerDependencies": {
+    "@diffyman/wasm": "0.1.0",
     "react": ">=18"
   },
   "devDependencies": {
+    "@diffyman/wasm": "file:../pkg-web",
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "diffyman-wasm": "file:../pkg-web",
     "happy-dom": "21.0.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",

@@ -177,7 +177,7 @@ pub unsafe extern "C" fn diffyman_free_string(s: *mut c_char) {
     }
 }
 
-/// The engine version, such as `0.0.1`: a static NUL-terminated string that
+/// The engine version, such as `0.1.0`: a static NUL-terminated string that
 /// must not be freed.
 #[unsafe(no_mangle)]
 pub extern "C" fn diffyman_engine_version() -> *const c_char {

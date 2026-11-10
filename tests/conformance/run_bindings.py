@@ -154,13 +154,15 @@ def build_surfaces(args: argparse.Namespace, names: list[str]) -> list[sf.Surfac
             "wasm",
             args.node,
             args.wasm_pkg.resolve(),
-            "wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node",
+            "wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node` and "
+            "`node bindings/wasm/scripts/finish-package.mjs bindings/wasm/pkg-node",
         ),
         "wasm-slim": sf.Wasm(
             "wasm-slim",
             args.node,
             args.wasm_slim_pkg.resolve(),
-            "wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node-slim -- --no-default-features",
+            "wasm-pack build bindings/wasm --release --target nodejs --out-dir pkg-node-slim -- --no-default-features`"
+            " and `node bindings/wasm/scripts/finish-package.mjs bindings/wasm/pkg-node-slim",
         ),
         "node": sf.Node(args.node, args.node_pkg.resolve()),
         "java": sf.Java(

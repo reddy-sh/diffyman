@@ -20,7 +20,7 @@ then the jar (which packs the library for your platform and runs the tests):
 <!-- check: build -->
 ```sh
 cargo build --release --locked -p diffyman-java
-mvn -f bindings/java/pom.xml verify     # writes bindings/java/target/diffyman-0.0.1.jar
+mvn -f bindings/java/pom.xml verify     # writes bindings/java/target/diffyman-0.1.0.jar
 ```
 
 `mvn -f bindings/java/pom.xml install` also puts the jar in your local Maven repository, so a
@@ -31,7 +31,7 @@ project can depend on it:
 <dependency>
   <groupId>sh.reddy.diffyman</groupId>
   <artifactId>diffyman</artifactId>
-  <version>0.0.1</version>
+  <version>0.1.0</version>
 </dependency>
 ```
 
@@ -42,7 +42,7 @@ your clone; on Windows the separator is `;`:
 <!-- check: env -->
 ```sh
 JACKSON="$HOME/.m2/repository/com/fasterxml/jackson/core"
-export CLASSPATH="$DIFFYMAN_REPO/bindings/java/target/diffyman-0.0.1.jar"
+export CLASSPATH="$DIFFYMAN_REPO/bindings/java/target/diffyman-0.1.0.jar"
 CLASSPATH="$CLASSPATH:$JACKSON/jackson-databind/2.22.4/jackson-databind-2.22.4.jar"
 CLASSPATH="$CLASSPATH:$JACKSON/jackson-core/2.22.4/jackson-core-2.22.4.jar"
 CLASSPATH="$CLASSPATH:$JACKSON/jackson-annotations/2.22/jackson-annotations-2.22.jar"
@@ -94,8 +94,9 @@ public class Example {
 }
 ```
 
-Run it with the source launcher (Java 24 and newer ask for `--enable-native-access` to allow
-JNI without a warning; leave it out on Java 17 to 21):
+Run it with the source launcher, which needs a JDK (Java 24 and newer ask for
+`--enable-native-access` to allow JNI without a warning; Java 17 to 23 accept the flag and do
+not need it):
 
 <!-- check: run -->
 ```sh
@@ -109,6 +110,10 @@ different
 + blueberry
 + date
 ```
+
+A JRE has no compiler, so there compile the example first with a JDK
+(`javac --release 17 -cp "$CLASSPATH" Example.java`) and run the class:
+`java --enable-native-access=ALL-UNNAMED -cp ".:$CLASSPATH" Example old.txt new.txt`.
 
 `Diffyman.diff(byte[] left, byte[] right, String optionsJson, String leftName, String
 rightName)` compares bytes; names become `left.name` and `right.name`. `diffPaths` also takes

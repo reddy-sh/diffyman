@@ -37,7 +37,7 @@ dynamic = ["version"]
 [project.urls]
 Homepage = "https://reddy.sh"
 Repository = "https://github.com/reddy-sh/diffyman"
-Documentation = "https://github.com/reddy-sh/diffyman/tree/main/bindings/python"
+Documentation = "https://reddy-sh.github.io/diffyman"
 Issues = "https://github.com/reddy-sh/diffyman/issues"
 
 # Development only (PEP 735): never part of the published metadata.
@@ -51,8 +51,18 @@ python-source = "python"
 module-name = "diffyman._native"
 features = ["extension-module"]
 # The extension a local `maturin develop` leaves next to the sources is not
-# part of an sdist.
-exclude = [{ path = "python/diffyman/*.so", format = "sdist" }, { path = "python/diffyman/*.pyd", format = "sdist" }]
+# part of an sdist, and the bytecode a local test run leaves is in neither.
+exclude = [
+    { path = "python/diffyman/*.so", format = "sdist" },
+    { path = "python/diffyman/*.pyd", format = "sdist" },
+    "python/diffyman/__pycache__/**",
+]
+
+# No CycloneDX SBOM inside the wheel: maturin's names the workspace crates by
+# their absolute path on the build machine. The release workflow publishes a
+# path-free SBOM of this package next to the wheels (docs/release.md).
+[tool.maturin.sbom]
+rust = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

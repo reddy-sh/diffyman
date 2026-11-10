@@ -8,6 +8,8 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
+# Part of diffyman-server, which is not on crates.io at 0.1.0.
+publish = false
 
 [dependencies]
 sqlx.workspace = true

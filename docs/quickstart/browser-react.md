@@ -1,6 +1,6 @@
 # Quickstart: browser and React
 
-The engine also builds to WebAssembly (`diffyman-wasm`, about 620 KB brotli), so a web page
+The engine also builds to WebAssembly (`@diffyman/wasm`, about 620 KB brotli), so a web page
 can compare files without sending them anywhere. `@diffyman/react` wraps it in a `useDiff`
 hook that runs every diff in a Web Worker, so typing and large inputs never block the page,
 and cancels requests that are out of date. The hook returns the
@@ -17,11 +17,13 @@ what `diffyman diff --json` prints apart from `provenance`).
 
 ## Build and install from source
 
-Nothing is on npm yet. From a clone of the repository, build the WASM package and the hook:
+Nothing is on npm yet. From a clone of the repository, build the WASM package (the second
+command names it `@diffyman/wasm` and adds its README and license texts) and the hook:
 
 <!-- check: build -->
 ```sh
 wasm-pack build bindings/wasm --release --target web --out-dir pkg-web -- --locked
+node bindings/wasm/scripts/finish-package.mjs bindings/wasm/pkg-web
 npm ci --prefix bindings/wasm/react
 npm run build --prefix bindings/wasm/react
 ```
@@ -49,7 +51,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   // The two packages are linked from the repository: use one copy of React and of the engine.
-  resolve: { dedupe: ["react", "react-dom", "diffyman-wasm"] },
+  resolve: { dedupe: ["react", "react-dom", "@diffyman/wasm"] },
   worker: { format: "es" }, // the diff worker is an ES module worker
 });
 ```
@@ -80,7 +82,7 @@ import { useState, type ChangeEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { createDiffClient, DiffProvider } from "@diffyman/react";
 import DiffWorker from "@diffyman/react/worker?worker";
-import wasmUrl from "diffyman-wasm/diffyman_wasm_bg.wasm?url";
+import wasmUrl from "@diffyman/wasm/diffyman_wasm_bg.wasm?url";
 import { ChangedLines } from "./ChangedLines";
 
 const client = createDiffClient({ createWorker: () => new DiffWorker(), wasm: wasmUrl });

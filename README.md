@@ -6,6 +6,8 @@ diffyman is an open-source, headless diff engine. One Rust core compares two fil
 
 > **Status:** early development — the engine compares text, binary files, folders and archives, with a CLI, bindings for Python, Node.js, Java and the browser (WASM and React), a C ABI, and a local REST service. Nothing is published to a package registry yet; see [Usage](#usage) and [Use it from your language](#use-it-from-your-language) to build from source, and [docs/STATUS.md](docs/STATUS.md).
 
+**Documentation:** <https://reddy-sh.github.io/diffyman> (coming soon: the site is built and link-checked in CI but not published yet). Until then, read the same pages here: the quickstarts and references linked below, and everything under [docs/](docs/).
+
 ## Why
 
 - **Same answer everywhere.** Byte-identical JSON from the CLI, every binding and the API, checked in CI.
@@ -47,7 +49,7 @@ Every surface returns the same Diff Document, byte for byte apart from `provenan
 | Python 3.11+ | [Python](docs/quickstart/python.md) | `diffyman` (PyO3, abi3 wheel) | [bindings/python](bindings/python/README.md) |
 | Node.js 22+ | [Node.js](docs/quickstart/node.md) | `@diffyman/node` (Node-API) | [bindings/node](bindings/node/README.md) |
 | Java 17+ | [Java](docs/quickstart/java.md) | `sh.reddy.diffyman:diffyman` (JNI) | [bindings/java](bindings/java/README.md) |
-| Browser, React | [Browser and React](docs/quickstart/browser-react.md) | `@diffyman/react` over the WASM build | [bindings/wasm/react](bindings/wasm/react/README.md), [example app](examples/amplify-react) |
+| Browser, React | [Browser and React](docs/quickstart/browser-react.md) | `@diffyman/react` over `@diffyman/wasm` | [bindings/wasm/react](bindings/wasm/react/README.md), [bindings/wasm](bindings/wasm/README.md), [example app](examples/amplify-react) |
 | C, and Go, C#, Zig, Swift through C | [C](docs/quickstart/c.md) | `diffyman-ffi` (shared or static library) | [crates/diffyman-ffi](crates/diffyman-ffi/README.md) |
 | Any language over HTTP | [REST API](docs/quickstart/rest.md) | crate `diffyman-server` (a local service) | [API reference](docs/api/README.md), [OpenAPI 3.1](docs/api/openapi.json), [server guide](docs/server.md) |
 

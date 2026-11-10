@@ -567,6 +567,12 @@ The engine's own limits apply on top ([spec §7, §17, §19.6](../spec/diff-docu
 over one of them gives a document with `status: "error"` and a `limit-exceeded` warning, or a
 `tree-limit` warning, never a crash. `GET /v1/formats` reports the server's current limits.
 
+A body with a `Content-Length` of at most 64 KiB is read in full before the request is handled,
+so the connection stays open for the next request even when the answer is an error. A refused
+request with a larger or chunked body is answered without waiting for the body, and the
+server may then close the connection; a client that streams a large body should send it on a
+new connection, or one it has checked is still open.
+
 ## Retention
 
 Saved diffs, jobs and blobs expire after 30 days (`DIFFYMAN_DIFF_TTL_DAYS`, `DIFFYMAN_JOB_TTL_DAYS`,

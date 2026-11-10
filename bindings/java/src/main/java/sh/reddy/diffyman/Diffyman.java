@@ -120,7 +120,7 @@ public final class Diffyman {
   }
 
   /**
-   * The engine version, such as {@code 0.0.1}.
+   * The engine version, such as {@code 0.1.0}.
    *
    * @return the version of the native engine
    */

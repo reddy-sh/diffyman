@@ -275,9 +275,10 @@ pub async fn create_diff(
             ));
         }
     };
-    // Admitted before the body is read, so bodies in memory are bounded too;
-    // the reservation is held until the request is done and the engine has
-    // returned. A body without `Content-Length` reserves the body limit.
+    // Admitted before the body is read (beyond the 64 KiB `guard::context`
+    // reads ahead), so bodies in memory are bounded too; the reservation is
+    // held until the request is done and the engine has returned. A body
+    // without `Content-Length` reserves the body limit.
     let limits = state.config.limits;
     let declared = request
         .headers()

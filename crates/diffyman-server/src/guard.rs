@@ -1,9 +1,10 @@
 //! Middleware: request context, `Host` and `Origin` checks, authentication.
 //!
-//! Order, outermost first: [`context`] (request ID, time limit, one log
-//! line), [`host_origin`] (DNS-rebinding and cross-origin defence, CORS for
-//! allow-listed origins), routing, [`tag_route`], and on `/v1` routes
-//! [`auth`] (API key, scope, rate limit, usage record).
+//! Order, outermost first: [`context`] (request ID, time limit, small bodies
+//! read ahead, one log line), [`host_origin`] (DNS-rebinding and
+//! cross-origin defence, CORS for allow-listed origins), routing,
+//! [`tag_route`], and on `/v1` routes [`auth`] (API key, scope, rate limit,
+//! usage record).
 
 use std::time::Instant;
 
@@ -67,6 +68,42 @@ fn millis(started: Instant) -> u64 {
     u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
+/// Request bodies of a declared length up to this many bytes are read
+/// before the request is handled (see [`read_small_body`]).
+const READ_AHEAD_BYTES: u64 = 64 * 1024;
+
+/// Reads a small body of declared length (at most [`READ_AHEAD_BYTES`])
+/// before the request is handled, and hands the handler the bytes.
+///
+/// A request can be answered without its body being read: a refused method
+/// or `Host`, a missing key, an invalid query. hyper then keeps the
+/// connection only when the whole body had already arrived with the head;
+/// when the body comes a moment later (clients often send the head and the
+/// body in separate writes), it closes the connection after the answer,
+/// without `Connection: close`, and the client's next request on it fails.
+/// Read here, the body never decides whether the connection stays open.
+/// Larger bodies and chunked ones of unknown length are left to the
+/// handler, as before: a refusal does not wait for them, and the connection
+/// may close after it. A read error is handed on, so the handler answers it
+/// as it would have.
+async fn read_small_body(request: Request) -> Request {
+    use axum::body::{Body, HttpBody};
+
+    let declared = request.body().size_hint().exact();
+    if !declared.is_some_and(|n| (1..=READ_AHEAD_BYTES).contains(&n)) {
+        return request;
+    }
+    let (parts, body) = request.into_parts();
+    let limit = usize::try_from(READ_AHEAD_BYTES).unwrap_or(usize::MAX);
+    let body = match axum::body::to_bytes(body, limit).await {
+        Ok(bytes) => Body::from(bytes),
+        Err(error) => Body::from_stream(futures::stream::once(async move {
+            Err::<axum::body::Bytes, _>(error)
+        })),
+    };
+    Request::from_parts(parts, body)
+}
+
 /// Request ID, the request time limit and the request log line.
 pub async fn context(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let started = Instant::now();
@@ -74,7 +111,9 @@ pub async fn context(State(state): State<AppState>, request: Request, next: Next
     let request_id = Uuid::new_v4().simple().to_string()[..16].to_owned();
     let bytes_in = content_length(request.headers());
     let limit = state.config.limits.request_timeout;
-    let mut response = match tokio::time::timeout(limit, next.run(request)).await {
+    // Within the time limit: a small body sent slowly ends with `timeout`.
+    let handled = async move { next.run(read_small_body(request).await).await };
+    let mut response = match tokio::time::timeout(limit, handled).await {
         Ok(response) => response,
         Err(_) => ApiError::unavailable(
             "timeout",

@@ -1,0 +1,44 @@
+# The documentation site, built with mdBook 0.5.4:
+#
+#   cargo install --locked mdbook --version 0.5.4 --no-default-features --features search
+#   python3 book/build.py
+#
+# book/build.py assembles the book in target/book/src (this file, SUMMARY.md
+# and the repository's own Markdown at their repository paths, so `src` is
+# that folder itself) and writes the site to target/book/html. See
+# book/README.md.
+
+[book]
+title = "diffyman"
+description = "diffyman, an open-source headless diff engine: one Rust core, the same Diff Document from the CLI, every binding and the REST API."
+authors = ["Sankara Reddy Telukutla"]
+language = "en"
+src = "."
+
+[build]
+build-dir = "../html"
+# No preprocessors: chapters are rendered exactly as they are on GitHub, so
+# text such as `{{#include}}` in a chapter is never expanded.
+use-default-preprocessors = false
+
+[output.html]
+site-url = "/diffyman/"
+git-repository-url = "https://github.com/reddy-sh/diffyman"
+edit-url-template = "https://github.com/reddy-sh/diffyman/edit/main/{path}"
+# The chapters number their own sections (the spec's §6.8 and so on).
+no-section-label = true
+smart-punctuation = false
+# Nothing is loaded from another origin: fonts, highlighting and search are
+# served with the site, MathJax stays off, and there is no analytics.
+mathjax-support = false
+
+[output.html.playground]
+runnable = false
+editable = false
+copyable = true
+
+[output.html.search]
+enable = true
+
+[output.html.print]
+enable = true

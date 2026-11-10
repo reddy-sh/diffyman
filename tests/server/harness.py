@@ -36,6 +36,7 @@ import json
 import os
 import pathlib
 import re
+import select
 import shutil
 import signal
 import socket
@@ -184,18 +185,68 @@ class Reply:
 
 
 class Client:
-    """One keep-alive connection to the server."""
+    """One keep-alive connection to the server. With `log` (the server's
+    log file), a request that fails on a connection error prints the log's
+    tail."""
 
-    def __init__(self, port: int, key: str | None = None, timeout: float = 120) -> None:
+    def __init__(self, port: int, key: str | None = None, timeout: float = 120, log: pathlib.Path | None = None) -> None:
         self.port = port
         self.key = key
         self.timeout = timeout
+        self.log = log
         self.conn: http.client.HTTPConnection | None = None
 
     def close(self) -> None:
         if self.conn is not None:
             self.conn.close()
             self.conn = None
+
+    def dropped(self) -> bool:
+        """Whether the server closed the kept-alive connection (it is
+        readable while no request is outstanding: end of stream or a reset).
+        A server may close one after answering a request without reading its
+        body, without saying so in the answer."""
+        sock = self.conn.sock if self.conn is not None else None
+        if sock is None:
+            return False
+        try:
+            readable, _, _ = select.select([sock], [], [], 0)
+        except (OSError, ValueError):
+            return True
+        return bool(readable)
+
+    def early_reply(self, method: str) -> Reply | None:
+        """An answer the server sent before the request was sent in full
+        (typically a refusal, after which it closed), if one is readable."""
+        sock = self.conn.sock if self.conn is not None else None
+        if sock is None:
+            return None
+        try:
+            sock.settimeout(2)
+            response = http.client.HTTPResponse(sock, method=method)
+            response.begin()
+            try:
+                data = response.read()
+            except (OSError, http.client.HTTPException):
+                data = b""
+        except (OSError, http.client.HTTPException):
+            return None
+        return Reply(response.status, {k.lower(): v for k, v in response.getheaders()}, data)
+
+    def report(self, method: str, path: str, error: BaseException) -> None:
+        """With a log: the failed request and the log's tail, on stderr."""
+        if self.log is None:
+            return
+        try:
+            lines = self.log.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]
+        except OSError as why:
+            lines = [f"(cannot read {self.log.name}: {why})"]
+        print(
+            f"harness: {method} {path.split('?')[0]} failed with {type(error).__name__}: {error}; "
+            f"the server sent no HTTP answer. The last {len(lines)} lines of its log:",
+            file=sys.stderr,
+        )
+        print("\n".join(lines), file=sys.stderr, flush=True)
 
     def request(
         self,
@@ -205,24 +256,39 @@ class Client:
         headers: dict[str, str] | None = None,
         key: str | None | bool = True,
     ) -> Reply:
-        """`key=True` uses the client's key, a string another key, None/False none."""
+        """`key=True` uses the client's key, a string another key, None/False none.
+        A body may be bytes or a binary file object (streamed; set
+        Content-Length): a seekable one is sent again when a retry needs it."""
         all_headers = dict(headers or {})
         token = self.key if key is True else key or None
         if token:
             all_headers["Authorization"] = f"Bearer {token}"
+        start = body.tell() if hasattr(body, "seekable") and body.seekable() else None
+        retryable = body is None or isinstance(body, bytes) or start is not None
         for attempt in (0, 1):
+            if self.conn is not None and self.dropped():
+                self.close()
             if self.conn is None:
                 self.conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=self.timeout)
             try:
                 self.conn.request(method, path, body=body, headers=all_headers)
                 response = self.conn.getresponse()
                 data = response.read()
-            except (ConnectionError, http.client.RemoteDisconnected, http.client.CannotSendRequest):
+            except (ConnectionError, http.client.RemoteDisconnected, http.client.CannotSendRequest) as error:
+                # The server may have answered before the body was sent in
+                # full, then closed: that answer is the reply.
+                early = self.early_reply(method)
                 self.close()
-                # A kept-alive connection the server closed: retry once on a
-                # new one, unless the body was a stream that is now consumed.
-                if attempt == 1 or not (body is None or isinstance(body, bytes)):
+                if early is not None:
+                    return early
+                # Otherwise a kept-alive connection the server closed: retry
+                # once on a new one, unless the body was a stream that is now
+                # consumed and cannot be rewound.
+                if attempt == 1 or not retryable:
+                    self.report(method, path, error)
                     raise
+                if start is not None:
+                    body.seek(start)
                 continue
             reply = Reply(response.status, {k.lower(): v for k, v in response.getheaders()}, data)
             if reply.headers.get("connection", "").lower() == "close":
@@ -411,6 +477,21 @@ class Server:
             raise SystemExit(f"keys create failed (exit {proc.returncode}): {proc.stderr.strip()}")
         return found.group(1), secret
 
+    def describe_exit(self) -> str:
+        """How the process stands: still running, exited with a code, or
+        killed by a signal (a crash)."""
+        code = self.proc.poll() if self.proc is not None else None
+        if self.proc is None:
+            return "was not started"
+        if code is None:
+            return "is still running"
+        if code < 0:
+            try:
+                return f"was killed by {signal.Signals(-code).name}"
+            except ValueError:
+                return f"was killed by signal {-code}"
+        return f"exited with {code}"
+
     def rss(self) -> int | None:
         return rss_bytes(self.proc.pid) if self.proc and self.proc.poll() is None else None
 
@@ -475,6 +556,9 @@ def main() -> int:
         _, key = server.create_key("conformance")
         env = {**os.environ, "DIFFYMAN_SERVER_URL": server.base_url, "DIFFYMAN_SERVER_KEY": key}
         code = subprocess.run(command, env=env, check=False).returncode
+        if code != 0:
+            print(f"harness: the command exited with {code}; the server {server.describe_exit()}; last lines of its log:", file=sys.stderr)
+            print(server.log_tail(40), file=sys.stderr, flush=True)
     finally:
         server.stop()
         server.cleanup(keep=False)

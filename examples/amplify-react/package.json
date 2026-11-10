@@ -1,6 +1,6 @@
 {
   "name": "diffyman-amplify-react-example",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Static Vite + React app that diffs two inputs in the browser with @diffyman/react",
   "license": "MIT OR Apache-2.0",
   "author": "Sankara Reddy Telukutla <sankara@reddy.sh> (https://reddy.sh)",
@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@diffyman/react": "file:../../bindings/wasm/react",
-    "diffyman-wasm": "file:../../bindings/wasm/pkg-web",
+    "@diffyman/wasm": "file:../../bindings/wasm/pkg-web",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

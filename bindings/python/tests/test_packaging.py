@@ -17,3 +17,12 @@ def test_license_files_are_listed_and_match_the_repository(name: str) -> None:
     assert project["license"] == "MIT OR Apache-2.0"
     assert name in project["license-files"]
     assert (PACKAGE / name).read_bytes() == (REPO / name).read_bytes()
+
+
+def test_project_urls() -> None:
+    project = tomllib.loads((PACKAGE / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["urls"]["Homepage"] == "https://reddy.sh"
+    assert project["urls"]["Repository"] == "https://github.com/reddy-sh/diffyman"
+    assert project["urls"]["Documentation"] == "https://reddy-sh.github.io/diffyman"
+    assert project["requires-python"] == ">=3.11"
+    assert "version" in project["dynamic"]  # from the workspace version in Cargo.toml

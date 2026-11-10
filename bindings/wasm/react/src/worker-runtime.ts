@@ -3,7 +3,7 @@
 // This file has no import of the WASM package, so a custom worker can serve any
 // build of it (for example one without the `archives` feature):
 //
-//   import * as engine from "diffyman-wasm";
+//   import * as engine from "@diffyman/wasm";
 //   import { serveDiffWorker } from "@diffyman/react/worker-runtime";
 //   serveDiffWorker(engine);
 

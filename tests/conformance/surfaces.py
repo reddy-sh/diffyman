@@ -271,6 +271,8 @@ class Python(Surface):
 
 
 WASM_SCRIPT = HERE / "wasm_diff.mjs"
+# The npm name bindings/wasm/scripts/finish-package.mjs gives a wasm-pack folder.
+WASM_PACKAGE = "@diffyman/wasm"
 
 
 class Wasm(Surface):
@@ -289,6 +291,12 @@ class Wasm(Surface):
     def prepare(self) -> None:
         if not (self.pkg / "diffyman_wasm.js").is_file():
             raise SystemExit(f"{self.name}: no WASM package at {self.pkg}; build it with `{self.build_hint}`")
+        manifest = json.loads((self.pkg / "package.json").read_text(encoding="utf-8"))
+        if manifest.get("name") != WASM_PACKAGE:
+            raise SystemExit(
+                f"{self.name}: {self.pkg} is named {manifest.get('name')!r}, not {WASM_PACKAGE!r}; "
+                f"finish it with `node bindings/wasm/scripts/finish-package.mjs {self.pkg}`"
+            )
         proc = subprocess.run(
             [self.node, str(WASM_SCRIPT), "--pkg", str(self.pkg), "--features"], capture_output=True, check=False
         )

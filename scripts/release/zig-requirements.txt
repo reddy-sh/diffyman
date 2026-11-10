@@ -1,0 +1,17 @@
+# cargo-zigbuild and Zig, for the Linux glibc builds of the release workflow
+# (the Node.js addons and the JNI libraries link against glibc 2.28, like
+# the manylinux_2_28 Python wheels). Install with hash checking:
+#
+#   uv pip install --require-hashes -r scripts/release/zig-requirements.txt
+#
+# Hashes of the Linux x86_64 and aarch64 wheels and the macOS ones (for a
+# local trial). When updating a version, update every hash with it.
+cargo-zigbuild==0.24.0 \
+    --hash=sha256:484412e39e4c6039474535ce97ee75a22bab22d58233056f8ec8a8f9034bb957 \
+    --hash=sha256:6942e4320f7b05d8fb29e0a8ce5670bcbb3d254275100b85b5b7c86552f9a744 \
+    --hash=sha256:b576e8b95ff199eedee0e57afcdbaff7579744916261483280d350b9a35711fd
+ziglang==0.16.0 \
+    --hash=sha256:9fcda73f62b851dd72a54b710ad40a209896db14cfb13649e62191243556342b \
+    --hash=sha256:e27d409812b11e0fb89ed0200cf2e55b6464d43f9461553104e4a4f9a94a1fd5 \
+    --hash=sha256:b61e5413c49508d9d62e5dcea543e3af491594154d74a00ff52f84ed508260cc \
+    --hash=sha256:18e14f6b25678d7b7c65708c82501ee6090fe39ed5c783477d56267af1fa5629

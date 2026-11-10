@@ -8,7 +8,8 @@ whether the inputs differ.
 
 - git, and the Rust toolchain pinned in [`rust-toolchain.toml`](../../rust-toolchain.toml)
   ([rustup](https://rustup.rs) installs it on the first build).
-- [jq](https://jqlang.org) 1.7 or newer for the JSON example (optional).
+- [jq](https://jqlang.org) 1.7 or newer for the JSON example, and `patch` for the patch
+  example (both optional).
 
 ## Build and install from source
 

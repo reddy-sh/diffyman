@@ -224,7 +224,7 @@ exports.diffDocument = diffDocument;
 exports.diffDocumentAsync = diffDocumentAsync;
 exports.diffPaths = diffPaths;
 exports.diffPathsAsync = diffPathsAsync;
-/** The engine version, such as "0.0.1". */
+/** The engine version, such as "0.1.0". */
 exports.ENGINE_VERSION = native.engineVersion();
 /** The Diff Document schema version this build writes, such as "0.4.0". */
 exports.SCHEMA_VERSION = native.schemaVersion();

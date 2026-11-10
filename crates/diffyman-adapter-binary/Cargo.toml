@@ -8,6 +8,12 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
+documentation.workspace = true
+readme = "README.md"
+keywords = ["diff", "binary", "bytes", "chunking", "compare"]
+categories = ["algorithms"]
+# Sources, README and license texts only (copies of the repository's).
+include = ["/src/**", "/README.md", "/LICENSE-MIT", "/LICENSE-APACHE"]
 
 [dependencies]
 diffyman-algo.workspace = true

@@ -4,26 +4,27 @@ members = ["crates/*", "bindings/python", "bindings/wasm", "bindings/java", "bin
 exclude = ["spikes", "fuzz"]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/reddy-sh/diffyman"
 homepage = "https://reddy.sh"
+documentation = "https://reddy-sh.github.io/diffyman"
 authors = ["Sankara Reddy Telukutla <sankara@reddy.sh>"]
 
 # Every external dependency is pinned to an exact version. A version bump that
 # changes diff output also bumps the matching algorithm ID (docs/spec).
 [workspace.dependencies]
 # Workspace crates
-diffyman-model = { path = "crates/diffyman-model", version = "=0.0.1" }
-diffyman-algo = { path = "crates/diffyman-algo", version = "=0.0.1" }
+diffyman-model = { path = "crates/diffyman-model", version = "=0.1.0" }
+diffyman-algo = { path = "crates/diffyman-algo", version = "=0.1.0" }
 # Without `fs` for the WASM binding; native surfaces turn it on.
-diffyman = { path = "crates/diffyman-engine", version = "=0.0.1", default-features = false }
-diffyman-render = { path = "crates/diffyman-render", version = "=0.0.1" }
-diffyman-detect = { path = "crates/diffyman-detect", version = "=0.0.1" }
-diffyman-adapter-binary = { path = "crates/diffyman-adapter-binary", version = "=0.0.1" }
-diffyman-adapter-tree = { path = "crates/diffyman-adapter-tree", version = "=0.0.1" }
+diffyman = { path = "crates/diffyman-engine", version = "=0.1.0", default-features = false }
+diffyman-render = { path = "crates/diffyman-render", version = "=0.1.0" }
+diffyman-detect = { path = "crates/diffyman-detect", version = "=0.1.0" }
+diffyman-adapter-binary = { path = "crates/diffyman-adapter-binary", version = "=0.1.0" }
+diffyman-adapter-tree = { path = "crates/diffyman-adapter-tree", version = "=0.1.0" }
 
 # Serialization and hashing
 serde = { version = "=1.0.229", features = ["derive"] }
@@ -98,8 +99,8 @@ cbindgen = { version = "=0.29.4", default-features = false }
 # Local REST service only: diffyman-server, diffyman-db and diffyman-storage
 # (docs/adr/0012-local-service-architecture.md). The engine, CLI and bindings
 # never depend on these.
-diffyman-storage = { path = "crates/diffyman-storage", version = "=0.0.1" }
-diffyman-db = { path = "crates/diffyman-db", version = "=0.0.1" }
+diffyman-storage = { path = "crates/diffyman-storage", version = "=0.1.0" }
+diffyman-db = { path = "crates/diffyman-db", version = "=0.1.0" }
 tokio = { version = "=1.54.1", default-features = false }
 futures = { version = "=0.3.34", default-features = false, features = ["std", "async-await"] }
 bytes = "=1.12.1"

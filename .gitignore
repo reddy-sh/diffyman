@@ -9,6 +9,8 @@ node_modules/
 # Node addon and the native type stubs written by `napi build` (bindings/node)
 /bindings/node/*.node
 /bindings/node/native.d.ts
+# Platform package folders `napi create-npm-dirs` writes (scripts/stage-npm-packages.mjs)
+/bindings/node/npm/
 dist/
 coverage/
 *.tsbuildinfo

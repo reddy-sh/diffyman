@@ -1,7 +1,8 @@
 //! Connection time limits (`docs/api/README.md`, Limits): a request head
 //! must arrive within the header-read limit, and a kept-alive connection is
-//! closed after the idle limit, not after the shorter header-read one. Runs
-//! the real listener on a random loopback port; no database is needed.
+//! closed after the idle limit, not after the shorter header-read one, and
+//! a refused request does not close it. Runs the real listener on a random
+//! loopback port; no database is needed.
 
 mod support;
 
@@ -153,5 +154,66 @@ async fn test_idle_keep_alive_connection_is_closed_after_the_idle_limit() {
     // Then closed once the idle limit passes.
     let waited = time_until_closed(&mut stream, Duration::from_secs(8)).await;
     assert!(waited >= Duration::from_millis(2500), "{waited:?}");
+    server.stop().await;
+}
+
+/// A request answered without its body being used (a refused method or
+/// `Host`) leaves a kept-alive connection usable even when the body arrives
+/// after the head, as it does from clients that write them separately.
+/// Before small bodies were read ahead, the server closed such a connection
+/// after the answer, without `Connection: close`, and the client's next
+/// request on it (in CI, a 200 MB upload) failed with a broken pipe.
+#[tokio::test]
+async fn test_refused_request_with_a_late_body_keeps_the_connection() {
+    let server = Running::start("10", "30").await;
+    let body = br#"{"left":{"text":"a\n"},"right":{"text":"b\n"}}"#;
+    for (head, status) in [
+        (
+            format!("PUT /v1/diff HTTP/1.1\r\nHost: {}\r\n", server.addr),
+            "405",
+        ),
+        (
+            "POST /v1/diff HTTP/1.1\r\nHost: evil.example\r\n".to_owned(),
+            "403",
+        ),
+    ] {
+        let mut stream = TcpStream::connect(&server.addr).await.unwrap();
+        let head = format!(
+            "{head}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(head.as_bytes()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        stream.write_all(body).await.unwrap();
+        let answer = read_response(&mut stream).await;
+        assert!(
+            answer.starts_with(&format!("HTTP/1.1 {status}")),
+            "{answer}"
+        );
+        // The same connection serves the next request.
+        stream.write_all(server.request().as_bytes()).await.unwrap();
+        let next = read_response(&mut stream).await;
+        assert!(next.starts_with("HTTP/1.1 404"), "after {status}: {next}");
+    }
+    server.stop().await;
+}
+
+/// A large body is not read ahead: a refusal is answered without waiting
+/// for it.
+#[tokio::test]
+async fn test_refused_request_with_a_large_body_is_answered_at_once() {
+    let server = Running::start("10", "30").await;
+    let mut stream = TcpStream::connect(&server.addr).await.unwrap();
+    let head = "POST /v1/blobs HTTP/1.1\r\nHost: evil.example\r\n\
+                Content-Type: application/octet-stream\r\nContent-Length: 10000000\r\n\r\n";
+    stream.write_all(head.as_bytes()).await.unwrap();
+    let started = Instant::now();
+    let answer = read_response(&mut stream).await;
+    assert!(answer.starts_with("HTTP/1.1 403"), "{answer}");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
     server.stop().await;
 }
