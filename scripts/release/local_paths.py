@@ -18,7 +18,7 @@ Pass --target to cargo as well, so these flags reach only the target's code
 (not build scripts or proc-macros).
 
 `check` reads each file (every file under a folder argument), and every
-member of a .zip, .whl, .jar, .tar.gz or .tgz, and fails when one holds one
+member of a .zip, .whl, .jar, .tar.gz, .tgz or .crate, and fails when one holds one
 of this machine's folders (UTF-8 or UTF-16LE), or, in a binary file, a
 folder of the CI images.
 
@@ -115,7 +115,7 @@ def members(path: Path) -> Iterator[tuple[str, bytes]]:
             for info in archive.infolist():
                 if not info.is_dir():
                     yield f"{path}!{info.filename}", archive.read(info)
-    elif name.endswith((".tar.gz", ".tgz")):
+    elif name.endswith((".tar.gz", ".tgz", ".crate")):
         with tarfile.open(path, "r:gz") as tar:
             for entry in tar:
                 if entry.isfile():

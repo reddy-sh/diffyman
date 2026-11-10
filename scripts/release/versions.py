@@ -4,6 +4,7 @@
     python3 scripts/release/versions.py check [--expect 0.1.0]
     python3 scripts/release/versions.py set 0.1.0
     python3 scripts/release/versions.py crates
+    python3 scripts/release/versions.py lock-version wasm-bindgen
 
 `check` exits 1 when the manifests disagree (or differ from --expect). It
 reads:
@@ -24,7 +25,10 @@ reads:
 `set` rewrites all of them, changing nothing else in each file, then runs
 `check`. `crates` prints the workspace crates that are published to
 crates.io (`publish` not false), one per line, each after the crates it
-depends on (normal, build and versioned dev-dependencies).
+depends on (normal, build and versioned dev-dependencies). `lock-version`
+prints the version of a crates.io package in Cargo.lock, which must be
+there exactly once (the release installs wasm-bindgen-cli at the version of
+the wasm-bindgen crate).
 
 Python 3.11 or later, standard library only.
 """
@@ -333,6 +337,13 @@ def publish_order() -> list[str]:
     return order
 
 
+def lock_version(name: str) -> str:
+    versions: list[str] = [str(p["version"]) for p in tomllib.loads(read("Cargo.lock"))["package"] if p["name"] == name and "source" in p]
+    if len(versions) != 1:
+        raise Problem(f"Cargo.lock has {len(versions)} versions of {name} from a registry ({', '.join(versions)}), expected one")
+    return versions[0]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -341,6 +352,8 @@ def main() -> int:
     set_parser = sub.add_parser("set", help="write a version into every manifest")
     set_parser.add_argument("version")
     sub.add_parser("crates", help="the crates.io publish order")
+    lock_parser = sub.add_parser("lock-version", help="the Cargo.lock version of a crates.io package")
+    lock_parser.add_argument("name")
     args = parser.parse_args()
     try:
         for value in (getattr(args, "expect", None), getattr(args, "version", None)):
@@ -350,6 +363,9 @@ def main() -> int:
             return check(args.expect)
         if args.command == "set":
             return set_version(args.version)
+        if args.command == "lock-version":
+            print(lock_version(args.name))
+            return 0
         print("\n".join(publish_order()))
         return 0
     except Problem as problem:

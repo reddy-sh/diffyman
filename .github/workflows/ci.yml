@@ -141,8 +141,13 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install wasm-pack
-        run: cargo install --locked wasm-pack --version 0.15.1
+      - name: Install wasm-bindgen-cli (the version of Cargo.lock) and wasm-pack
+        # wasm-pack uses the wasm-bindgen on PATH when its version matches the
+        # crate's, so it downloads no prebuilt binary.
+        run: |
+          version=$(uv run --no-project --python 3.12 python scripts/release/versions.py lock-version wasm-bindgen)
+          cargo install --locked wasm-bindgen-cli --version "$version"
+          cargo install --locked wasm-pack --version 0.15.1
 
       - name: Build the CLI, the C ABI and the JNI library
         run: cargo build --locked --release -p diffyman-cli -p diffyman-ffi -p diffyman-java
@@ -427,6 +432,108 @@ jobs:
 
       - name: Versions
         run: python3 scripts/release/versions.py check
+
+  release-packaging:
+    # The packaging steps of release.yml that need no credentials, so a
+    # change that breaks them fails here and not on release day
+    # (docs/release.md): the versions, `cargo publish --dry-run` of every
+    # crate in dependency order, @diffyman/wasm as the release builds it, the
+    # npm staging (this runner's addon only) and `npm pack --dry-run` of each
+    # package, the jar with this runner's library, check_jar.py and the
+    # unsigned Maven bundle, and no build-machine path in any of them.
+    # Nothing is uploaded or published, and no secret is used.
+    name: release packaging (dry run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The packages' layout, not the shipped binaries: optimized code without
+      # LTO and with parallel codegen, as in the bindings job.
+      CARGO_PROFILE_RELEASE_LTO: "off"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-packaging
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Versions agree
+        run: python3 scripts/release/versions.py check
+
+      - name: Install wasm-bindgen-cli (the version of Cargo.lock)
+        run: cargo install --locked wasm-bindgen-cli --version "$(python3 scripts/release/versions.py lock-version wasm-bindgen)"
+
+      - name: Remap build-machine paths (RUSTFLAGS)
+        run: python3 scripts/release/local_paths.py rustflags --github-env
+
+      - name: crates.io (cargo publish --dry-run, in dependency order)
+        run: |
+          sh scripts/release/publish-crates.sh --dry-run
+          python3 scripts/release/local_paths.py check target/package/*.crate
+
+      - name: "@diffyman/wasm and @diffyman/react (the release build)"
+        run: |
+          python3 scripts/release/build_wasm.py --out bindings/wasm/pkg-web
+          npm --prefix bindings/wasm/react ci
+          npm --prefix bindings/wasm/react run build
+
+      - name: The Node.js addon (this runner's platform)
+        working-directory: bindings/node
+        run: |
+          npm ci
+          npx napi build --platform --release --no-js --no-dts-header --dts native.d.ts -- --locked
+
+      - name: npm staging and npm pack --dry-run
+        run: |
+          node bindings/node/scripts/stage-npm-packages.mjs --out "$RUNNER_TEMP/npm" --addons bindings/node \
+            --allow-missing --wasm-pkg bindings/wasm/pkg-web --react bindings/wasm/react
+          python3 scripts/release/local_paths.py check "$RUNNER_TEMP/npm"
+          while read -r package; do
+            npm pack --dry-run "$RUNNER_TEMP/npm/$package"
+          done < "$RUNNER_TEMP/npm/publish-order.txt"
+
+      - name: The jar (this runner's library), check_jar.py and the Maven bundle
+        run: |
+          version=$(node -p 'require("./bindings/node/package.json").version')
+          cargo build --release --locked -p diffyman-java
+          mkdir -p "$RUNNER_TEMP/natives/linux-x86_64" "$RUNNER_TEMP/release/release-maven"
+          cp target/release/libdiffyman_java.so "$RUNNER_TEMP/natives/linux-x86_64/"
+          mvn -B -ntp -f bindings/java/pom.xml -P release verify -Dgpg.skip=true -DskipTests \
+            "-Ddiffyman.release.natives=$RUNNER_TEMP/natives" \
+            "-Ddiffyman.native.dir=$RUNNER_TEMP/natives/linux-x86_64"
+          python3 scripts/release/check_jar.py --version "$version" --platforms linux-x86_64 bindings/java/target
+          python3 scripts/release/local_paths.py check bindings/java/target/diffyman-"$version"*.jar
+          # As the release's java and checksums jobs lay them out, then as publish-maven checks them.
+          cp bindings/java/target/diffyman-"$version".jar bindings/java/target/diffyman-"$version"-sources.jar \
+            bindings/java/target/diffyman-"$version"-javadoc.jar "$RUNNER_TEMP/release/release-maven/"
+          cp bindings/java/pom.xml "$RUNNER_TEMP/release/release-maven/diffyman-$version.pom"
+          (cd "$RUNNER_TEMP/release" && sha256sum release-maven/* > SHA256SUMS)
+          python3 scripts/release/verify_sums.py --sums "$RUNNER_TEMP/release/SHA256SUMS" --root "$RUNNER_TEMP/release" release-maven
+          python3 scripts/release/maven_bundle.py bundle --version "$version" \
+            --files "$RUNNER_TEMP/release/release-maven" --out "$RUNNER_TEMP/central-bundle.zip"
 
   python-wheels:
     # abi3 wheels (one per platform covers CPython 3.11+). Uploaded as

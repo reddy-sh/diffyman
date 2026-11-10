@@ -4,12 +4,14 @@ name: Docs
 # built from the repository's Markdown, link-checked (book/build.py) and
 # uploaded as an artifact. It is published to GitHub Pages
 # (https://reddy-sh.github.io/diffyman) only when someone runs this workflow
-# by hand on main with `deploy` set to true; nothing else deploys it.
+# by hand on main with `deploy` set to true, and a reviewer of the
+# `github-pages` environment approves it (docs/release.md); nothing else
+# deploys it.
 #
 # Hygiene: no pull_request_target, no secrets, a read-only token everywhere
-# except the deploy job (pages: write and id-token: write only), checkout
-# without stored credentials, actions pinned by commit, and no `${{ }}`
-# expressions inside `run:` scripts.
+# except the deploy job (pages: write and id-token: write only), no cache in
+# a deploy run, checkout without stored credentials, actions pinned by
+# commit, and no `${{ }}` expressions inside `run:` scripts.
 
 on:
   push:
@@ -54,7 +56,10 @@ jobs:
         run: rustup toolchain install
 
       - name: Cache
-        # Only ~/.cargo (the installed mdbook); this job builds no crate.
+        # Only ~/.cargo (the installed mdbook); this job builds no crate. Not
+        # in a deploy run: the published site is built from a clean runner,
+        # never from what another run wrote into the cache.
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.deploy) }}
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: docs
@@ -88,9 +93,9 @@ jobs:
           path: target/book/html/
 
   deploy:
-    # Runs only by hand, on main, with `deploy: true`. Pages must also be set
-    # to "GitHub Actions" in the repository settings, and the `github-pages`
-    # environment can require a reviewer.
+    # Runs only by hand, on main, with `deploy: true`, and waits for a
+    # required reviewer of the `github-pages` environment. Pages must also be
+    # set to "GitHub Actions" in the repository settings (docs/release.md).
     name: deploy to GitHub Pages
     needs: build
     if: github.event_name == 'workflow_dispatch' && inputs.deploy && github.ref == 'refs/heads/main'

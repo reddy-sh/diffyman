@@ -13,16 +13,23 @@ name: Release
 # artifacts, and SHA256SUMS over all of them, as workflow artifacts; nothing
 # goes to a GitHub release. The publish jobs run only when started by hand,
 # and each needs an approval of the `release` environment (required
-# reviewers): with dry_run (the default) they run the registry's own dry run
-# (cargo publish --dry-run per crate in dependency order, twine check, npm
-# publish --dry-run, mvn verify with the release profile); only with dry_run
-# unticked, on the tag vX.Y.Z, do they publish and attest the artifacts'
-# build provenance.
+# reviewers). The PyPI, npm and Maven jobs upload the files of this run's
+# artifacts, after checking them against SHA256SUMS (verify_sums.py), so
+# what is published is what was built, checksummed and attested. With
+# dry_run (the default) they stop short of the upload: cargo publish
+# --dry-run per crate in dependency order, the SHA256SUMS check of the
+# wheels and sdist (twine check runs in python-check, a job without
+# id-token), npm publish --dry-run, and the unsigned Maven Central bundle.
+# Only with dry_run unticked, on the tag vX.Y.Z, do they publish and attest
+# the artifacts' build provenance. Maven Central has a second gate: the
+# upload stops at a validated deployment that the owner publishes in the
+# Central Portal (docs/release.md).
 #
 # Hygiene: no caches (a release must not read what another run wrote), a
 # read-only token by default and id-token only on the jobs that use OIDC,
-# checkout without stored credentials, actions pinned by commit, and no
-# `${{ }}` inside run: scripts (values reach the shell through env:).
+# no tool resolved without a pin in those jobs, checkout without stored
+# credentials, actions pinned by commit, and no `${{ }}` inside run:
+# scripts (values reach the shell through env:).
 
 on:
   workflow_dispatch:
@@ -347,6 +354,32 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  python-check:
+    # twine check --strict of every wheel and the sdist. It runs here, with a
+    # read-only token and no id-token, because twine and its dependencies are
+    # resolved from PyPI; publish-pypi only uploads the files this job checked.
+    name: python check (twine)
+    needs: [python-wheels, python-sdist]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download the wheels and the sdist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-python-*
+          path: dist
+          merge-multiple: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: twine check
+        run: |
+          ls -l dist
+          uvx --from twine==7.0.0 twine check --strict dist/*
+
   node-addons:
     # The napi targets of bindings/node/package.json. The Linux addons are
     # linked with Zig against glibc 2.28, like the manylinux_2_28 wheels.
@@ -448,10 +481,14 @@ jobs:
           retention-days: 30
 
   npm-packages:
-    # @diffyman/node and its five platform packages (through
-    # bindings/node/scripts/stage-npm-packages.mjs), @diffyman/wasm and
-    # @diffyman/react, laid out and checked by scripts/release/stage_npm.py.
-    # Every package.json still says "private": true; the publish job removes it.
+    # @diffyman/node and its five platform packages, @diffyman/wasm and
+    # @diffyman/react, laid out and checked by
+    # bindings/node/scripts/stage-npm-packages.mjs, with publish-order.txt.
+    # @diffyman/wasm is ADR 0008's release build (scripts/release/build_wasm.py):
+    # wasm-bindgen-cli built from source at the version of Cargo.lock, the
+    # name and producers sections removed, no wasm-pack and no wasm-opt, so
+    # no binary is downloaded. Every package.json still says
+    # "private": true; the publish job removes it.
     name: npm packages
     needs: [plan, node-addons]
     runs-on: ubuntu-latest
@@ -473,17 +510,16 @@ jobs:
           node-version: "22"
           package-manager-cache: false
 
-      - name: Install wasm-pack
-        run: cargo install --locked wasm-pack --version 0.15.1
+      - name: Install wasm-bindgen-cli (the version of Cargo.lock, from source)
+        run: cargo install --locked wasm-bindgen-cli --version "$(python3 scripts/release/versions.py lock-version wasm-bindgen)"
 
       - name: Remap build-machine paths (RUSTFLAGS)
         run: python3 scripts/release/local_paths.py rustflags --target wasm32-unknown-unknown --github-env
 
-      - name: Build @diffyman/wasm
+      - name: Build @diffyman/wasm (name and producers sections removed)
         run: |
-          wasm-pack build bindings/wasm --release --target web --out-dir pkg-web -- --locked
-          node bindings/wasm/scripts/finish-package.mjs bindings/wasm/pkg-web
-          python3 scripts/release/local_paths.py check bindings/wasm/pkg-web/*
+          python3 scripts/release/build_wasm.py --out bindings/wasm/pkg-web
+          python3 scripts/release/local_paths.py check bindings/wasm/pkg-web
 
       - name: Build and test @diffyman/react
         run: |
@@ -498,11 +534,11 @@ jobs:
           path: addons
 
       - name: Lay out the packages
-        # bindings/node's stager runs `napi create-npm-dirs` (its build tools).
+        # The stager runs `napi create-npm-dirs` (bindings/node's build tools).
         run: |
           npm --prefix bindings/node ci
-          python3 scripts/release/stage_npm.py --version "$VERSION" --out npm \
-            --node-addons addons --wasm-pkg bindings/wasm/pkg-web
+          node bindings/node/scripts/stage-npm-packages.mjs --version "$VERSION" --out npm \
+            --addons addons --wasm-pkg bindings/wasm/pkg-web --react bindings/wasm/react
           python3 scripts/release/local_paths.py check npm
 
       - name: Upload
@@ -733,12 +769,14 @@ jobs:
   publish-crates:
     # crates.io: every crate without `publish = false`, each after the crates
     # it depends on. Trusted publishing (OIDC); the very first release of a
-    # crate needs the environment secret CARGO_REGISTRY_TOKEN instead.
+    # crate needs the environment secret CARGO_REGISTRY_TOKEN instead. The
+    # script waits out crates.io's rate limit for new crates (HTTP 429): the
+    # first release, which creates all eight, takes about half an hour.
     name: publish crates.io
     needs: [plan, checksums]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     environment: release
     permissions:
       contents: read
@@ -771,9 +809,11 @@ jobs:
         run: sh scripts/release/publish-crates.sh --publish "$VERSION"
 
   publish-pypi:
-    # PyPI by trusted publishing (no token), with PEP 740 attestations.
+    # PyPI by trusted publishing (no token), with PEP 740 attestations: the
+    # wheels and sdist that python-check checked, unchanged (SHA256SUMS). No
+    # tool is installed here; the pinned action does the upload.
     name: publish PyPI
-    needs: [plan, checksums]
+    needs: [plan, checksums, python-check]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -782,22 +822,29 @@ jobs:
       contents: read
       id-token: write # PyPI trusted publishing and attestations (OIDC)
     steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Download the wheels and the sdist
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-python-*
-          path: dist
-          merge-multiple: true
+          path: release
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Download the checksums
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          enable-cache: false
+          name: release-checksums
+          path: release
 
-      - name: twine check
+      - name: The files of SHA256SUMS, unchanged
         run: |
+          python3 scripts/release/verify_sums.py --sums release/SHA256SUMS --root release 'release-python-*'
+          mkdir dist
+          cp release/release-python-*/* dist/
           ls -l dist
-          uvx --from twine==7.0.0 twine check --strict dist/*
 
       - name: Publish
         if: needs.plan.outputs.dry_run == 'false'
@@ -821,31 +868,56 @@ jobs:
       contents: read
       id-token: write # npm trusted publishing and provenance (OIDC)
     steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Download the packages
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-npm
-          path: npm
+          path: release/release-npm
+
+      - name: Download the checksums
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-checksums
+          path: release
+
+      - name: The files of SHA256SUMS, unchanged
+        run: python3 scripts/release/verify_sums.py --sums release/SHA256SUMS --root release release-npm
 
       - name: Set up Node.js
-        # Node.js 24 comes with npm 11, which trusted publishing needs.
+        # An exact version, never a range: this job holds an OIDC token.
+        # Node.js 24.22.2 comes with npm 11.19.1 (trusted publishing needs
+        # 11.5.1 or later). Change both pins and the check below together.
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "24"
+          node-version: "24.22.2"
+          check-latest: false
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: npm 11.5.1 or later (trusted publishing)
+      - name: Exactly Node.js 24.22.2 and npm 11.19.1
+        env:
+          NODE_EXPECTED: v24.22.2
+          NPM_EXPECTED: 11.19.1
         run: |
-          npm --version
-          node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$(npm --version)"
+          node_actual=$(node --version)
+          npm_actual=$(npm --version)
+          echo "node $node_actual, npm $npm_actual"
+          if [ "$node_actual" != "$NODE_EXPECTED" ] || [ "$npm_actual" != "$NPM_EXPECTED" ]; then
+            echo "::error::expected node $NODE_EXPECTED and npm $NPM_EXPECTED"
+            exit 1
+          fi
 
       - name: Dry run (npm publish --dry-run)
         if: needs.plan.outputs.dry_run != 'false'
         run: |
           while read -r package; do
-            (cd "npm/$package" && npm pkg delete private && npm publish --dry-run --access public)
-          done < npm/publish-order.txt
+            (cd "release/release-npm/$package" && npm pkg delete private && npm publish --dry-run --access public)
+          done < release/release-npm/publish-order.txt
 
       - name: Publish
         # A package whose version is already on npm is skipped, so a run that
@@ -856,22 +928,26 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           while read -r package; do
-            name=$(node -p 'require(process.argv[1]).name' "$PWD/npm/$package/package.json")
+            name=$(node -p 'require(process.argv[1]).name' "$PWD/release/release-npm/$package/package.json")
             if npm view "$name@$VERSION" version > /dev/null 2>&1; then
               echo "$name $VERSION is already on npm; skipped"
               continue
             fi
-            (cd "npm/$package" && npm pkg delete private && npm publish --provenance --access public)
-          done < npm/publish-order.txt
+            (cd "release/release-npm/$package" && npm pkg delete private && npm publish --provenance --access public)
+          done < release/release-npm/publish-order.txt
 
   publish-maven:
-    # Maven Central (Central Portal) through central-publishing-maven-plugin,
-    # signed with the environment's GPG key.
+    # Maven Central (Central Portal): the jars and POM of the `java` job, byte
+    # for byte (checked against SHA256SUMS; nothing is rebuilt), signed with
+    # the environment's GPG key and uploaded by scripts/release/maven_bundle.py
+    # with publishingType USER_MANAGED (autoPublish false). The upload ends as
+    # a validated deployment, which goes to Maven Central only when the owner
+    # presses Publish in the portal: a second gate after this job's approval.
     name: publish Maven Central
     needs: [plan, checksums]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     environment: release
     permissions:
       contents: read
@@ -883,46 +959,42 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download the native libraries
+      - name: Download the Maven files
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: release-java-native-*
-          path: natives
-          merge-multiple: true
+          name: release-maven
+          path: release/release-maven
 
-      - name: Set up Java
-        if: needs.plan.outputs.dry_run != 'false'
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - name: Download the checksums
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          distribution: temurin
-          java-version: "17"
+          name: release-checksums
+          path: release
 
-      - name: Set up Java, the Central token and the signing key
-        if: needs.plan.outputs.dry_run == 'false'
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          distribution: temurin
-          java-version: "17"
-          server-id: central
-          server-username: MAVEN_CENTRAL_USERNAME
-          server-password: MAVEN_CENTRAL_PASSWORD
-          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
-          gpg-passphrase: MAVEN_GPG_PASSPHRASE
-
-      - name: Dry run (mvn -P release verify, no deploy)
+      - name: The files of SHA256SUMS, unchanged
         run: |
-          mvn -B -ntp -f bindings/java/pom.xml -P release verify -Dgpg.skip=true \
-            "-Ddiffyman.release.natives=$GITHUB_WORKSPACE/natives" \
-            "-Ddiffyman.native.dir=$GITHUB_WORKSPACE/natives/linux-x86_64"
-          python3 scripts/release/check_jar.py --version "$VERSION" bindings/java/target
+          python3 scripts/release/verify_sums.py --sums release/SHA256SUMS --root release release-maven
+          python3 scripts/release/check_jar.py --version "$VERSION" release/release-maven
 
-      - name: Publish (signed)
+      - name: Dry run (the bundle, unsigned, not uploaded)
+        if: needs.plan.outputs.dry_run != 'false'
+        run: >-
+          python3 scripts/release/maven_bundle.py bundle --version "$VERSION"
+          --files release/release-maven --out "$RUNNER_TEMP/central-bundle.zip"
+
+      - name: Sign and upload (a validated deployment, published by hand)
         if: needs.plan.outputs.dry_run == 'false'
         env:
+          MAVEN_GPG_PRIVATE_KEY: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
         run: |
-          mvn -B -ntp -f bindings/java/pom.xml -P release deploy \
-            "-Ddiffyman.release.natives=$GITHUB_WORKSPACE/natives" \
-            "-Ddiffyman.native.dir=$GITHUB_WORKSPACE/natives/linux-x86_64"
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          trap 'gpgconf --kill all; rm -rf "$GNUPGHOME"' EXIT
+          printf '%s\n' "$MAVEN_GPG_PRIVATE_KEY" | gpg --batch --import
+          python3 scripts/release/maven_bundle.py bundle --version "$VERSION" \
+            --files release/release-maven --out "$RUNNER_TEMP/central-bundle.zip" --sign
+          python3 scripts/release/maven_bundle.py upload --version "$VERSION" \
+            --bundle "$RUNNER_TEMP/central-bundle.zip"

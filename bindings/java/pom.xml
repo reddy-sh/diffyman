@@ -297,17 +297,21 @@
     </profile>
 
     <!--
-      The Maven Central release (.github/workflows/release.yml, docs/release.md): the jar with the
-      native library of every platform, sources and javadoc jars, GPG signatures, and the Central
-      Portal upload on `mvn deploy`.
+      The Maven Central artifacts (.github/workflows/release.yml, docs/release.md): the jar with
+      the native library of every platform, and the sources and javadoc jars.
 
-        mvn -P release verify -Ddiffyman.release.natives=DIR -Dgpg.skip=true   # dry run
-        mvn -P release deploy -Ddiffyman.release.natives=DIR                   # publishes
+        mvn -P release verify -Ddiffyman.release.natives=DIR -Dgpg.skip=true
 
       DIR holds <platform>/<library> for each platform, with the names of the platform profiles
       above (macos-aarch64/libdiffyman_java.dylib, linux-x86_64/libdiffyman_java.so,
       windows-x86_64/diffyman_java.dll, ...); scripts/release/check_jar.py checks the jar has
-      all five. The Central token is the `central` server of settings.xml.
+      all five.
+
+      The release workflow never runs `mvn deploy`: its publish job signs and uploads the jars
+      this build made, byte for byte (scripts/release/maven_bundle.py). The signing and Central
+      plugins below are for a by-hand `mvn -P release deploy` only (the Central token is the
+      `central` server of settings.xml), and even that stops at a validated deployment
+      (autoPublish false) that the owner publishes in the Central Portal.
     -->
     <profile>
       <id>release</id>
@@ -406,8 +410,9 @@
             <extensions>true</extensions>
             <configuration>
               <publishingServerId>central</publishingServerId>
-              <autoPublish>true</autoPublish>
-              <waitUntil>published</waitUntil>
+              <!-- Upload and validate only: the owner presses Publish in the Central Portal. -->
+              <autoPublish>false</autoPublish>
+              <waitUntil>validated</waitUntil>
             </configuration>
           </plugin>
         </plugins>

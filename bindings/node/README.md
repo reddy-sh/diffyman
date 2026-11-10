@@ -98,18 +98,26 @@ Prebuilt packages are planned for `darwin-arm64`, `darwin-x64`,
 `linux-x64-gnu`, `linux-arm64-gnu` and `win32-x64-msvc` (the `napi.targets`
 of `package.json`); on other platforms, build from source.
 
-A release stages every package in a folder of its own, from the addons built
-for each target (CI's `node-addon-*` artifacts):
+A release stages every npm package in a folder of its own, from the addons
+built for each target (CI's `node-addon-*` artifacts), the WASM package and
+the React hook; this script is the release's only staging step
+([docs/release.md](../../docs/release.md)):
 
 ```sh
-node bindings/node/scripts/stage-npm-packages.mjs --out staged --addons addons
-npm pack --dry-run staged/node staged/darwin-arm64   # and the other platforms
+node bindings/node/scripts/stage-npm-packages.mjs --out staged --addons addons \
+  --wasm-pkg bindings/wasm/pkg-web --react bindings/wasm/react
+npm pack --dry-run staged/node staged/node-darwin-arm64   # and the others in staged/publish-order.txt
 ```
 
-`staged/<platform>` is `@diffyman/node-<platform>` (from
-`napi create-npm-dirs`, with its addon and both license texts), and
+`staged/node-<platform>` is `@diffyman/node-<platform>` (from
+`napi create-npm-dirs`, with its addon and both license texts),
 `staged/node` is this package with an exact `optionalDependencies` entry for
-each of them. Every staged `package.json` stays `"private": true`.
+each of them, `staged/wasm` and `staged/react` are `@diffyman/wasm` and
+`@diffyman/react`, and `staged/publish-order.txt` lists the folders in the
+order to publish them. Every staged `package.json` stays `"private": true`.
+`--node-only` stages the Node.js packages alone, and `--allow-missing`
+stages a platform without its addon (left out of the publish order) for a
+local check.
 
 ## Development
 
