@@ -11,7 +11,7 @@
 # --dry-run packages and builds every crate with `cargo publish --dry-run`
 # in one call, so crates that depend on each other resolve against the
 # packaged copies instead of crates.io. Nothing is uploaded and no token is
-# needed. The .crate files stay in target/package/. Locally, add
+# needed. The .crate files stay in target/package/tmp-crate/. Locally, add
 # --allow-dirty for an uncommitted tree.
 #
 # --publish uploads them one by one; it is what the release workflow's

@@ -320,7 +320,7 @@ npm pack release/release-npm/node release/release-npm/node-linux-arm64-gnu \
 ```
 
 The workflow uploads no `.crate` files and no C library. `publish-crates.sh --dry-run` leaves
-the crates in `target/package/`; build the C library for Linux as below.
+the crates in `target/package/tmp-crate/`; build the C library for Linux as below.
 
 **Before a release**, the same files can be built on a Mac with Apple silicon for Linux arm64
 (Docker's architecture there), with Zig as the release workflow uses it:
@@ -360,7 +360,7 @@ mvn -f bindings/java/pom.xml -P release verify -Dgpg.skip=true \
 cp bindings/java/target/diffyman-0.1.0.jar files/
 
 sh scripts/release/publish-crates.sh --dry-run --allow-dirty
-cp target/package/*-0.1.0.crate files/
+cp target/package/tmp-crate/*-0.1.0.crate files/
 
 scripts/release/install-check.sh files
 ```

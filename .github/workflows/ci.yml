@@ -492,7 +492,14 @@ jobs:
       - name: crates.io (cargo publish --dry-run, in dependency order)
         run: |
           sh scripts/release/publish-crates.sh --dry-run
-          python3 scripts/release/local_paths.py check target/package/*.crate
+          # A dry run of several crates leaves them in target/package/tmp-crate/.
+          shopt -s nullglob
+          crates=(target/package/tmp-crate/*.crate)
+          if [ "${#crates[@]}" -ne 8 ]; then
+            echo "expected 8 packaged crates, found ${#crates[@]}" >&2
+            exit 1
+          fi
+          python3 scripts/release/local_paths.py check "${crates[@]}"
 
       - name: "@diffyman/wasm and @diffyman/react (the release build)"
         run: |
