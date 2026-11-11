@@ -30,8 +30,12 @@ permissions:
   contents: read
 
 concurrency:
-  # By event too, so a push to main never cancels a deploy run.
-  group: docs-${{ github.event_name }}-${{ github.ref }}
+  # A newer push or pull request commit cancels the older build. A run started
+  # by hand gets a group of its own (its run id), so no push, pull request or
+  # other run cancels it here. Its deploy job then joins the `pages` group,
+  # which runs one deployment at a time: while one holds it, only the newest
+  # deploy waits behind it, and an older waiting deploy is cancelled.
+  group: docs-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 env:

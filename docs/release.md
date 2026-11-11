@@ -47,8 +47,11 @@ either way, and so is the document it returns.
 - **Dry run by default.** The `dry_run` input defaults to true. A tag push is always a dry run.
 - **Publish jobs.** `publish-crates`, `publish-pypi`, `publish-npm` and `publish-maven` run only
   in a run started by hand, and each waits for an approval of the `release` environment (required
-  reviewers). In a dry run they stop before the upload: `cargo publish --dry-run` for every crate
-  in dependency order, the checksum check of the wheels and the sdist, `npm publish --dry-run` for
+  reviewers). In a run that publishes they start only after `attest build provenance` has
+  succeeded, so nothing is published unless the attestations were made (they cover the files of
+  `SHA256SUMS`; the crates are built by `cargo publish` from the tagged source and are not among
+  them). In a dry run they stop before the upload: `cargo publish --dry-run` for every crate in
+  dependency order, the checksum check of the wheels and the sdist, `npm publish --dry-run` for
   every package, and the unsigned Maven Central bundle. They upload only when `dry_run` is false.
 - **What is uploaded is what was built.** `publish-pypi`, `publish-npm` and `publish-maven`
   download this run's artifacts and check them against its `SHA256SUMS`
@@ -68,8 +71,10 @@ either way, and so is the document it returns.
 - **The tag.** The `plan` job stops a run that would publish unless it runs on the tag
   `vX.Y.Z` and every manifest has version `X.Y.Z` (`scripts/release/versions.py check`).
 - **Attestations.** Build provenance attestations (`actions/attest-build-provenance`, from
-  `SHA256SUMS`) are created only in a run that publishes, after the same approval: they are public
-  records, and a dry run leaves none.
+  `SHA256SUMS`) are created only in a run that publishes, after an approval of the `release`
+  environment (a review of its own, before the publish jobs'): they are public records, and a dry
+  run leaves none. The publish jobs wait for them; if `attest build provenance` fails or is
+  rejected, nothing is published.
 - **npm `private`.** Every package.json in the repository and in the staged packages says
   `"private": true`. Only the approved publish job runs `npm pkg delete private`, then
   `npm publish --provenance`.
@@ -158,6 +163,15 @@ rules.
 2. **First release:** npm adds a trusted publisher only to a package that exists. Create a
    granular access token with read and write access to the packages of the `diffyman`
    organization, with a short expiry. Store it as the environment secret `NPM_TOKEN`.
+   Your account requires two-factor authentication and the publish job cannot answer a
+   one-time code, so tick **Bypass two-factor authentication** on this token. That makes it a
+   publish credential that skips 2FA: keep the expiry to a few days, store it only in the
+   `release` environment, and delete it as soon as trusted publishing is set up (step 3). npm
+   no longer lets such tokens manage tokens, access, maintainers or trusted publishers (those
+   need an interactive 2FA challenge), and it plans to end their direct publishing in January
+   2027. The release workflow does not yet support the replacement, npm's staged publishing
+   (`npm stage publish`, npm 11.15.0 or later), where a stage-only token stages each new
+   package from the workflow and you approve each version on npmjs.com with 2FA.
 3. **After the first release:** for each of the eight packages, open **Settings → Trusted
    publishing** and add GitHub Actions with user `reddy-sh`, repository `diffyman`, workflow
    `release.yml` and environment `release`. Set **Publishing access** to require two-factor
@@ -251,8 +265,9 @@ A deploy run builds the site without restoring any cache, then waits for your ap
 4. **Release.** In **Actions → Release → Run workflow**, choose the tag `v0.1.0` under **Use
    workflow from**, enter `0.1.0` and untick **Dry run**. The `plan` job checks the tag and the
    versions, then the run builds everything again. Approve the `release` environment for
-   `attest build provenance` and the four publish jobs. `publish-crates` takes about half an hour
-   for the first release ([crates.io](#2-cratesio)).
+   `attest build provenance` first. Once it has succeeded, the four publish jobs wait for approval
+   together, and one review approves all four; if it fails or is rejected, they are skipped.
+   `publish-crates` takes about half an hour for the first release ([crates.io](#2-cratesio)).
 
 5. **Publish the Maven Central deployment** (the second gate). `publish-maven` ends with a
    deployment named `diffyman-0.1.0` in the state **Validated**, not published. Open

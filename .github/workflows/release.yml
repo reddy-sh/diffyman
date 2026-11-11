@@ -20,8 +20,9 @@ name: Release
 # --dry-run per crate in dependency order, the SHA256SUMS check of the
 # wheels and sdist (twine check runs in python-check, a job without
 # id-token), npm publish --dry-run, and the unsigned Maven Central bundle.
-# Only with dry_run unticked, on the tag vX.Y.Z, do they publish and attest
-# the artifacts' build provenance. Maven Central has a second gate: the
+# Only with dry_run unticked, on the tag vX.Y.Z, does the attest job record
+# the artifacts' build provenance and do they publish, each only after the
+# attestations succeeded. Maven Central has a second gate: the
 # upload stops at a validated deployment that the owner publishes in the
 # Central Portal (docs/release.md).
 #
@@ -773,8 +774,16 @@ jobs:
     # script waits out crates.io's rate limit for new crates (HTTP 429): the
     # first release, which creates all eight, takes about half an hour.
     name: publish crates.io
-    needs: [plan, checksums]
-    if: github.event_name == 'workflow_dispatch'
+    needs: [plan, checksums, attest]
+    # After `attest`: a release publishes nothing unless the attestations
+    # succeeded. A dry run skips `attest` on purpose and still runs this job,
+    # so the result of each need is checked here (a skipped need would skip
+    # the job).
+    if: >-
+      github.event_name == 'workflow_dispatch' && !cancelled()
+      && needs.checksums.result == 'success'
+      && (needs.attest.result == 'success'
+      || (needs.attest.result == 'skipped' && needs.plan.outputs.dry_run != 'false'))
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: release
@@ -813,8 +822,17 @@ jobs:
     # wheels and sdist that python-check checked, unchanged (SHA256SUMS). No
     # tool is installed here; the pinned action does the upload.
     name: publish PyPI
-    needs: [plan, checksums, python-check]
-    if: github.event_name == 'workflow_dispatch'
+    needs: [plan, checksums, python-check, attest]
+    # After `attest`: a release publishes nothing unless the attestations
+    # succeeded. A dry run skips `attest` on purpose and still runs this job,
+    # so the result of each need is checked here (a skipped need would skip
+    # the job).
+    if: >-
+      github.event_name == 'workflow_dispatch' && !cancelled()
+      && needs.checksums.result == 'success'
+      && needs.python-check.result == 'success'
+      && (needs.attest.result == 'success'
+      || (needs.attest.result == 'skipped' && needs.plan.outputs.dry_run != 'false'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release
@@ -859,8 +877,16 @@ jobs:
     # package needs the environment secret NPM_TOKEN instead. The platform
     # packages go first, then @diffyman/node, @diffyman/wasm, @diffyman/react.
     name: publish npm
-    needs: [plan, checksums]
-    if: github.event_name == 'workflow_dispatch'
+    needs: [plan, checksums, attest]
+    # After `attest`: a release publishes nothing unless the attestations
+    # succeeded. A dry run skips `attest` on purpose and still runs this job,
+    # so the result of each need is checked here (a skipped need would skip
+    # the job).
+    if: >-
+      github.event_name == 'workflow_dispatch' && !cancelled()
+      && needs.checksums.result == 'success'
+      && (needs.attest.result == 'success'
+      || (needs.attest.result == 'skipped' && needs.plan.outputs.dry_run != 'false'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release
@@ -944,8 +970,16 @@ jobs:
     # a validated deployment, which goes to Maven Central only when the owner
     # presses Publish in the portal: a second gate after this job's approval.
     name: publish Maven Central
-    needs: [plan, checksums]
-    if: github.event_name == 'workflow_dispatch'
+    needs: [plan, checksums, attest]
+    # After `attest`: a release publishes nothing unless the attestations
+    # succeeded. A dry run skips `attest` on purpose and still runs this job,
+    # so the result of each need is checked here (a skipped need would skip
+    # the job).
+    if: >-
+      github.event_name == 'workflow_dispatch' && !cancelled()
+      && needs.checksums.result == 'success'
+      && (needs.attest.result == 'success'
+      || (needs.attest.result == 'skipped' && needs.plan.outputs.dry_run != 'false'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: release
